@@ -1,0 +1,9 @@
+[package]
+name = "rbat"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+capstone = "0.14.0"
+goblin = "0.10.5"
+# yara = {version = "0.31.0", features = ["vendored"]}
