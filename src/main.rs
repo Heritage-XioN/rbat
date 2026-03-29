@@ -4,6 +4,7 @@ use crate::prelude::*;
 
 mod error;
 mod prelude;
+mod traits;
 mod types;
 mod utils;
 

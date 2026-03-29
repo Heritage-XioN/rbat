@@ -8,6 +8,24 @@ pub struct Parser {
     path: String,
 }
 
+#[derive(Debug)]
+struct WinDisasm;
+
+#[derive(Debug)]
+struct LinuxDisam;
+
+#[derive(Debug)]
+struct MacDisasm;
+
+#[derive(Debug)]
+struct Factory;
+
+enum DisasmType {
+    WinDisasm,
+    LinuxDisam,
+    MacDisasm,
+}
+
 impl Parser {
     pub fn new(path: String) -> Self {
         Parser { path }
@@ -67,5 +85,57 @@ impl Parser {
         }
 
         Ok(())
+    }
+}
+
+impl Disassembler for WinDisasm {
+    fn disassemble(&self) -> Result<Capstone> {
+        let cs = Capstone::new()
+            .x86()
+            .mode(arch::x86::ArchMode::Mode64)
+            .syntax(arch::x86::ArchSyntax::Intel)
+            .detail(true)
+            .build()
+            .unwrap();
+
+        Ok(cs)
+    }
+}
+
+impl Disassembler for LinuxDisam {
+    fn disassemble(&self) -> Result<Capstone> {
+        let cs = Capstone::new()
+            .x86()
+            .mode(arch::x86::ArchMode::Mode64)
+            .syntax(arch::x86::ArchSyntax::Intel)
+            .detail(true)
+            .build()
+            .unwrap();
+
+        Ok(cs)
+    }
+}
+
+impl Disassembler for MacDisasm {
+    fn disassemble(&self) -> Result<Capstone> {
+        let cs = Capstone::new()
+            .x86()
+            .mode(arch::x86::ArchMode::Mode64)
+            .syntax(arch::x86::ArchSyntax::Intel)
+            .detail(true)
+            .build()
+            .unwrap();
+
+        Ok(cs)
+    }
+}
+
+impl Factory {
+    fn disasm(disasm_type: DisasmType) -> Box<dyn Disassembler> {
+        match disasm_type {
+            DisasmType::WinDisasm => Box::new(WinDisasm),
+            DisasmType::LinuxDisam => Box::new(LinuxDisam),
+            DisasmType::MacDisasm => Box::new(MacDisasm),
+        }
     }
 }
