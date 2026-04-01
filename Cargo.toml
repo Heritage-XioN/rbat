@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 capstone = "0.14.0"
 goblin = "0.10.5"
+thiserror = "2.0.18"
 # yara = {version = "0.31.0", features = ["vendored"]}

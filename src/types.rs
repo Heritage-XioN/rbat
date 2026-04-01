@@ -1,9 +1,11 @@
 use crate::prelude::*;
 use goblin::{Object, error};
+use std::collections::HashMap;
+use std::collections::btree_map::Values;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Parser {
     path: String,
 }
@@ -18,12 +20,17 @@ struct LinuxDisam;
 struct MacDisasm;
 
 #[derive(Debug)]
-struct Factory;
+pub struct Factory;
 
-enum DisasmType {
+pub enum DisasmType {
     WinDisasm,
     LinuxDisam,
     MacDisasm,
+}
+
+pub enum MapSize {
+    Bytes(Vec<u8>),
+    Word(u64),
 }
 
 impl Parser {
@@ -31,60 +38,67 @@ impl Parser {
         Parser { path }
     }
 
-    pub fn parse_buffer(&self) -> error::Result<()> {
+    pub fn parse_buffer(&self) -> Result<HashMap<String, MapSize>> {
         let buffer = fs::read(&self.path)?;
 
         match Object::parse(&buffer)? {
             Object::Elf(elf) => {
-                println!("--- Detected Linux ELF Binary ---");
+                let mut binary_data: HashMap<String, MapSize> = HashMap::new();
+                binary_data.insert("entry_addr".to_string(), MapSize::Word(elf.entry));
+
+                println!("--- Detected Linux ELF Binary 23 ---");
                 println!("Entry Point: {:#x}", elf.entry);
                 println!("Architecture: {}", elf.header.e_machine);
 
                 println!("\nSections:");
-                for section in &elf.section_headers {
-                    // Goblin handles the string table lookup for you
-                    let name = elf
-                        .shdr_strtab
-                        .get_at(section.sh_name)
-                        .unwrap_or("<unnamed>");
-                    println!("  Name: {}, Size: {:#x}", name, section.sh_size);
+                for ph in &elf.program_headers {
+                    if ph.p_type == goblin::elf::program_header::PT_LOAD
+                        && ph.p_flags & goblin::elf::program_header::PF_X != 0
+                    {
+                        let text_bytes = &buffer[ph.p_offset as usize..][..ph.p_filesz as usize];
+                        binary_data.insert(
+                            "text_bytes".to_string(),
+                            MapSize::Bytes(text_bytes.to_vec()),
+                        );
+                    }
                 }
+                Ok(binary_data)
             }
             Object::PE(pe) => {
+                let text_bytes: &[u8] = &[];
                 println!("--- Detected Windows PE Binary ---");
                 println!("Entry Point: {:#x}", pe.entry);
 
                 println!("\nSections:");
-                for section in &pe.sections {
-                    let name = String::from_utf8_lossy(&section.name);
-                    println!(
-                        "  Name: {}, Virtual Size: {:#x}",
-                        name.trim_matches(char::from(0)),
-                        section.virtual_size
-                    );
+                for ph in &pe.sections {
+                    println!("{:#?}", ph);
                 }
 
                 println!("\nImports:");
                 for import in &pe.imports {
                     println!("  DLL: {}, Function: {}", import.dll, import.name);
                 }
+                // Ok(text_bytes.to_vec());
+                unimplemented!()
             }
             Object::Mach(_mach) => {
                 println!("--- Detected macOS Mach-O Binary ---");
                 // Mach-O specific logic here
+                unimplemented!()
             }
             Object::Archive(_archive) => {
                 println!("--- Detected Archive (Static Library) ---");
+                unimplemented!()
             }
             Object::Unknown(magic) => {
                 println!("Unknown format! Magic bytes: {:#x}", magic);
+                unimplemented!()
             }
             _ => {
-                println!("other file types")
+                println!("other file types");
+                unimplemented!()
             }
         }
-
-        Ok(())
     }
 }
 
@@ -107,7 +121,7 @@ impl Disassembler for LinuxDisam {
         let cs = Capstone::new()
             .x86()
             .mode(arch::x86::ArchMode::Mode64)
-            .syntax(arch::x86::ArchSyntax::Intel)
+            .syntax(arch::x86::ArchSyntax::Att)
             .detail(true)
             .build()
             .unwrap();
@@ -119,9 +133,8 @@ impl Disassembler for LinuxDisam {
 impl Disassembler for MacDisasm {
     fn disassemble(&self) -> Result<Capstone> {
         let cs = Capstone::new()
-            .x86()
-            .mode(arch::x86::ArchMode::Mode64)
-            .syntax(arch::x86::ArchSyntax::Intel)
+            .arm64()
+            .mode(arch::arm64::ArchMode::Arm)
             .detail(true)
             .build()
             .unwrap();
@@ -131,7 +144,7 @@ impl Disassembler for MacDisasm {
 }
 
 impl Factory {
-    fn disasm(disasm_type: DisasmType) -> Box<dyn Disassembler> {
+    pub fn disasm(disasm_type: DisasmType) -> Box<dyn Disassembler> {
         match disasm_type {
             DisasmType::WinDisasm => Box::new(WinDisasm),
             DisasmType::LinuxDisam => Box::new(LinuxDisam),
