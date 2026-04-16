@@ -1,10 +1,12 @@
 use crate::prelude::*;
 use goblin::elf::sym::{STT_FUNC, STT_OBJECT};
 use goblin::{Object, error};
+use rust_embed::RustEmbed;
 use std::collections::btree_map::Values;
 use std::collections::{HashMap, HashSet, binary_heap};
 use std::fs;
 use std::path::Path;
+use yara::{Compiler, Rules};
 
 #[derive(Debug, Clone)]
 pub struct Parser {
@@ -22,6 +24,15 @@ struct MacDisasm;
 
 #[derive(Debug)]
 pub struct Factory;
+
+#[derive(RustEmbed)]
+#[folder = "assets/"] // This folder sits at your project root
+pub struct Asset;
+
+#[derive(Debug)]
+pub struct YaraHandler {
+    path: String,
+}
 
 pub enum DisasmType {
     WinDisasm,
@@ -161,6 +172,40 @@ impl Parser {
             }
         }
         Ok(())
+    }
+}
+
+impl YaraHandler {
+    pub fn new(path: String) -> Self {
+        YaraHandler { path }
+    }
+
+    pub fn compile_yara_rule(&self) -> Result<Rules> {
+        let file = Asset::get(&self.path);
+        let rules = String::from_utf8(file.unwrap().data.to_vec()).unwrap();
+        let mut compiler = Compiler::new()?.add_rules_str(&rules)?;
+        let compiled_rule_file = compiler.compile_rules()?;
+        Ok(compiled_rule_file)
+    }
+
+    pub fn scan_file(&self, compiled_rules: Result<Rules>, scan_file: &str) {
+        match compiled_rules {
+            Ok(compiled_rules) => {
+                let mut scanner = compiled_rules.scanner().unwrap();
+                let results = scanner.scan_file(scan_file).unwrap();
+
+                if !results.is_empty() {
+                    for yara_match in results {
+                        println!("Rule match: {:#?}", yara_match.strings)
+                    }
+                } else {
+                    println!("No YARA Matches!")
+                }
+            }
+            Err(err) => {
+                eprintln!("Error compiling YARA rule: {}", err);
+            }
+        }
     }
 }
 

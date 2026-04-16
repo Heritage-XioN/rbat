@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::prelude::*;
 use crate::types::DisasmType;
 use crate::types::MapValue;
@@ -6,10 +8,16 @@ use capstone::Instructions;
 
 /// the main analyzer function that dynamically detects binary environment
 /// and processes it accordingly.
-pub fn analyzer(file_path: String) -> Result<()> {
-    let buffer = Parser::new(file_path);
+pub fn analyzer(file_path: &str) -> Result<()> {
+    let buffer = Parser::new(file_path.to_owned());
+    let string_eva = YaraHandler::new("suspicious_strings.yar".to_owned());
+    let rules = string_eva.compile_yara_rule();
+
+    // returnables
     let mut counter: i32 = 0;
     let mut nop_addr: Vec<u64> = vec![];
+    let mut blacklisted_mnemonics: HashMap<&str, u64> = HashMap::new();
+
     // TODO: use a txt file to store blacklist data
     let blacklist: [&str; 3] = ["rdtsc", "cpuid", "int3"];
 
@@ -64,11 +72,12 @@ pub fn analyzer(file_path: String) -> Result<()> {
 
             // checks if there any blacklisted mneomonics for Identifying Anti-Analysis & VM Evasion
             if blacklist.contains(&i.mnemonic().unwrap()) {
-                print!(
-                    "found blacklisted mnemonic: {} at mem addr: {:x}",
-                    i.mnemonic().unwrap(),
-                    i.address()
-                );
+                blacklisted_mnemonics.insert(i.mnemonic().unwrap(), i.address());
+                // print!(
+                //     "found blacklisted mnemonic: {} at mem addr: {:x}",
+                //     i.mnemonic().unwrap(),
+                //     i.address()
+                // );
             }
 
             // println!(
@@ -78,10 +87,13 @@ pub fn analyzer(file_path: String) -> Result<()> {
             //     i.op_str().unwrap_or("")
             // );
         }
+
         buffer.detect_api_hooking();
         // checks for sus functions injection
         let sus_function = buffer.check_process_injec();
         println!("Entropy of random data: {:.2}", calculate_entropy(bytes));
+        string_eva.scan_file(rules, file_path);
     }
+
     Ok(())
 }

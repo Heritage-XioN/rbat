@@ -10,6 +10,6 @@ mod utils;
 
 fn main() -> Result<()> {
     let file_path = "/bin/cat";
-    analyzer(file_path.to_owned());
+    analyzer(file_path);
     Ok(())
 }

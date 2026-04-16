@@ -10,4 +10,10 @@ pub enum RbatError {
 
     #[error("error occured while disassembling binary bytes")]
     DisassemblerError(#[from] capstone::Error),
+
+    #[error("error occured while compiling yara rules")]
+    YaraCompileError(#[from] yara::errors::YaraError),
+
+    #[error("error occured while performing I/O of yara rules")]
+    YaraIO(#[from] yara::Error),
 }
