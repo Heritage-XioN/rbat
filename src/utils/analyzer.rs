@@ -73,19 +73,7 @@ pub fn analyzer(file_path: &str) -> Result<()> {
             // checks if there any blacklisted mneomonics for Identifying Anti-Analysis & VM Evasion
             if blacklist.contains(&i.mnemonic().unwrap()) {
                 blacklisted_mnemonics.insert(i.mnemonic().unwrap(), i.address());
-                // print!(
-                //     "found blacklisted mnemonic: {} at mem addr: {:x}",
-                //     i.mnemonic().unwrap(),
-                //     i.address()
-                // );
             }
-
-            // println!(
-            //     "0x{:x}:\t{}\t{}",
-            //     i.address(),
-            //     i.mnemonic().unwrap_or(""),
-            //     i.op_str().unwrap_or("")
-            // );
         }
 
         buffer.detect_api_hooking();

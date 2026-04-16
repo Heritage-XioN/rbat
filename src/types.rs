@@ -34,6 +34,16 @@ pub struct YaraHandler {
     path: String,
 }
 
+#[derive(Debug)]
+pub struct AnalysisResult {
+    code_cave: HashMap<String, u64>,
+    blacklisted_mnemonics: HashMap<String, u64>,
+    api_hooking: HashMap<String, u64>,
+    process_injection: HashSet<String>,
+    entropy: f64,
+    string_values: Vec<String>,
+}
+
 pub enum DisasmType {
     WinDisasm,
     LinuxDisam,
