@@ -1,7 +1,8 @@
 use crate::prelude::*;
+use goblin::elf::sym::{STT_FUNC, STT_OBJECT};
 use goblin::{Object, error};
-use std::collections::HashMap;
 use std::collections::btree_map::Values;
+use std::collections::{HashMap, HashSet, binary_heap};
 use std::fs;
 use std::path::Path;
 
@@ -28,9 +29,10 @@ pub enum DisasmType {
     MacDisasm,
 }
 
-pub enum MapSize {
+pub enum MapValue {
     Bytes(Vec<u8>),
     Word(u64),
+    OS(DisasmType),
 }
 
 impl Parser {
@@ -38,13 +40,14 @@ impl Parser {
         Parser { path }
     }
 
-    pub fn parse_buffer(&self) -> Result<HashMap<String, MapSize>> {
+    pub fn parse_buffer(&self) -> Result<HashMap<String, MapValue>> {
         let buffer = fs::read(&self.path)?;
 
         match Object::parse(&buffer)? {
             Object::Elf(elf) => {
-                let mut binary_data: HashMap<String, MapSize> = HashMap::new();
-                binary_data.insert("entry_addr".to_string(), MapSize::Word(elf.entry));
+                let mut binary_data: HashMap<String, MapValue> = HashMap::new();
+                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::LinuxDisam));
+                binary_data.insert("entry_addr".to_string(), MapValue::Word(elf.entry));
 
                 println!("--- Detected Linux ELF Binary 23 ---");
                 println!("Entry Point: {:#x}", elf.entry);
@@ -55,10 +58,12 @@ impl Parser {
                     if ph.p_type == goblin::elf::program_header::PT_LOAD
                         && ph.p_flags & goblin::elf::program_header::PF_X != 0
                     {
+                        // TODO: add Safety check to prevent panics on corrupted binaries
+
                         let text_bytes = &buffer[ph.p_offset as usize..][..ph.p_filesz as usize];
                         binary_data.insert(
                             "text_bytes".to_string(),
-                            MapSize::Bytes(text_bytes.to_vec()),
+                            MapValue::Bytes(text_bytes.to_vec()),
                         );
                     }
                 }
@@ -99,6 +104,63 @@ impl Parser {
                 unimplemented!()
             }
         }
+    }
+
+    pub fn check_process_injec(&self) -> Result<HashSet<String>> {
+        let buffer = fs::read(&self.path)?;
+        let blacklist = ["ptrace", "mmap", "mprotect"];
+        let mut sus_func: HashSet<String> = HashSet::new();
+
+        match Object::parse(&buffer)? {
+            Object::Elf(elf) => {
+                for dy in &elf.dynsyms {
+                    if dy.st_shndx == 0
+                        && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
+                    {
+                        let dy_type = match dy.st_type() {
+                            STT_FUNC => "FUNCTION",
+                            STT_OBJECT => "OBJECT",
+                            _ => "OTHER",
+                        };
+
+                        let dy_binding = match dy.st_bind() {
+                            1 => "GLOBAL",
+                            2 => "WEAK",
+                            _ => "OTHER",
+                        };
+
+                        if blacklist.contains(&name) {
+                            sus_func.insert(name.to_owned());
+                        }
+                    }
+                }
+                Ok(sus_func)
+            }
+            _ => {
+                println!("other file types");
+                unimplemented!()
+            }
+        }
+    }
+
+    pub fn detect_api_hooking(&self) -> Result<()> {
+        let buffer = fs::read(&self.path)?;
+        match Object::parse(&buffer)? {
+            Object::Elf(elf) => {
+                for dy in &elf.dynsyms {
+                    if dy.st_shndx > 0
+                        && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
+                    {
+                        println!("p headers {:#?}, name: {:#?}", dy.st_value, name);
+                    }
+                }
+            }
+            _ => {
+                println!("other file types");
+                unimplemented!()
+            }
+        }
+        Ok(())
     }
 }
 
