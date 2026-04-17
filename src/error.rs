@@ -16,4 +16,7 @@ pub enum RbatError {
 
     #[error("error occured while performing I/O of yara rules")]
     YaraIO(#[from] yara::Error),
+
+    #[error("serialization error")]
+    SerializationError(#[from] serde_json::Error),
 }

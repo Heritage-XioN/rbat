@@ -1,7 +1,9 @@
 use crate::prelude::*;
+use crate::utils::section_offset::get_section_for_offset;
 use goblin::elf::sym::{STT_FUNC, STT_OBJECT};
 use goblin::{Object, error};
 use rust_embed::RustEmbed;
+use serde::{Deserialize, Serialize};
 use std::collections::btree_map::Values;
 use std::collections::{HashMap, HashSet, binary_heap};
 use std::fs;
@@ -34,14 +36,22 @@ pub struct YaraHandler {
     path: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct YaraMatches {
+    offset: usize,
+    section: String,
+    length: usize,
+    data: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AnalysisResult {
-    code_cave: HashMap<String, u64>,
-    blacklisted_mnemonics: HashMap<String, u64>,
-    api_hooking: HashMap<String, u64>,
-    process_injection: HashSet<String>,
-    entropy: f64,
-    string_values: Vec<String>,
+    pub code_cave: HashMap<String, Vec<u64>>,
+    pub blacklisted_mnemonics: HashMap<String, u64>,
+    pub api_hooking: HashMap<String, u64>,
+    pub process_injection: HashSet<String>,
+    pub entropy: f64,
+    pub string_values: HashMap<String, Vec<YaraMatches>>,
 }
 
 pub enum DisasmType {
@@ -74,7 +84,6 @@ impl Parser {
                 println!("Entry Point: {:#x}", elf.entry);
                 println!("Architecture: {}", elf.header.e_machine);
 
-                println!("\nSections:");
                 for ph in &elf.program_headers {
                     if ph.p_type == goblin::elf::program_header::PT_LOAD
                         && ph.p_flags & goblin::elf::program_header::PF_X != 0
@@ -164,7 +173,8 @@ impl Parser {
         }
     }
 
-    pub fn detect_api_hooking(&self) -> Result<()> {
+    pub fn detect_api_hooking(&self) -> Result<HashMap<String, u64>> {
+        let mut api_hooking_func: HashMap<String, u64> = HashMap::new();
         let buffer = fs::read(&self.path)?;
         match Object::parse(&buffer)? {
             Object::Elf(elf) => {
@@ -172,16 +182,16 @@ impl Parser {
                     if dy.st_shndx > 0
                         && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
                     {
-                        println!("p headers {:#?}, name: {:#?}", dy.st_value, name);
+                        api_hooking_func.insert(name.to_owned(), dy.st_value);
                     }
                 }
+                Ok(api_hooking_func)
             }
             _ => {
                 println!("other file types");
                 unimplemented!()
             }
         }
-        Ok(())
     }
 }
 
@@ -190,6 +200,7 @@ impl YaraHandler {
         YaraHandler { path }
     }
 
+    /// Compiles YARA rules from the embedded assets and returns a compiled `Rules` object that can be used for scanning.
     pub fn compile_yara_rule(&self) -> Result<Rules> {
         let file = Asset::get(&self.path);
         let rules = String::from_utf8(file.unwrap().data.to_vec()).unwrap();
@@ -198,23 +209,45 @@ impl YaraHandler {
         Ok(compiled_rule_file)
     }
 
-    pub fn scan_file(&self, compiled_rules: Result<Rules>, scan_file: &str) {
-        match compiled_rules {
-            Ok(compiled_rules) => {
-                let mut scanner = compiled_rules.scanner().unwrap();
-                let results = scanner.scan_file(scan_file).unwrap();
+    /// Scans a file using the provided compiled YARA rules and returns a structured result
+    /// with offsets, sections, length and matched data.
+    pub fn scan_file(
+        &self,
+        compiled_rules: Result<Rules>,
+        scan_file: &str,
+    ) -> Result<HashMap<String, Vec<YaraMatches>>> {
+        let rule = compiled_rules?;
+        let mut scanner = rule.scanner().unwrap();
+        let results = scanner.scan_file(scan_file).unwrap();
+        let mut yara_result: HashMap<String, Vec<YaraMatches>> = HashMap::new();
 
-                if !results.is_empty() {
-                    for yara_match in results {
-                        println!("Rule match: {:#?}", yara_match.strings)
+        if !results.is_empty() {
+            for rule in results {
+                for yr_string in rule.strings {
+                    if yr_string.matches.is_empty() {
+                        continue;
                     }
-                } else {
-                    println!("No YARA Matches!")
+
+                    for m in yr_string.matches {
+                        let buffer = fs::read(scan_file).unwrap();
+                        let section_name = get_section_for_offset(m.offset, &buffer).unwrap();
+                        let decoded_string = String::from_utf8_lossy(&m.data).to_string();
+
+                        yara_result
+                            .entry(yr_string.identifier.to_string())
+                            .or_insert_with(Vec::new)
+                            .push(YaraMatches {
+                                offset: m.offset,
+                                section: section_name,
+                                length: m.length,
+                                data: decoded_string,
+                            });
+                    }
                 }
             }
-            Err(err) => {
-                eprintln!("Error compiling YARA rule: {}", err);
-            }
+            Ok(yara_result)
+        } else {
+            Ok(yara_result)
         }
     }
 }

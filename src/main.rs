@@ -9,6 +9,7 @@ mod types;
 mod utils;
 
 fn main() -> Result<()> {
+    println!("program starts here");
     let file_path = "/bin/cat";
     analyzer(file_path);
     Ok(())
