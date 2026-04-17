@@ -4,6 +4,7 @@ use goblin::elf::sym::{STT_FUNC, STT_OBJECT};
 use goblin::{Object, error};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
+use std::cmp;
 use std::collections::btree_map::Values;
 use std::collections::{HashMap, HashSet, binary_heap};
 use std::fs;
@@ -28,7 +29,7 @@ struct MacDisasm;
 pub struct Factory;
 
 #[derive(RustEmbed)]
-#[folder = "assets/"] // This folder sits at your project root
+#[folder = "assets/"]
 pub struct Asset;
 
 #[derive(Debug)]
@@ -64,6 +65,30 @@ pub enum MapValue {
     Bytes(Vec<u8>),
     Word(u64),
     OS(DisasmType),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Confidence {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Finding {
+    pub indicator: String,
+    pub description: String,
+    pub confidence: Confidence,
+    pub weight: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RiskAssessment {
+    pub score: u32,       // 0 to 100
+    pub severity: String, // "Safe", "Suspicious", "Malicious"
+    pub findings: Vec<Finding>,
+    pub recommendations: Vec<String>,
 }
 
 impl Parser {
