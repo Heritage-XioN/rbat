@@ -19,4 +19,7 @@ pub enum RbatError {
 
     #[error("serialization error")]
     SerializationError(#[from] serde_json::Error),
+
+    #[error("CLI error")]
+    CliError(#[from] clap::error::Error),
 }

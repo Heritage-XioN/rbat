@@ -72,7 +72,7 @@ pub fn calculate_risk(
         });
     }
 
-    // Cap the score at a maximum of 100
+    // the score is capped at 100
     let final_score = cmp::min(100, score);
 
     // Determine Severity and Recommendations based on final score

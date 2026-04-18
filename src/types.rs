@@ -1,5 +1,6 @@
 use crate::prelude::*;
 use crate::utils::section_offset::get_section_for_offset;
+use clap::Parser as CliParser;
 use goblin::elf::sym::{STT_FUNC, STT_OBJECT};
 use goblin::{Object, error};
 use rust_embed::RustEmbed;
@@ -10,6 +11,18 @@ use std::collections::{HashMap, HashSet, binary_heap};
 use std::fs;
 use std::path::Path;
 use yara::{Compiler, Rules};
+
+/// a rust based static binary analysis tool (This comment becomes the app's description)
+#[derive(CliParser, Debug)]
+#[command(version, about, long_about = None)]
+pub struct Cli {
+    /// The path to the binary
+    pub path: String,
+
+    /// Turn on debugging information
+    #[arg(short, long)]
+    pub debug: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct Parser {
@@ -225,7 +238,8 @@ impl YaraHandler {
         YaraHandler { path }
     }
 
-    /// Compiles YARA rules from the embedded assets and returns a compiled `Rules` object that can be used for scanning.
+    /// Compiles YARA rules from the embedded assets
+    /// and returns a compiled `Rules` object that can be used for scanning.
     pub fn compile_yara_rule(&self) -> Result<Rules> {
         let file = Asset::get(&self.path);
         let rules = String::from_utf8(file.unwrap().data.to_vec()).unwrap();

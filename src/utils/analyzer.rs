@@ -4,6 +4,7 @@ use crate::prelude::*;
 use crate::types::DisasmType;
 use crate::types::MapValue;
 use crate::utils::entropy::calculate_entropy;
+use crate::utils::scoring::calculate_risk;
 use capstone::Instructions;
 
 /// the main analyzer function that dynamically detects binary environment
@@ -84,7 +85,14 @@ pub fn analyzer(file_path: &str) -> Result<()> {
 
         let json_value = serde_json::to_value(&analysis_result)?;
 
-        println!("analysis data: {:#?}", json_value);
+        let score = calculate_risk(
+            analysis_result.entropy,
+            !analysis_result.string_values.is_empty(),
+            !analysis_result.api_hooking.is_empty(),
+            !analysis_result.code_cave.is_empty(),
+        );
+
+        println!("analysis data: {:#?} \n score: {:#?}", json_value, score);
     }
 
     Ok(())
