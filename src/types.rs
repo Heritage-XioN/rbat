@@ -10,7 +10,7 @@ use std::cmp;
 use std::collections::btree_map::Values;
 use std::collections::{HashMap, HashSet, binary_heap};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use yara::{Compiler, Rules};
 
 /// a rust based static binary analysis tool (This comment becomes the app's description)
@@ -18,16 +18,20 @@ use yara::{Compiler, Rules};
 #[command(version, about, long_about = None)]
 pub struct Cli {
     /// The path to the binary
-    pub path: String,
+    pub path: PathBuf,
 
     /// Turn on debugging information
     #[arg(short, long)]
     pub debug: bool,
+
+    /// PDF output
+    #[arg(short, long)]
+    pub pdf: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Parser {
-    path: String,
+    path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -61,6 +65,7 @@ pub struct YaraMatches {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnalysisResult {
+    pub metadata: BinaryMetadata,
     pub code_cave: HashMap<String, Vec<u64>>,
     pub blacklisted_mnemonics: HashMap<String, u64>,
     pub api_hooking: HashMap<String, u64>,
@@ -105,9 +110,16 @@ pub struct RiskAssessment {
     pub recommendations: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BinaryMetadata {
+    pub binary_type: String,
+    pub entry_point: u64,
+    pub architecture: u16,
+}
+
 impl Parser {
-    pub fn new(path: String) -> Self {
-        Parser { path }
+    pub fn new(path: PathBuf) -> Self {
+        Parser { path: path }
     }
 
     pub fn parse_buffer(&self) -> Result<HashMap<String, MapValue>> {
@@ -118,10 +130,6 @@ impl Parser {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
                 binary_data.insert("os".to_string(), MapValue::OS(DisasmType::LinuxDisam));
                 binary_data.insert("entry_addr".to_string(), MapValue::Word(elf.entry));
-
-                println!("--- Detected Linux ELF Binary 23 ---");
-                println!("Entry Point: {:#x}", elf.entry);
-                println!("Architecture: {}", elf.header.e_machine);
 
                 for ph in &elf.program_headers {
                     if ph.p_type == goblin::elf::program_header::PT_LOAD
@@ -254,7 +262,7 @@ impl YaraHandler {
     pub fn scan_file(
         &self,
         compiled_rules: Result<Rules>,
-        scan_file: &str,
+        scan_file: &PathBuf,
     ) -> Result<HashMap<String, Vec<YaraMatches>>> {
         let rule = compiled_rules?;
         let mut scanner = rule.scanner().unwrap();
@@ -269,7 +277,7 @@ impl YaraHandler {
                     }
 
                     for m in yr_string.matches {
-                        let buffer = fs::read(scan_file).unwrap();
+                        let buffer = fs::read(&scan_file).unwrap();
                         let section_name = get_section_for_offset(m.offset, &buffer).unwrap();
                         let decoded_string = String::from_utf8_lossy(&m.data).to_string();
 

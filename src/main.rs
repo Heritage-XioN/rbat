@@ -19,7 +19,6 @@ fn main() -> Result<()> {
         println!("Debug mode is ON.");
     }
 
-    let file_path = &cli.path;
-    analyzer(file_path);
+    analyzer(cli.path);
     Ok(())
 }

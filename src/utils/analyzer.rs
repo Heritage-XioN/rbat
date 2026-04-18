@@ -1,20 +1,22 @@
-use std::collections::HashMap;
-
 use crate::prelude::*;
 use crate::types::DisasmType;
 use crate::types::MapValue;
 use crate::utils::entropy::calculate_entropy;
+use crate::utils::get_metadata::get_binary_metadata;
 use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::scoring::calculate_risk;
 use capstone::Instructions;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// the main analyzer function that dynamically detects binary environment
 /// and processes it accordingly.
-pub fn analyzer(file_path: &str) -> Result<()> {
-    let buffer = Parser::new(file_path.to_owned());
+pub fn analyzer(file_path: PathBuf) -> Result<()> {
+    let metadata = get_binary_metadata(&file_path)?;
     let string_eva = YaraHandler::new("suspicious_strings.yar".to_owned());
     let rules = string_eva.compile_yara_rule();
-
+    let string_eva_res = string_eva.scan_file(rules, &file_path)?;
+    let buffer = Parser::new(file_path);
     let mut counter: i32 = 0;
     let mut nop_addr: Vec<u64> = vec![];
     let mut blacklisted_mnemonics: HashMap<String, u64> = HashMap::new();
@@ -68,12 +70,11 @@ pub fn analyzer(file_path: &str) -> Result<()> {
             }
         }
 
-        // returnables
         let api_hooking = buffer.detect_api_hooking()?;
         let process_inj = buffer.check_process_injec()?;
-        let string_eva_res = string_eva.scan_file(rules, file_path)?;
 
         let analysis_result: AnalysisResult = AnalysisResult {
+            metadata: metadata,
             code_cave: code_cave,
             blacklisted_mnemonics: blacklisted_mnemonics,
             api_hooking: api_hooking,
