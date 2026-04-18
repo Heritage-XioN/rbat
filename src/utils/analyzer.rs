@@ -4,6 +4,7 @@ use crate::prelude::*;
 use crate::types::DisasmType;
 use crate::types::MapValue;
 use crate::utils::entropy::calculate_entropy;
+use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::scoring::calculate_risk;
 use capstone::Instructions;
 
@@ -18,9 +19,7 @@ pub fn analyzer(file_path: &str) -> Result<()> {
     let mut nop_addr: Vec<u64> = vec![];
     let mut blacklisted_mnemonics: HashMap<String, u64> = HashMap::new();
     let mut code_cave: HashMap<String, Vec<u64>> = HashMap::new();
-
-    // TODO: use a txt file to store blacklist data
-    let blacklist: [&str; 3] = ["rdtsc", "cpuid", "int3"];
+    let blacklist = get_txt_from_file("blacklisted_mnemonics.txt");
 
     let binary_data = match buffer.parse_buffer() {
         Ok(data) => data,
@@ -64,7 +63,7 @@ pub fn analyzer(file_path: &str) -> Result<()> {
             }
 
             // checks if there any blacklisted mneomonics for Identifying Anti-Analysis & VM Evasion
-            if blacklist.contains(&i.mnemonic().unwrap()) {
+            if blacklist.contains(&i.mnemonic().unwrap().to_string()) {
                 blacklisted_mnemonics.insert(i.mnemonic().unwrap().to_string(), i.address());
             }
         }

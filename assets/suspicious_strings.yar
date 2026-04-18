@@ -1,8 +1,8 @@
 rule Suspicious_Indicators {
     meta:
         description = "Detects interesting strings, C2 domains, APIs, and credentials in binaries"
-        author = "BAT Project"
-        version = "1.0"
+        author = "rBAT Project"
+        version = "0.1.0"
 
     strings:
         // URLs and Domains (Command and Control infrastructure)

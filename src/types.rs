@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::section_offset::get_section_for_offset;
 use clap::Parser as CliParser;
 use goblin::elf::sym::{STT_FUNC, STT_OBJECT};
@@ -176,7 +177,7 @@ impl Parser {
 
     pub fn check_process_injec(&self) -> Result<HashSet<String>> {
         let buffer = fs::read(&self.path)?;
-        let blacklist = ["ptrace", "mmap", "mprotect"];
+        let blacklist = get_txt_from_file("blacklisted_process_injec.txt");
         let mut sus_func: HashSet<String> = HashSet::new();
 
         match Object::parse(&buffer)? {
@@ -197,7 +198,7 @@ impl Parser {
                             _ => "OTHER",
                         };
 
-                        if blacklist.contains(&name) {
+                        if blacklist.contains(&name.to_string()) {
                             sus_func.insert(name.to_owned());
                         }
                     }
@@ -241,8 +242,8 @@ impl YaraHandler {
     /// Compiles YARA rules from the embedded assets
     /// and returns a compiled `Rules` object that can be used for scanning.
     pub fn compile_yara_rule(&self) -> Result<Rules> {
-        let file = Asset::get(&self.path);
-        let rules = String::from_utf8(file.unwrap().data.to_vec()).unwrap();
+        let file = Asset::get(&self.path).expect("File not found");
+        let rules = String::from_utf8(file.data.to_vec()).expect("Invalid UTF-8 in data");
         let mut compiler = Compiler::new()?.add_rules_str(&rules)?;
         let compiled_rule_file = compiler.compile_rules()?;
         Ok(compiled_rule_file)
