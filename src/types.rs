@@ -7,7 +7,7 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use yara::{Compiler, Rules};
 
 /// a rust based static binary analysis tool (This comment becomes the app's description)
@@ -157,9 +157,57 @@ impl Parser {
                 }
                 Ok(binary_data)
             }
-            Object::PE(_) => Err(RbatError::UnsupportedBinaryFormat(
-                "Windows PE disassembly is not implemented yet".to_string(),
-            )),
+            Object::PE(pe) => {
+                let mut binary_data: HashMap<String, MapValue> = HashMap::new();
+                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::WinDisasm));
+                binary_data.insert(
+                    "entry_addr".to_string(),
+                    MapValue::Word(pe.image_base + pe.entry as u64),
+                );
+
+                const IMAGE_SCN_MEM_EXECUTE: u32 = 0x20000000;
+                let entry_rva = pe.entry as u32;
+                let executable_section = pe
+                    .sections
+                    .iter()
+                    .find(|section| {
+                        let start = section.virtual_address;
+                        let size = section.virtual_size.max(section.size_of_raw_data);
+                        let end = start.saturating_add(size);
+                        section.characteristics & IMAGE_SCN_MEM_EXECUTE != 0
+                            && entry_rva >= start
+                            && entry_rva < end
+                    })
+                    .or_else(|| {
+                        pe.sections
+                            .iter()
+                            .find(|section| section.characteristics & IMAGE_SCN_MEM_EXECUTE != 0)
+                    });
+
+                if let Some(section) = executable_section {
+                    let start = section.pointer_to_raw_data as usize;
+                    let size = section.size_of_raw_data as usize;
+                    let end = start.checked_add(size).ok_or_else(|| {
+                        RbatError::InvalidBinaryLayout(
+                            "PE executable section offset overflowed file bounds".to_string(),
+                        )
+                    })?;
+                    let text_bytes = buffer.get(start..end).ok_or_else(|| {
+                        RbatError::InvalidBinaryLayout(format!(
+                            "PE executable section range {start}..{end} is outside file bounds"
+                        ))
+                    })?;
+                    binary_data.insert(
+                        "text_bytes".to_string(),
+                        MapValue::Bytes(text_bytes.to_vec()),
+                    );
+                }
+
+                if !binary_data.contains_key("text_bytes") {
+                    return Err(RbatError::MissingExecutableSection);
+                }
+                Ok(binary_data)
+            }
             Object::Mach(_) => Err(RbatError::UnsupportedBinaryFormat(
                 "Mach-O disassembly is not implemented yet".to_string(),
             )),
@@ -186,7 +234,6 @@ impl Parser {
                     if dy.st_shndx == 0
                         && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
                     {
-
                         if blacklist.contains(&name.to_string()) {
                             sus_func.insert(name.to_owned());
                         }
@@ -194,8 +241,20 @@ impl Parser {
                 }
                 Ok(sus_func)
             }
+            Object::PE(pe) => {
+                for import in &pe.imports {
+                    let import_name = import.name.to_string();
+                    if blacklist
+                        .iter()
+                        .any(|item| item.eq_ignore_ascii_case(&import_name))
+                    {
+                        sus_func.insert(import_name);
+                    }
+                }
+                Ok(sus_func)
+            }
             _ => Err(RbatError::UnsupportedBinaryFormat(
-                "Process injection checks currently support ELF binaries only".to_string(),
+                "Process injection checks currently support ELF and PE binaries only".to_string(),
             )),
         }
     }
@@ -214,8 +273,16 @@ impl Parser {
                 }
                 Ok(api_hooking_func)
             }
+            Object::PE(pe) => {
+                for import in &pe.imports {
+                    let function = import.name.to_string();
+                    let dll = import.dll.to_string();
+                    api_hooking_func.insert(format!("{dll}!{function}"), import.rva as u64);
+                }
+                Ok(api_hooking_func)
+            }
             _ => Err(RbatError::UnsupportedBinaryFormat(
-                "API hooking detection currently supports ELF binaries only".to_string(),
+                "API hooking detection currently supports ELF and PE binaries only".to_string(),
             )),
         }
     }
@@ -229,10 +296,10 @@ impl YaraHandler {
     /// Compiles YARA rules from the embedded assets
     /// and returns a compiled `Rules` object that can be used for scanning.
     pub fn compile_yara_rule(&self) -> Result<Rules> {
-        let file = Asset::get(&self.path)
-            .ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
+        let file =
+            Asset::get(&self.path).ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
         let rules = String::from_utf8(file.data.to_vec())?;
-        let mut compiler = Compiler::new()?.add_rules_str(&rules)?;
+        let compiler = Compiler::new()?.add_rules_str(&rules)?;
         let compiled_rule_file = compiler.compile_rules()?;
         Ok(compiled_rule_file)
     }
