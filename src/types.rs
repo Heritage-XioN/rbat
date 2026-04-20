@@ -2,13 +2,10 @@ use crate::prelude::*;
 use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::section_offset::get_section_for_offset;
 use clap::Parser as CliParser;
-use goblin::elf::sym::{STT_FUNC, STT_OBJECT};
-use goblin::{Object, error};
+use goblin::Object;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use std::cmp;
-use std::collections::btree_map::Values;
-use std::collections::{HashMap, HashSet, binary_heap};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use yara::{Compiler, Rules};
@@ -119,7 +116,7 @@ pub struct BinaryMetadata {
 
 impl Parser {
     pub fn new(path: PathBuf) -> Self {
-        Parser { path: path }
+        Parser { path }
     }
 
     pub fn parse_buffer(&self) -> Result<HashMap<String, MapValue>> {
@@ -135,57 +132,52 @@ impl Parser {
                     if ph.p_type == goblin::elf::program_header::PT_LOAD
                         && ph.p_flags & goblin::elf::program_header::PF_X != 0
                     {
-                        // TODO: add Safety check to prevent panics on corrupted binaries
-
-                        let text_bytes = &buffer[ph.p_offset as usize..][..ph.p_filesz as usize];
+                        let start = ph.p_offset as usize;
+                        let size = ph.p_filesz as usize;
+                        let end = start.checked_add(size).ok_or_else(|| {
+                            RbatError::InvalidBinaryLayout(
+                                "Executable segment offset overflowed file bounds".to_string(),
+                            )
+                        })?;
+                        let text_bytes = buffer.get(start..end).ok_or_else(|| {
+                            RbatError::InvalidBinaryLayout(format!(
+                                "Executable segment range {start}..{end} is outside file bounds"
+                            ))
+                        })?;
                         binary_data.insert(
                             "text_bytes".to_string(),
                             MapValue::Bytes(text_bytes.to_vec()),
                         );
+                        break;
                     }
+                }
+
+                if !binary_data.contains_key("text_bytes") {
+                    return Err(RbatError::MissingExecutableSection);
                 }
                 Ok(binary_data)
             }
-            Object::PE(pe) => {
-                let text_bytes: &[u8] = &[];
-                println!("--- Detected Windows PE Binary ---");
-                println!("Entry Point: {:#x}", pe.entry);
-
-                println!("\nSections:");
-                for ph in &pe.sections {
-                    println!("{:#?}", ph);
-                }
-
-                println!("\nImports:");
-                for import in &pe.imports {
-                    println!("  DLL: {}, Function: {}", import.dll, import.name);
-                }
-                // Ok(text_bytes.to_vec());
-                unimplemented!()
-            }
-            Object::Mach(_mach) => {
-                println!("--- Detected macOS Mach-O Binary ---");
-                // Mach-O specific logic here
-                unimplemented!()
-            }
-            Object::Archive(_archive) => {
-                println!("--- Detected Archive (Static Library) ---");
-                unimplemented!()
-            }
-            Object::Unknown(magic) => {
-                println!("Unknown format! Magic bytes: {:#x}", magic);
-                unimplemented!()
-            }
-            _ => {
-                println!("other file types");
-                unimplemented!()
-            }
+            Object::PE(_) => Err(RbatError::UnsupportedBinaryFormat(
+                "Windows PE disassembly is not implemented yet".to_string(),
+            )),
+            Object::Mach(_) => Err(RbatError::UnsupportedBinaryFormat(
+                "Mach-O disassembly is not implemented yet".to_string(),
+            )),
+            Object::Archive(_) => Err(RbatError::UnsupportedBinaryFormat(
+                "Archive files are not supported for disassembly".to_string(),
+            )),
+            Object::Unknown(magic) => Err(RbatError::UnsupportedBinaryFormat(format!(
+                "Unknown file format magic: {magic:#x}"
+            ))),
+            _ => Err(RbatError::UnsupportedBinaryFormat(
+                "Unsupported file type for disassembly".to_string(),
+            )),
         }
     }
 
     pub fn check_process_injec(&self) -> Result<HashSet<String>> {
         let buffer = fs::read(&self.path)?;
-        let blacklist = get_txt_from_file("blacklisted_process_injec.txt");
+        let blacklist = get_txt_from_file("blacklisted_process_injec.txt")?;
         let mut sus_func: HashSet<String> = HashSet::new();
 
         match Object::parse(&buffer)? {
@@ -194,17 +186,6 @@ impl Parser {
                     if dy.st_shndx == 0
                         && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
                     {
-                        let dy_type = match dy.st_type() {
-                            STT_FUNC => "FUNCTION",
-                            STT_OBJECT => "OBJECT",
-                            _ => "OTHER",
-                        };
-
-                        let dy_binding = match dy.st_bind() {
-                            1 => "GLOBAL",
-                            2 => "WEAK",
-                            _ => "OTHER",
-                        };
 
                         if blacklist.contains(&name.to_string()) {
                             sus_func.insert(name.to_owned());
@@ -213,10 +194,9 @@ impl Parser {
                 }
                 Ok(sus_func)
             }
-            _ => {
-                println!("other file types");
-                unimplemented!()
-            }
+            _ => Err(RbatError::UnsupportedBinaryFormat(
+                "Process injection checks currently support ELF binaries only".to_string(),
+            )),
         }
     }
 
@@ -234,10 +214,9 @@ impl Parser {
                 }
                 Ok(api_hooking_func)
             }
-            _ => {
-                println!("other file types");
-                unimplemented!()
-            }
+            _ => Err(RbatError::UnsupportedBinaryFormat(
+                "API hooking detection currently supports ELF binaries only".to_string(),
+            )),
         }
     }
 }
@@ -250,8 +229,9 @@ impl YaraHandler {
     /// Compiles YARA rules from the embedded assets
     /// and returns a compiled `Rules` object that can be used for scanning.
     pub fn compile_yara_rule(&self) -> Result<Rules> {
-        let file = Asset::get(&self.path).expect("File not found");
-        let rules = String::from_utf8(file.data.to_vec()).expect("Invalid UTF-8 in data");
+        let file = Asset::get(&self.path)
+            .ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
+        let rules = String::from_utf8(file.data.to_vec())?;
         let mut compiler = Compiler::new()?.add_rules_str(&rules)?;
         let compiled_rule_file = compiler.compile_rules()?;
         Ok(compiled_rule_file)
@@ -261,13 +241,13 @@ impl YaraHandler {
     /// with offsets, sections, length and matched data.
     pub fn scan_file(
         &self,
-        compiled_rules: Result<Rules>,
+        compiled_rules: Rules,
         scan_file: &PathBuf,
     ) -> Result<HashMap<String, Vec<YaraMatches>>> {
-        let rule = compiled_rules?;
-        let mut scanner = rule.scanner().unwrap();
-        let results = scanner.scan_file(scan_file).unwrap();
+        let mut scanner = compiled_rules.scanner()?;
+        let results = scanner.scan_file(scan_file)?;
         let mut yara_result: HashMap<String, Vec<YaraMatches>> = HashMap::new();
+        let buffer = fs::read(scan_file)?;
 
         if !results.is_empty() {
             for rule in results {
@@ -277,13 +257,12 @@ impl YaraHandler {
                     }
 
                     for m in yr_string.matches {
-                        let buffer = fs::read(&scan_file).unwrap();
-                        let section_name = get_section_for_offset(m.offset, &buffer).unwrap();
+                        let section_name = get_section_for_offset(m.offset, &buffer)?;
                         let decoded_string = String::from_utf8_lossy(&m.data).to_string();
 
                         yara_result
                             .entry(yr_string.identifier.to_string())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(YaraMatches {
                                 offset: m.offset,
                                 section: section_name,
@@ -307,8 +286,7 @@ impl Disassembler for WinDisasm {
             .mode(arch::x86::ArchMode::Mode64)
             .syntax(arch::x86::ArchSyntax::Intel)
             .detail(true)
-            .build()
-            .unwrap();
+            .build()?;
 
         Ok(cs)
     }
@@ -321,8 +299,7 @@ impl Disassembler for LinuxDisam {
             .mode(arch::x86::ArchMode::Mode64)
             .syntax(arch::x86::ArchSyntax::Att)
             .detail(true)
-            .build()
-            .unwrap();
+            .build()?;
 
         Ok(cs)
     }
@@ -334,8 +311,7 @@ impl Disassembler for MacDisasm {
             .arm64()
             .mode(arch::arm64::ArchMode::Arm)
             .detail(true)
-            .build()
-            .unwrap();
+            .build()?;
 
         Ok(cs)
     }

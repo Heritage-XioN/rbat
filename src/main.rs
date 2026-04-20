@@ -1,4 +1,3 @@
-#![allow(unused)] // dont forget to remove
 
 use clap::Parser;
 
@@ -19,6 +18,6 @@ fn main() -> Result<()> {
         println!("Debug mode is ON.");
     }
 
-    analyzer(cli.path);
+    analyzer(cli.path)?;
     Ok(())
 }

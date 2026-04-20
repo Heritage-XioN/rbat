@@ -2,8 +2,8 @@ use crate::prelude::*;
 use goblin::Object;
 
 /// A simple helper function to find the section name based on a YARA offset
-pub fn get_section_for_offset(offset: usize, buffer: &Vec<u8>) -> Result<String> {
-    match Object::parse(buffer).unwrap() {
+pub fn get_section_for_offset(offset: usize, buffer: &[u8]) -> Result<String> {
+    match Object::parse(buffer)? {
         Object::Elf(elf) => {
             let mut res: String = "".to_string();
             for section in &elf.section_headers {
@@ -34,7 +34,7 @@ pub fn get_section_for_offset(offset: usize, buffer: &Vec<u8>) -> Result<String>
             }
             Ok(res)
         }
-        _ => return Ok("Unknown Format".to_string()),
+        _ => Ok("Unknown Format".to_string()),
     }
 
     // If the offset doesn't fall into any defined section, it might be in the header or an overlay

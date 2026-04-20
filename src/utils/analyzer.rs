@@ -5,7 +5,6 @@ use crate::utils::entropy::calculate_entropy;
 use crate::utils::get_metadata::get_binary_metadata;
 use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::scoring::calculate_risk;
-use capstone::Instructions;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -14,22 +13,15 @@ use std::path::PathBuf;
 pub fn analyzer(file_path: PathBuf) -> Result<()> {
     let metadata = get_binary_metadata(&file_path)?;
     let string_eva = YaraHandler::new("suspicious_strings.yar".to_owned());
-    let rules = string_eva.compile_yara_rule();
+    let rules = string_eva.compile_yara_rule()?;
     let string_eva_res = string_eva.scan_file(rules, &file_path)?;
     let buffer = Parser::new(file_path);
     let mut counter: i32 = 0;
     let mut nop_addr: Vec<u64> = vec![];
     let mut blacklisted_mnemonics: HashMap<String, u64> = HashMap::new();
     let mut code_cave: HashMap<String, Vec<u64>> = HashMap::new();
-    let blacklist = get_txt_from_file("blacklisted_mnemonics.txt");
-
-    let binary_data = match buffer.parse_buffer() {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("Error parsing: {}", e);
-            return Ok(());
-        }
-    };
+    let blacklist = get_txt_from_file("blacklisted_mnemonics.txt")?;
+    let binary_data = buffer.parse_buffer()?;
 
     if let (
         Some(MapValue::OS(os)),
@@ -45,14 +37,16 @@ pub fn analyzer(file_path: PathBuf) -> Result<()> {
             DisasmType::WinDisasm => Factory::disasm(DisasmType::WinDisasm),
             DisasmType::MacDisasm => Factory::disasm(DisasmType::MacDisasm),
         };
-        let cs = factory.disassemble().unwrap();
+        let cs = factory.disassemble()?;
         let instructions = cs.disasm_all(bytes, *entry_addr)?;
 
         println!("disassembled data: {:#?}", instructions.len());
 
         for i in instructions.as_ref() {
             // checking for code caves (NOP sleds)
-            if i.mnemonic().unwrap_or("") == "nop" {
+            let mnemonic = i.mnemonic().unwrap_or("");
+
+            if mnemonic == "nop" {
                 nop_addr.push(i.address());
                 counter += 1;
                 if counter >= 30 {
@@ -65,8 +59,8 @@ pub fn analyzer(file_path: PathBuf) -> Result<()> {
             }
 
             // checks if there any blacklisted mneomonics for Identifying Anti-Analysis & VM Evasion
-            if blacklist.contains(&i.mnemonic().unwrap().to_string()) {
-                blacklisted_mnemonics.insert(i.mnemonic().unwrap().to_string(), i.address());
+            if !mnemonic.is_empty() && blacklist.contains(&mnemonic.to_string()) {
+                blacklisted_mnemonics.insert(mnemonic.to_string(), i.address());
             }
         }
 
@@ -74,10 +68,10 @@ pub fn analyzer(file_path: PathBuf) -> Result<()> {
         let process_inj = buffer.check_process_injec()?;
 
         let analysis_result: AnalysisResult = AnalysisResult {
-            metadata: metadata,
-            code_cave: code_cave,
-            blacklisted_mnemonics: blacklisted_mnemonics,
-            api_hooking: api_hooking,
+            metadata,
+            code_cave,
+            blacklisted_mnemonics,
+            api_hooking,
             process_injection: process_inj,
             entropy: calculate_entropy(bytes),
             string_values: string_eva_res,
@@ -93,7 +87,10 @@ pub fn analyzer(file_path: PathBuf) -> Result<()> {
         );
 
         println!("analysis data: {:#?} \n score: {:#?}", json_value, score);
+        return Ok(());
     }
 
-    Ok(())
+    Err(RbatError::MissingAnalysisData(
+        "Required disassembly inputs were not produced from parse_buffer".to_string(),
+    ))
 }
