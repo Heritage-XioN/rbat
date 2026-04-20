@@ -33,7 +33,7 @@ pub fn analyzer(file_path: PathBuf) -> Result<()> {
         binary_data.get("entry_addr"),
     ) {
         let factory = match os {
-            DisasmType::LinuxDisam => Factory::disasm(DisasmType::LinuxDisam),
+            DisasmType::LinuxDisasm => Factory::disasm(DisasmType::LinuxDisasm),
             DisasmType::WinDisasm => Factory::disasm(DisasmType::WinDisasm),
             DisasmType::MacDisasm => Factory::disasm(DisasmType::MacDisasm),
         };

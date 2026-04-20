@@ -26,20 +26,26 @@ pub struct Cli {
     pub pdf: bool,
 }
 
+/// a struct to hold the parsed binary data and provide methods for analysis.
 #[derive(Debug)]
 pub struct Parser {
     path: PathBuf,
 }
 
+/// windows disassembler struct
 #[derive(Debug)]
 struct WinDisasm;
 
+/// linux disassembler struct
 #[derive(Debug)]
-struct LinuxDisam;
+struct LinuxDisasm;
 
+/// mac disassembler struct
 #[derive(Debug)]
 struct MacDisasm;
 
+/// capstone factory implementation.
+/// returns the appropriate disassembler based on the binary's OS type.
 #[derive(Debug)]
 pub struct Factory;
 
@@ -73,7 +79,7 @@ pub struct AnalysisResult {
 
 pub enum DisasmType {
     WinDisasm,
-    LinuxDisam,
+    LinuxDisasm,
     MacDisasm,
 }
 
@@ -125,7 +131,7 @@ impl Parser {
         match Object::parse(&buffer)? {
             Object::Elf(elf) => {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
-                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::LinuxDisam));
+                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::LinuxDisasm));
                 binary_data.insert("entry_addr".to_string(), MapValue::Word(elf.entry));
 
                 for ph in &elf.program_headers {
@@ -486,7 +492,7 @@ impl Disassembler for WinDisasm {
     }
 }
 
-impl Disassembler for LinuxDisam {
+impl Disassembler for LinuxDisasm {
     fn disassemble(&self) -> Result<Capstone> {
         let cs = Capstone::new()
             .x86()
@@ -515,7 +521,7 @@ impl Factory {
     pub fn disasm(disasm_type: DisasmType) -> Box<dyn Disassembler> {
         match disasm_type {
             DisasmType::WinDisasm => Box::new(WinDisasm),
-            DisasmType::LinuxDisam => Box::new(LinuxDisam),
+            DisasmType::LinuxDisasm => Box::new(LinuxDisasm),
             DisasmType::MacDisasm => Box::new(MacDisasm),
         }
     }
