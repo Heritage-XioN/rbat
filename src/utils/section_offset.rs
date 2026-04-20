@@ -34,6 +34,40 @@ pub fn get_section_for_offset(offset: usize, buffer: &[u8]) -> Result<String> {
             }
             Ok(res)
         }
+        Object::Mach(mach) => {
+            let mut res: String = "".to_string();
+            match mach {
+                goblin::mach::Mach::Binary(macho) => {
+                    for segment in &macho.segments {
+                        for (section, _) in segment.into_iter().flatten() {
+                            let start = section.offset as usize;
+                            let end = start.saturating_add(section.size as usize);
+                            if offset >= start && offset < end {
+                                res = section.name().unwrap_or("<unnamed>").to_string();
+                            }
+                        }
+                    }
+                }
+                goblin::mach::Mach::Fat(fat) => {
+                    let arches = fat.arches()?;
+                    for (index, arch) in arches.iter().enumerate() {
+                        let base = arch.offset as usize;
+                        if let Ok(goblin::mach::SingleArch::MachO(macho)) = fat.get(index) {
+                            for segment in &macho.segments {
+                                for (section, _) in segment.into_iter().flatten() {
+                                    let start = base.saturating_add(section.offset as usize);
+                                    let end = start.saturating_add(section.size as usize);
+                                    if offset >= start && offset < end {
+                                        res = section.name().unwrap_or("<unnamed>").to_string();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(res)
+        }
         _ => Ok("Unknown Format".to_string()),
     }
 

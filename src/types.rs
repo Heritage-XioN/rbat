@@ -208,9 +208,66 @@ impl Parser {
                 }
                 Ok(binary_data)
             }
-            Object::Mach(_) => Err(RbatError::UnsupportedBinaryFormat(
-                "Mach-O disassembly is not implemented yet".to_string(),
-            )),
+            Object::Mach(mach) => {
+                let mut binary_data: HashMap<String, MapValue> = HashMap::new();
+                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::MacDisasm));
+
+                match mach {
+                    goblin::mach::Mach::Binary(macho) => {
+                        binary_data.insert("entry_addr".to_string(), MapValue::Word(macho.entry));
+
+                        for segment in &macho.segments {
+                            for (section, section_data) in segment.into_iter().flatten() {
+                                let section_name = section.name().unwrap_or("");
+                                let segment_name = section.segname().unwrap_or("");
+                                if segment_name == "__TEXT" && section_name == "__text" {
+                                    binary_data.insert(
+                                        "text_bytes".to_string(),
+                                        MapValue::Bytes(section_data.to_vec()),
+                                    );
+                                    break;
+                                }
+                            }
+                            if binary_data.contains_key("text_bytes") {
+                                break;
+                            }
+                        }
+                    }
+                    goblin::mach::Mach::Fat(fat) => {
+                        for arch in &fat {
+                            if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
+                                binary_data
+                                    .insert("entry_addr".to_string(), MapValue::Word(macho.entry));
+
+                                for segment in &macho.segments {
+                                    for (section, section_data) in segment.into_iter().flatten() {
+                                        let section_name = section.name().unwrap_or("");
+                                        let segment_name = section.segname().unwrap_or("");
+                                        if segment_name == "__TEXT" && section_name == "__text" {
+                                            binary_data.insert(
+                                                "text_bytes".to_string(),
+                                                MapValue::Bytes(section_data.to_vec()),
+                                            );
+                                            break;
+                                        }
+                                    }
+                                    if binary_data.contains_key("text_bytes") {
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if !binary_data.contains_key("entry_addr")
+                    || !binary_data.contains_key("text_bytes")
+                {
+                    return Err(RbatError::MissingExecutableSection);
+                }
+                Ok(binary_data)
+            }
             Object::Archive(_) => Err(RbatError::UnsupportedBinaryFormat(
                 "Archive files are not supported for disassembly".to_string(),
             )),
@@ -241,6 +298,43 @@ impl Parser {
                 }
                 Ok(sus_func)
             }
+            Object::Mach(mach) => {
+                let matches_blacklist = |name: &str| {
+                    let normalized = name.trim_start_matches('_');
+                    blacklist
+                        .iter()
+                        .any(|item| item.eq_ignore_ascii_case(normalized))
+                };
+
+                let mut collect_from_macho = |macho: &goblin::mach::MachO<'_>| -> Result<()> {
+                    if let Ok(imports) = macho.imports() {
+                        for import in imports {
+                            if matches_blacklist(import.name) {
+                                sus_func.insert(import.name.to_string());
+                            }
+                        }
+                    }
+
+                    for (name, symbol) in macho.symbols().flatten() {
+                        if symbol.is_undefined() && matches_blacklist(name) {
+                            sus_func.insert(name.to_string());
+                        }
+                    }
+                    Ok(())
+                };
+
+                match mach {
+                    goblin::mach::Mach::Binary(macho) => collect_from_macho(&macho)?,
+                    goblin::mach::Mach::Fat(fat) => {
+                        for arch in &fat {
+                            if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
+                                collect_from_macho(&macho)?;
+                            }
+                        }
+                    }
+                }
+                Ok(sus_func)
+            }
             Object::PE(pe) => {
                 for import in &pe.imports {
                     let import_name = import.name.to_string();
@@ -254,7 +348,8 @@ impl Parser {
                 Ok(sus_func)
             }
             _ => Err(RbatError::UnsupportedBinaryFormat(
-                "Process injection checks currently support ELF and PE binaries only".to_string(),
+                "Process injection checks currently support ELF, PE, and Mach-O binaries only"
+                    .to_string(),
             )),
         }
     }
@@ -281,8 +376,40 @@ impl Parser {
                 }
                 Ok(api_hooking_func)
             }
+            Object::Mach(mach) => {
+                let mut collect_from_macho = |macho: &goblin::mach::MachO<'_>| -> Result<()> {
+                    if let Ok(imports) = macho.imports() {
+                        for import in imports {
+                            api_hooking_func.insert(
+                                format!("{}!{}", import.dylib, import.name),
+                                import.address,
+                            );
+                        }
+                    }
+
+                    for (name, symbol) in macho.symbols().flatten() {
+                        if symbol.is_global() && !symbol.is_undefined() {
+                            api_hooking_func.insert(name.to_string(), symbol.n_value);
+                        }
+                    }
+                    Ok(())
+                };
+
+                match mach {
+                    goblin::mach::Mach::Binary(macho) => collect_from_macho(&macho)?,
+                    goblin::mach::Mach::Fat(fat) => {
+                        for arch in &fat {
+                            if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
+                                collect_from_macho(&macho)?;
+                            }
+                        }
+                    }
+                }
+                Ok(api_hooking_func)
+            }
             _ => Err(RbatError::UnsupportedBinaryFormat(
-                "API hooking detection currently supports ELF and PE binaries only".to_string(),
+                "API hooking detection currently supports ELF, PE, and Mach-O binaries only"
+                    .to_string(),
             )),
         }
     }

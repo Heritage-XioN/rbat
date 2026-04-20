@@ -17,9 +17,27 @@ pub fn get_binary_metadata(path: &PathBuf) -> Result<BinaryMetadata> {
             entry_point: pe.entry as u64,
             architecture: pe.header.coff_header.machine,
         }),
-        Object::Mach(_) => Err(RbatError::UnsupportedBinaryFormat(
-            "Mach-O metadata parsing is not implemented yet".to_string(),
-        )),
+        Object::Mach(mach) => match mach {
+            goblin::mach::Mach::Binary(macho) => Ok(BinaryMetadata {
+                binary_type: "Mach-O".to_string(),
+                entry_point: macho.entry,
+                architecture: (macho.header.cputype & 0xFFFF) as u16,
+            }),
+            goblin::mach::Mach::Fat(fat) => {
+                for arch in &fat {
+                    if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
+                        return Ok(BinaryMetadata {
+                            binary_type: "Mach-O (Fat)".to_string(),
+                            entry_point: macho.entry,
+                            architecture: (macho.header.cputype & 0xFFFF) as u16,
+                        });
+                    }
+                }
+                Err(RbatError::UnsupportedBinaryFormat(
+                    "Mach-O fat binary did not contain a parseable Mach-O architecture".to_string(),
+                ))
+            }
+        },
         Object::Archive(_) => Err(RbatError::UnsupportedBinaryFormat(
             "Archive metadata parsing is not supported".to_string(),
         )),
