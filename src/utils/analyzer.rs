@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 /// the main analyzer function that dynamically detects binary environment
 /// and processes it accordingly.
-pub fn analyzer(file_path: PathBuf) -> Result<()> {
+pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)> {
     let metadata = get_binary_metadata(&file_path)?;
     let string_eva = YaraHandler::new("suspicious_strings.yar".to_owned());
     let rules = string_eva.compile_yara_rule()?;
@@ -39,8 +39,6 @@ pub fn analyzer(file_path: PathBuf) -> Result<()> {
         };
         let cs = factory.disassemble()?;
         let instructions = cs.disasm_all(bytes, *entry_addr)?;
-
-        println!("disassembled data: {:#?}", instructions.len());
 
         for i in instructions.as_ref() {
             // checking for code caves (NOP sleds)
@@ -77,8 +75,6 @@ pub fn analyzer(file_path: PathBuf) -> Result<()> {
             string_values: string_eva_res,
         };
 
-        let json_value = serde_json::to_value(&analysis_result)?;
-
         let score = calculate_risk(
             analysis_result.entropy,
             !analysis_result.string_values.is_empty(),
@@ -86,8 +82,7 @@ pub fn analyzer(file_path: PathBuf) -> Result<()> {
             !analysis_result.code_cave.is_empty(),
         );
 
-        println!("analysis data: {:#?} \n score: {:#?}", json_value, score);
-        return Ok(());
+        return Ok((analysis_result, score));
     }
 
     Err(RbatError::MissingAnalysisData(

@@ -2,16 +2,26 @@ use crate::prelude::*;
 use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::section_offset::get_section_for_offset;
 use clap::Parser as CliParser;
+use crossterm::event::{self, Event, KeyCode};
 use goblin::Object;
+use ratatui::{
+    DefaultTerminal, Frame,
+    buffer::Buffer,
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Stylize},
+    text::ToSpan,
+    widgets::{Block, List, ListItem, Widget},
+};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 use yara::{Compiler, Rules};
 
 /// a rust based static binary analysis tool (This comment becomes the app's description)
-#[derive(CliParser, Debug)]
+#[derive(CliParser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
     /// The path to the binary
@@ -26,10 +36,16 @@ pub struct Cli {
     pub pdf: bool,
 }
 
+#[derive(Debug, Default)]
+pub struct App {
+    analysis_result: AnalysisResult,
+    assessment: RiskAssessment,
+}
+
 /// a struct to hold the parsed binary data and provide methods for analysis.
 #[derive(Debug)]
-pub struct Parser {
-    path: PathBuf,
+pub struct Parser<'path> {
+    path: &'path PathBuf,
 }
 
 /// windows disassembler struct
@@ -58,7 +74,7 @@ pub struct YaraHandler {
     path: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct YaraMatches {
     offset: usize,
     section: String,
@@ -66,7 +82,7 @@ pub struct YaraMatches {
     data: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct AnalysisResult {
     pub metadata: BinaryMetadata,
     pub code_cave: HashMap<String, Vec<u64>>,
@@ -89,15 +105,16 @@ pub enum MapValue {
     OS(DisasmType),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub enum Confidence {
+    #[default]
     Low,
     Medium,
     High,
     Critical,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Finding {
     pub indicator: String,
     pub description: String,
@@ -105,7 +122,7 @@ pub struct Finding {
     pub weight: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct RiskAssessment {
     pub score: u32,       // 0 to 100
     pub severity: String, // "Safe", "Suspicious", "Malicious"
@@ -113,15 +130,15 @@ pub struct RiskAssessment {
     pub recommendations: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct BinaryMetadata {
     pub binary_type: String,
     pub entry_point: u64,
     pub architecture: u16,
 }
 
-impl Parser {
-    pub fn new(path: PathBuf) -> Self {
+impl<'path> Parser<'path> {
+    pub fn new(path: &'path PathBuf) -> Self {
         Parser { path }
     }
 
@@ -524,5 +541,109 @@ impl Factory {
             DisasmType::LinuxDisasm => Box::new(LinuxDisasm),
             DisasmType::MacDisasm => Box::new(MacDisasm),
         }
+    }
+}
+
+impl App {
+    pub fn new(analysis_result: AnalysisResult, assessment: RiskAssessment) -> Self {
+        Self {
+            analysis_result,
+            assessment,
+        }
+    }
+
+    /// runs the application's main loop until the user quits
+    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+        loop {
+            terminal.draw(|frame| self.draw(frame))?;
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Char('q') => break Ok(()),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn draw(&self, frame: &mut Frame) {
+        frame.render_widget(self, frame.area());
+    }
+}
+
+impl Widget for &App {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let binary_type = format!(
+            " BINARY TYPE: {} ",
+            self.analysis_result.metadata.binary_type
+        );
+        let entry_point = format!(
+            " ENTRY POINT: {} (0x{:X}) ",
+            self.analysis_result.metadata.entry_point, self.analysis_result.metadata.entry_point
+        );
+        let architecture = format!(
+            " ARCHITECTURE: {} ",
+            self.analysis_result.metadata.architecture
+        );
+
+        let container = Layout::vertical([
+            Constraint::Percentage(70),
+            Constraint::Percentage(30), // Body
+        ])
+        .split(area);
+
+        let top_layout = Layout::horizontal([
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+        ])
+        .split(container[0]);
+
+        let analysis_result = Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+        ])
+        .split(top_layout[0]);
+
+        let items = vec![
+            ListItem::new(binary_type),
+            ListItem::new(entry_point),
+            ListItem::new(architecture),
+        ];
+
+        List::new(items)
+            .block(
+                Block::bordered()
+                    .fg(Color::Green)
+                    .title(" BINARY METADATA ".to_span().into_centered_line()),
+            )
+            .render(analysis_result[0], buf);
+
+        let items = vec![ListItem::new("content")];
+
+        List::new(items)
+            .block(
+                Block::bordered()
+                    .fg(Color::Green)
+                    .title(" SECTION ANALYSIS ".to_span().into_centered_line()),
+            )
+            .render(analysis_result[1], buf);
+
+        Block::bordered()
+            .fg(Color::Green)
+            .title(" YARA RULE MATCH SUMMARY ".to_span().into_centered_line())
+            .render(analysis_result[2], buf);
+
+        Block::bordered()
+            .fg(Color::Green)
+            .title(" ENTROPY HEATMAP (6.12) ".to_span().into_centered_line())
+            .render(top_layout[1], buf);
+
+        Block::bordered()
+            .fg(Color::Green)
+            .title(" RISK ASSESSMENT ".to_span().into_centered_line())
+            .render(top_layout[2], buf);
+
+        Layout::horizontal([Constraint::Fill(1)]).split(container[1]);
     }
 }

@@ -1,6 +1,8 @@
 pub mod analyzer;
+pub mod csv;
 pub mod entropy;
 pub mod get_metadata;
 pub mod get_txt;
+pub mod pdf;
 pub mod scoring;
 pub mod section_offset;
