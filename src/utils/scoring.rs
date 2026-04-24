@@ -6,6 +6,7 @@ pub fn calculate_risk(
     has_network_urls: bool,
     has_suspicious_apis: bool,
     has_code_caves: bool,
+    has_packer_signatures: bool,
 ) -> RiskAssessment {
     let mut score = 0;
     let mut findings: Vec<Finding> = Vec::new();
@@ -69,6 +70,19 @@ pub fn calculate_risk(
                     .to_string(),
             confidence: Confidence::High,
             weight: 35,
+        });
+    }
+
+    // Heuristic 5: Known Packer Signatures (Critical Confidence)
+    if has_packer_signatures {
+        score += 45;
+        findings.push(Finding {
+            indicator: "Known Packer".to_string(),
+            description:
+                "Binary matches signatures of known packers (UPX, ASPack, PECompact, Themida, etc.)."
+                    .to_string(),
+            confidence: Confidence::Critical,
+            weight: 45,
         });
     }
 

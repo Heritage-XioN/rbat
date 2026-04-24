@@ -15,6 +15,12 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
     let string_eva = YaraHandler::new("suspicious_strings.yar".to_owned());
     let rules = string_eva.compile_yara_rule()?;
     let string_eva_res = string_eva.scan_file(rules, &file_path)?;
+
+    // Packer signature detection
+    let packer_eva = YaraHandler::new("packer_signatures.yar".to_owned());
+    let packer_rules = packer_eva.compile_yara_rule()?;
+    let packer_results = packer_eva.scan_file(packer_rules, &file_path)?;
+
     let buffer = Parser::new(file_path);
     let mut counter: i32 = 0;
     let mut nop_addr: Vec<u64> = vec![];
@@ -73,6 +79,7 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
             process_injection: process_inj,
             entropy: calculate_entropy(bytes),
             string_values: string_eva_res,
+            packer_signatures: packer_results,
         };
 
         let score = calculate_risk(
@@ -80,6 +87,7 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
             !analysis_result.string_values.is_empty(),
             !analysis_result.api_hooking.is_empty(),
             !analysis_result.code_cave.is_empty(),
+            !analysis_result.packer_signatures.is_empty(),
         );
 
         return Ok((analysis_result, score));

@@ -91,6 +91,7 @@ pub struct AnalysisResult {
     pub process_injection: HashSet<String>,
     pub entropy: f64,
     pub string_values: HashMap<String, Vec<YaraMatches>>,
+    pub packer_signatures: HashMap<String, Vec<YaraMatches>>,
 }
 
 pub enum DisasmType {

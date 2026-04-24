@@ -16,9 +16,11 @@ fn main() -> Result<()> {
     // parses terminal arguments!
     let cli = Cli::parse();
     let (analysis_result, assessment) = analyzer(&cli.path)?;
+    println!("assessment: {:#?}", assessment);
+    println!("analysis result: {:#?}", &analysis_result);
     if cli.debug {
         ratatui::run(|terminal| App::new(analysis_result, assessment.clone()).run(terminal))?;
     }
-    generate_pdf_report(&cli.path, &assessment, "result.pdf", "./".into())?;
+    // generate_pdf_report(&cli.path, &assessment, "result.pdf", "./".into())?;
     Ok(())
 }
