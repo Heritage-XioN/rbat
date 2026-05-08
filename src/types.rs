@@ -90,6 +90,7 @@ pub struct AnalysisResult {
     pub api_hooking: HashMap<String, u64>,
     pub process_injection: HashSet<String>,
     pub entropy: f64,
+    pub section_entropy: HashMap<String, f64>,
     pub string_values: HashMap<String, Vec<YaraMatches>>,
     pub packer_signatures: HashMap<String, Vec<YaraMatches>>,
 }
@@ -141,6 +142,73 @@ pub struct BinaryMetadata {
 impl<'path> Parser<'path> {
     pub fn new(path: &'path PathBuf) -> Self {
         Parser { path }
+    }
+
+    pub fn evaluate_section_entropy(&self) -> Result<HashMap<String, f64>> {
+        use crate::utils::entropy::calculate_entropy;
+        let mut section_entropy: HashMap<String, f64> = HashMap::new();
+        let buffer = fs::read(&self.path)?;
+
+        match Object::parse(&buffer)? {
+            Object::Elf(elf) => {
+                for sh in &elf.section_headers {
+                    if let Some(name) = elf.shdr_strtab.get_at(sh.sh_name) {
+                        let start = sh.sh_offset as usize;
+                        let size = sh.sh_size as usize;
+                        if size > 0 && start + size <= buffer.len() {
+                            let data = &buffer[start..start + size];
+                            section_entropy.insert(name.to_string(), calculate_entropy(data));
+                        }
+                    }
+                }
+            }
+            Object::PE(pe) => {
+                for section in &pe.sections {
+                    if let Ok(name) = section.name() {
+                        let start = section.pointer_to_raw_data as usize;
+                        let size = section.size_of_raw_data as usize;
+                        if size > 0 && start + size <= buffer.len() {
+                            let data = &buffer[start..start + size];
+                            section_entropy.insert(name.to_string(), calculate_entropy(data));
+                        }
+                    }
+                }
+            }
+            Object::Mach(mach) => {
+                match mach {
+                    goblin::mach::Mach::Binary(macho) => {
+                        for segment in &macho.segments {
+                            for (section, section_data) in segment.into_iter().flatten() {
+                                if let Ok(name) = section.name() {
+                                    if !section_data.is_empty() {
+                                        section_entropy.insert(name.to_string(), calculate_entropy(&section_data));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    goblin::mach::Mach::Fat(fat) => {
+                        for arch in &fat {
+                            if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
+                                for segment in &macho.segments {
+                                    for (section, section_data) in segment.into_iter().flatten() {
+                                        if let Ok(name) = section.name() {
+                                            if !section_data.is_empty() {
+                                                section_entropy.insert(name.to_string(), calculate_entropy(&section_data));
+                                            }
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(section_entropy)
     }
 
     pub fn parse_buffer(&self) -> Result<HashMap<String, MapValue>> {

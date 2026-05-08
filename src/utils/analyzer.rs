@@ -70,6 +70,7 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
 
         let api_hooking = buffer.detect_api_hooking()?;
         let process_inj = buffer.check_process_injec()?;
+        let section_entropy = buffer.evaluate_section_entropy().unwrap_or_default();
 
         let analysis_result: AnalysisResult = AnalysisResult {
             metadata,
@@ -78,6 +79,7 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
             api_hooking,
             process_injection: process_inj,
             entropy: calculate_entropy(bytes),
+            section_entropy,
             string_values: string_eva_res,
             packer_signatures: packer_results,
         };

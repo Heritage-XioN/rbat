@@ -18,9 +18,13 @@ fn main() -> Result<()> {
     let (analysis_result, assessment) = analyzer(&cli.path)?;
     println!("assessment: {:#?}", assessment);
     println!("analysis result: {:#?}", &analysis_result);
+    if cli.pdf {
+        let heatmap_svg = crate::utils::viz::generate_entropy_heatmap_svg(&analysis_result.section_entropy);
+        generate_pdf_report(&cli.path, &assessment, "result.pdf", Some(heatmap_svg))?;
+        println!("PDF report generated at result.pdf");
+    }
     if cli.debug {
         ratatui::run(|terminal| App::new(analysis_result, assessment.clone()).run(terminal))?;
     }
-    // generate_pdf_report(&cli.path, &assessment, "result.pdf", "./".into())?;
     Ok(())
 }
