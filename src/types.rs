@@ -80,10 +80,10 @@ pub struct YaraHandler {
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct YaraMatches {
-    offset: usize,
-    section: String,
-    length: usize,
-    data: String,
+    pub offset: usize,
+    pub section: String,
+    pub length: usize,
+    pub data: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]

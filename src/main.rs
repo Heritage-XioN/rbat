@@ -23,7 +23,13 @@ fn main() -> Result<()> {
     if cli.pdf {
         let heatmap_svg =
             crate::utils::viz::generate_entropy_heatmap_svg(&analysis_result.section_entropy);
-        generate_pdf_report(&cli.path, &assessment, "result.pdf", Some(heatmap_svg))?;
+        generate_pdf_report(
+            &cli.path,
+            &assessment,
+            &analysis_result,
+            "result.pdf",
+            heatmap_svg,
+        )?;
         println!("PDF report generated at result.pdf");
     }
 

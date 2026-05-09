@@ -63,5 +63,77 @@
             {% endif %}
         </tbody>
     </table>
+
+    <div class="section-title" style=" margin-top: 20px;">Deep Technical Analysis</div>
+    
+    <div style="margin-bottom: 20px;">
+        <h3>Binary Metadata</h3>
+        <table style="width: auto; min-width: 300px;">
+            <tr>
+                <th style="width: 150px;">Property</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td><strong>Binary Type</strong></td>
+                <td>{{ binary_type }}</td>
+            </tr>
+            <tr>
+                <td><strong>Entry Point</strong></td>
+                <td><code>{{ entry_point }}</code></td>
+            </tr>
+            <tr>
+                <td><strong>Architecture</strong></td>
+                <td>{{ architecture }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+        <h3>Detected Capabilities</h3>
+        {% if capabilities.is_empty() %}
+        <p>No specific suspicious capabilities detected.</p>
+        {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 200px;">Category</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cap in capabilities %}
+                <tr>
+                    <td><strong>{{ cap.category }}</strong></td>
+                    <td>{{ cap.details }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+
+    <div style="margin-bottom: 20px;">
+        <h3>Signature Matches</h3>
+        {% if signatures.is_empty() %}
+        <p>No signature matches (Packers/YARA) detected.</p>
+        {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 200px;">Type</th>
+                    <th>Match Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sig in signatures %}
+                <tr>
+                    <td><strong>{{ sig.category }}</strong></td>
+                    <td>{{ sig.details }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
 </body>
 </html>
