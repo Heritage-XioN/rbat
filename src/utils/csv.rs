@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::types::RiskAssessment;
+use crate::types::{AnalysisResult, RiskAssessment};
 use csv::Writer;
 use std::path::PathBuf;
 
@@ -9,9 +9,10 @@ pub fn generate_csv_report(
     out_path: &str,
 ) -> Result<()> {
     let mut wtr = Writer::from_path(out_path)?;
-    let filename = filename.to_string_lossy().to_string();
+    let filename_str = filename.to_string_lossy().to_string();
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-    // Write the standard headers expected by SOC tools
+    // Standard headers expected by SOC tools
     wtr.write_record(&[
         "Timestamp",
         "Filename",
@@ -22,19 +23,18 @@ pub fn generate_csv_report(
         "Description",
     ])?;
 
-    let timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let score = assessment.score.to_string();
+    let severity = &assessment.severity;
 
-    // Flatten the findings into individual rows
+    // Flatten the assessment findings into individual rows
     for finding in &assessment.findings {
-        let confidence_str = format!("{:?}", finding.confidence);
-
         wtr.write_record(&[
             &timestamp,
-            &filename,
-            &assessment.score.to_string(),
-            &assessment.severity,
+            &filename_str,
+            &score,
+            severity,
             &finding.indicator,
-            &confidence_str,
+            &format!("{:?}", finding.confidence),
             &finding.description,
         ])?;
     }
