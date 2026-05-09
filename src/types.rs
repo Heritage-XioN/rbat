@@ -34,6 +34,10 @@ pub struct Cli {
     /// PDF output
     #[arg(short, long)]
     pub pdf: bool,
+
+    /// CSV output
+    #[arg(short, long)]
+    pub csv: bool,
 }
 
 #[derive(Debug, Default)]
@@ -174,37 +178,39 @@ impl<'path> Parser<'path> {
                     }
                 }
             }
-            Object::Mach(mach) => {
-                match mach {
-                    goblin::mach::Mach::Binary(macho) => {
-                        for segment in &macho.segments {
-                            for (section, section_data) in segment.into_iter().flatten() {
-                                if let Ok(name) = section.name() {
-                                    if !section_data.is_empty() {
-                                        section_entropy.insert(name.to_string(), calculate_entropy(&section_data));
-                                    }
+            Object::Mach(mach) => match mach {
+                goblin::mach::Mach::Binary(macho) => {
+                    for segment in &macho.segments {
+                        for (section, section_data) in segment.into_iter().flatten() {
+                            if let Ok(name) = section.name() {
+                                if !section_data.is_empty() {
+                                    section_entropy
+                                        .insert(name.to_string(), calculate_entropy(&section_data));
                                 }
-                            }
-                        }
-                    }
-                    goblin::mach::Mach::Fat(fat) => {
-                        for arch in &fat {
-                            if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
-                                for segment in &macho.segments {
-                                    for (section, section_data) in segment.into_iter().flatten() {
-                                        if let Ok(name) = section.name() {
-                                            if !section_data.is_empty() {
-                                                section_entropy.insert(name.to_string(), calculate_entropy(&section_data));
-                                            }
-                                        }
-                                    }
-                                }
-                                break;
                             }
                         }
                     }
                 }
-            }
+                goblin::mach::Mach::Fat(fat) => {
+                    for arch in &fat {
+                        if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
+                            for segment in &macho.segments {
+                                for (section, section_data) in segment.into_iter().flatten() {
+                                    if let Ok(name) = section.name() {
+                                        if !section_data.is_empty() {
+                                            section_entropy.insert(
+                                                name.to_string(),
+                                                calculate_entropy(&section_data),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            },
             _ => {}
         }
 

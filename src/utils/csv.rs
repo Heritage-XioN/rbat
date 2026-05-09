@@ -1,13 +1,15 @@
+use crate::prelude::*;
 use crate::types::RiskAssessment;
 use csv::Writer;
-use std::error::Error;
+use std::path::PathBuf;
 
 pub fn generate_csv_report(
-    filename: &str,
+    filename: &PathBuf,
     assessment: &RiskAssessment,
     out_path: &str,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let mut wtr = Writer::from_path(out_path)?;
+    let filename = filename.to_string_lossy().to_string();
 
     // Write the standard headers expected by SOC tools
     wtr.write_record(&[
@@ -28,7 +30,7 @@ pub fn generate_csv_report(
 
         wtr.write_record(&[
             &timestamp,
-            filename,
+            &filename,
             &assessment.score.to_string(),
             &assessment.severity,
             &finding.indicator,

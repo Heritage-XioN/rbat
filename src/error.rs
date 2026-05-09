@@ -41,6 +41,6 @@ pub enum RbatError {
     #[error("Invalid UTF-8 in embedded asset")]
     Utf8Error(#[from] std::string::FromUtf8Error),
 
-    #[error("Error occurred while generating PDF report")]
-    PdfGenerationError(#[from] genpdf::error::Error),
+    #[error("csv creation error")]
+    ErrorCreatingCsv(#[from] csv::Error),
 }

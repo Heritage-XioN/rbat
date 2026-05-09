@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head></head>
+<body>
+    <div class="header">
+        <h1>BAT Threat Intelligence Report</h1>
+        <p>Automated Binary Triage & Risk Assessment</p>
+    </div>
+
+    <div class="executive-summary">
+        <h2 class="exec-title">Executive Summary</h2>
+        <div class="exec-item">
+            <strong>Target File:</strong>
+            <span>{{ target_file }}</span>
+        </div>
+        <div class="exec-item">
+            <strong>Analysis Date:</strong>
+            <span>{{ analysis_date }}</span>
+        </div>
+        <div class="exec-item">
+            <strong>Risk Score:</strong>
+            <span class="risk-score {{ severity_class }}">{{ score }}/100 ({{ severity }})</span>
+        </div>
+    </div>
+
+    <div class="recommendations">
+        <h3>Recommendations</h3>
+        <ul>
+            {% for rec in recommendations %}
+            <li>{{ rec }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    {% if has_heatmap %}
+    <div class="section-title">Section Entropy Analysis</div>
+    <div class="image-container">
+        {{ heatmap_svg|safe }}
+    </div>
+    {% endif %}
+
+    <div class="section-title">Technical Indicators of Compromise (IOCs)</div>
+    <table>
+        <thead>
+            <tr>
+                <th>INDICATOR</th>
+                <th>CONFIDENCE</th>
+                <th>DESCRIPTION</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for finding in findings %}
+            <tr>
+                <td><strong>{{ finding.indicator }}</strong></td>
+                <td><span class="badge {{ finding.confidence_class }}">{{ finding.confidence }}</span></td>
+                <td>{{ finding.description }}</td>
+            </tr>
+            {% endfor %}
+            {% if findings.is_empty() %}
+            <tr>
+                <td colspan="3">No significant indicators detected.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</body>
+</html>

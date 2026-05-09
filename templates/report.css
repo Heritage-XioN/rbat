@@ -1,0 +1,124 @@
+@page {
+    size: letter;
+    margin: 0.5in;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 40px;
+    color: #333;
+    background-color: #fcfcfc;
+}
+.header {
+    background-color: #2b3a4a;
+    color: white;
+    text-align: center;
+    padding: 20px;
+    border-bottom: 4px solid #e74c3c;
+    margin-bottom: 30px;
+}
+.header h1 {
+    margin: 0;
+    font-size: 24px;
+}
+.header p {
+    margin: 5px 0 0 0;
+    font-size: 14px;
+    color: #bdc3c7;
+}
+.section-title {
+    color: #2b3a4a;
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #bdc3c7;
+    padding-bottom: 5px;
+}
+.executive-summary {
+    border-left: 4px solid #e74c3c;
+    padding-left: 15px;
+    margin-bottom: 30px;
+    background-color: #fff;
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+.exec-item {
+    display: flex;
+    margin-bottom: 10px;
+}
+.exec-item strong {
+    width: 150px;
+}
+.risk-score {
+    font-weight: bold;
+}
+.risk-score.malicious { color: #e74c3c; }
+.risk-score.suspicious { color: #f39c12; }
+.risk-score.safe { color: #27ae60; }
+.recommendations {
+    background-color: #eef4f9;
+    padding: 15px;
+    border-radius: 4px;
+    margin-bottom: 30px;
+    border: 1px solid #d5e3ec;
+}
+.recommendations h3 {
+    margin-top: 0;
+    color: #2b3a4a;
+    font-size: 16px;
+}
+.recommendations ul {
+    margin: 0;
+    padding-left: 20px;
+}
+.recommendations li {
+    margin-bottom: 5px;
+    font-size: 14px;
+}
+.image-container {
+    text-align: center;
+    margin-bottom: 30px;
+    background-color: #fff;
+    padding: 15px;
+    border: 1px solid #eee;
+}
+.image-container img {
+    max-width: 100%;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #fff;
+}
+th, td {
+    border: 1px solid #bdc3c7;
+    padding: 10px;
+    text-align: left;
+    font-size: 14px;
+}
+th {
+    background-color: #2b3a4a;
+    color: white;
+}
+.badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 2px;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+.badge.critical { background-color: #e74c3c; }
+.badge.high { background-color: #d35400; }
+.badge.medium { background-color: #f39c12; }
+.badge.low { background-color: #f1c40f; color: #333; }
+
+.exec-title {
+    color: #e74c3c;
+    font-size: 18px;
+    font-weight: bold;
+    margin-top: 0;
+    margin-bottom: 15px;
+}
