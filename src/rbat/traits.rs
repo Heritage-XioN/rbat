@@ -1,4 +1,5 @@
-use crate::prelude::*;
+use crate::rbat::Result;
+pub use capstone::prelude::*;
 
 pub trait Disassembler {
     /// capstone disassembly function.

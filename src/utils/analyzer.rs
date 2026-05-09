@@ -1,6 +1,6 @@
-use crate::prelude::*;
-use crate::types::DisasmType;
-use crate::types::MapValue;
+use crate::rbat::parser::Parser;
+use crate::rbat::yarahandler::YaraHandler;
+use crate::rbat::*;
 use crate::utils::entropy::calculate_entropy;
 use crate::utils::get_metadata::get_binary_metadata;
 use crate::utils::get_txt::get_txt_from_file;
@@ -78,14 +78,13 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
             blacklisted_mnemonics,
             api_hooking,
             process_injection: process_inj,
-            entropy: calculate_entropy(bytes),
             section_entropy,
             string_values: string_eva_res,
             packer_signatures: packer_results,
         };
 
         let score = calculate_risk(
-            analysis_result.entropy,
+            &analysis_result.section_entropy,
             !analysis_result.string_values.is_empty(),
             !analysis_result.api_hooking.is_empty(),
             !analysis_result.code_cave.is_empty(),

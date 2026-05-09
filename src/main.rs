@@ -1,5 +1,5 @@
-use crate::types::App;
-use crate::types::Cli;
+use crate::rbat::cli::Cli;
+use crate::rbat::tui::App;
 use crate::utils::analyzer::analyzer;
 use crate::utils::csv::generate_csv_report;
 use crate::utils::pdf::generate_pdf_report;
@@ -7,9 +7,7 @@ use clap::Parser;
 use color_eyre::Result;
 
 mod error;
-mod prelude;
-mod traits;
-mod types;
+mod rbat;
 mod utils;
 
 fn main() -> Result<()> {
@@ -17,8 +15,6 @@ fn main() -> Result<()> {
     // parses terminal arguments!
     let cli = Cli::parse();
     let (analysis_result, assessment) = analyzer(&cli.path)?;
-    println!("assessment: {:#?}", assessment);
-    println!("analysis result: {:#?}", &analysis_result);
 
     if cli.pdf {
         let heatmap_svg =
@@ -30,7 +26,6 @@ fn main() -> Result<()> {
             "result.pdf",
             heatmap_svg,
         )?;
-        println!("PDF report generated at result.pdf");
     }
 
     if cli.csv {
