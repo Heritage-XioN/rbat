@@ -1,16 +1,20 @@
-pub use clap::Parser;
+pub use clap::{ArgGroup, Parser};
 use std::path::PathBuf;
 
-/// a rust based static binary analysis tool (This comment becomes the app's description)
+/// a rust based static binary analysis tool.
 #[derive(Parser, Debug, Clone)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, group(
+    ArgGroup::new("output")
+    .args(&["tui", "pdf", "csv", "json"])
+    .required(true).multiple(true))
+)]
 pub struct Cli {
     /// The path to the binary
     pub path: PathBuf,
 
-    /// Turn on debugging information
+    /// TUI result display
     #[arg(short, long)]
-    pub debug: bool,
+    pub tui: bool,
 
     /// PDF output
     #[arg(short, long)]
@@ -19,4 +23,8 @@ pub struct Cli {
     /// CSV output
     #[arg(short, long)]
     pub csv: bool,
+
+    /// JSON output
+    #[arg(short, long)]
+    pub json: bool,
 }

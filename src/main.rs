@@ -15,7 +15,6 @@ fn main() -> Result<()> {
     // parses terminal arguments!
     let cli = Cli::parse();
     let (analysis_result, assessment) = analyzer(&cli.path)?;
-    println!("{:#?} \n {:#?}", analysis_result, assessment); 
 
     if cli.pdf {
         let heatmap_svg =
@@ -24,7 +23,7 @@ fn main() -> Result<()> {
             &cli.path,
             &assessment,
             &analysis_result,
-            "result.pdf",
+            "report.pdf",
             heatmap_svg,
         )?;
     }
@@ -33,7 +32,11 @@ fn main() -> Result<()> {
         generate_csv_report(&cli.path, &assessment, "result.csv")?
     }
 
-    if cli.debug {
+    if cli.json {
+        println!("json output")
+    }
+
+    if cli.tui {
         ratatui::run(|terminal| App::new(analysis_result, assessment.clone()).run(terminal))?;
     }
 
