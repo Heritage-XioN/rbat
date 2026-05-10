@@ -1,4 +1,4 @@
-use crate::rbat::*;
+use crate::rbat::{Asset, RbatError, Result};
 
 pub fn get_txt_from_file(file: &str) -> Result<Vec<String>> {
     let file = Asset::get(file).ok_or_else(|| RbatError::MissingAsset(file.to_string()))?;

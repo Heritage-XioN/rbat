@@ -1,4 +1,4 @@
-use crate::rbat::{AnalysisResult, RiskAssessment};
+use super::{AnalysisResult, RiskAssessment};
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
     DefaultTerminal, Frame,

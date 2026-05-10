@@ -1,11 +1,10 @@
-use crate::rbat::MapValue;
-use crate::rbat::disassembler::DisasmType;
-use crate::rbat::*;
 use crate::utils::get_txt::get_txt_from_file;
 use goblin::Object;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
+
+use super::{DisasmType, MapValue, RbatError, Result};
 
 /// a struct to hold the parsed binary data and provide methods for analysis.
 #[derive(Debug)]

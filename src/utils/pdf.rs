@@ -1,5 +1,5 @@
-use crate::rbat::*;
-use crate::rbat::{AnalysisResult, Confidence, RiskAssessment};
+use super::viz::generate_entropy_heatmap_svg;
+use crate::rbat::{AnalysisResult, Confidence, RbatError, Result, RiskAssessment};
 use askama::Template;
 use chrono::Local;
 use std::fs;
@@ -17,7 +17,6 @@ struct ReportTemplate {
     has_heatmap: bool,
     heatmap_svg: String,
     findings: Vec<FindingContext>,
-    // Technical Analysis Fields
     binary_type: String,
     entry_point: String,
     architecture: String,
@@ -47,10 +46,9 @@ pub fn generate_pdf_report(
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult,
     out_path: &str,
-    heatmap_svg: String,
 ) -> Result<()> {
-    let has_heatmap = heatmap_svg.trim().len() > 0;
-    let heatmap_svg_content = heatmap_svg;
+    let heatmap_svg_content = generate_entropy_heatmap_svg(&analysis_result.section_entropy);
+    let has_heatmap = heatmap_svg_content.trim().len() > 0;
 
     let severity_class = match assessment.severity.to_lowercase().as_str() {
         "malicious" => "malicious",
@@ -153,7 +151,6 @@ pub fn generate_pdf_report(
         has_heatmap,
         heatmap_svg: heatmap_svg_content,
         findings,
-        // Technical analysis fields
         binary_type: analysis_result.metadata.binary_type.clone(),
         entry_point: format!("0x{:X}", analysis_result.metadata.entry_point),
         architecture: analysis_result.metadata.architecture.to_string(),
@@ -163,7 +160,7 @@ pub fn generate_pdf_report(
 
     let html = template
         .render()
-        .map_err(|e| crate::error::RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
 
     match generate_pdf_from_html(&html, out_path) {
         Ok(()) => {
@@ -191,11 +188,11 @@ fn generate_pdf_from_html(html: &str, out_path: &str) -> Result<()> {
         .document_title("RBAT Threat Intelligence Report")
         .document_lang("en")
         .build()
-        .map_err(|e| crate::error::RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
 
     let pdf_bytes = engine
         .render_to_buffer(html, REPORT_CSS)
-        .map_err(|e| crate::error::RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
 
     fs::write(out_path, pdf_bytes)?;
 

@@ -1,4 +1,4 @@
-use crate::rbat::*;
+use super::{Asset, RbatError, Result, YaraMatches};
 use crate::utils::section_offset::get_section_for_offset;
 use std::path::PathBuf;
 use std::{collections::HashMap, fs};

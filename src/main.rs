@@ -1,12 +1,9 @@
-use crate::rbat::cli::Cli;
-use crate::rbat::tui::App;
-use crate::utils::analyzer::analyzer;
-use crate::utils::csv::generate_csv_report;
+use crate::rbat::{cli::Cli, tui::App};
 use crate::utils::pdf::generate_pdf_report;
+use crate::utils::{analyzer::analyzer, csv::generate_csv_report};
 use clap::Parser;
 use color_eyre::Result;
 
-mod error;
 mod rbat;
 mod utils;
 
@@ -17,15 +14,7 @@ fn main() -> Result<()> {
     let (analysis_result, assessment) = analyzer(&cli.path)?;
 
     if cli.pdf {
-        let heatmap_svg =
-            crate::utils::viz::generate_entropy_heatmap_svg(&analysis_result.section_entropy);
-        generate_pdf_report(
-            &cli.path,
-            &assessment,
-            &analysis_result,
-            "report.pdf",
-            heatmap_svg,
-        )?;
+        generate_pdf_report(&cli.path, &assessment, &analysis_result, "report.pdf")?;
     }
 
     if cli.csv {
