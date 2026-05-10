@@ -255,13 +255,26 @@ impl<'path> Parser<'path> {
 
         match Object::parse(&buffer)? {
             Object::Elf(elf) => {
+                // For ELF, check dynamic symbols that are imported (st_shndx == 0)
                 for dy in &elf.dynsyms {
-                    if dy.st_shndx == 0
-                        && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
-                    {
-                        if blacklist.contains(&name.to_string()) {
-                            sus_func.insert(name.to_owned());
+                    if dy.st_shndx == 0 {
+                        if let Some(name) = elf.dynstrtab.get_at(dy.st_name) {
+                            if blacklist.contains(&name.to_string()) {
+                                sus_func.insert(name.to_owned());
+                            }
                         }
+                    }
+                }
+                Ok(sus_func)
+            }
+            Object::PE(pe) => {
+                for import in &pe.imports {
+                    let import_name = import.name.to_string();
+                    if blacklist
+                        .iter()
+                        .any(|item| item.eq_ignore_ascii_case(&import_name))
+                    {
+                        sus_func.insert(import_name);
                     }
                 }
                 Ok(sus_func)
@@ -283,9 +296,11 @@ impl<'path> Parser<'path> {
                         }
                     }
 
-                    for (name, symbol) in macho.symbols().flatten() {
-                        if symbol.is_undefined() && matches_blacklist(name) {
-                            sus_func.insert(name.to_string());
+                    for symbol in macho.symbols() {
+                        if let Ok((name, nlist)) = symbol {
+                            if nlist.is_undefined() && matches_blacklist(name) {
+                                sus_func.insert(name.to_string());
+                            }
                         }
                     }
                     Ok(())
@@ -299,18 +314,6 @@ impl<'path> Parser<'path> {
                                 collect_from_macho(&macho)?;
                             }
                         }
-                    }
-                }
-                Ok(sus_func)
-            }
-            Object::PE(pe) => {
-                for import in &pe.imports {
-                    let import_name = import.name.to_string();
-                    if blacklist
-                        .iter()
-                        .any(|item| item.eq_ignore_ascii_case(&import_name))
-                    {
-                        sus_func.insert(import_name);
                     }
                 }
                 Ok(sus_func)
@@ -323,41 +326,40 @@ impl<'path> Parser<'path> {
     }
 
     pub fn detect_api_hooking(&self) -> Result<HashMap<String, u64>> {
+        use crate::rbat::yarahandler::YaraHandler;
         let mut api_hooking_func: HashMap<String, u64> = HashMap::new();
         let buffer = fs::read(&self.path)?;
+        let blacklist = get_txt_from_file("api_hooking_apis.txt")?;
+
         match Object::parse(&buffer)? {
             Object::Elf(elf) => {
                 for dy in &elf.dynsyms {
-                    if dy.st_shndx > 0
-                        && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
-                    {
-                        api_hooking_func.insert(name.to_owned(), dy.st_value);
+                    if dy.st_shndx > 0 {
+                        if let Some(name) = elf.dynstrtab.get_at(dy.st_name) {
+                            // Only flag if it's a known hooking-related name or suspicious export
+                            if blacklist.iter().any(|b| name.contains(b)) {
+                                api_hooking_func.insert(name.to_owned(), dy.st_value);
+                            }
+                        }
                     }
                 }
-                Ok(api_hooking_func)
             }
             Object::PE(pe) => {
                 for import in &pe.imports {
                     let function = import.name.to_string();
-                    let dll = import.dll.to_string();
-                    api_hooking_func.insert(format!("{dll}!{function}"), import.rva as u64);
+                    if blacklist.iter().any(|b| function.contains(b)) {
+                        api_hooking_func
+                            .insert(format!("{}!{}", import.dll, function), import.rva as u64);
+                    }
                 }
-                Ok(api_hooking_func)
             }
             Object::Mach(mach) => {
                 let mut collect_from_macho = |macho: &goblin::mach::MachO<'_>| -> Result<()> {
-                    if let Ok(imports) = macho.imports() {
-                        for import in imports {
-                            api_hooking_func.insert(
-                                format!("{}!{}", import.dylib, import.name),
-                                import.address,
-                            );
-                        }
-                    }
-
                     for (name, symbol) in macho.symbols().flatten() {
                         if symbol.is_global() && !symbol.is_undefined() {
-                            api_hooking_func.insert(name.to_string(), symbol.n_value);
+                            if blacklist.iter().any(|b| name.contains(b)) {
+                                api_hooking_func.insert(name.to_string(), symbol.n_value);
+                            }
                         }
                     }
                     Ok(())
@@ -373,12 +375,23 @@ impl<'path> Parser<'path> {
                         }
                     }
                 }
-                Ok(api_hooking_func)
             }
-            _ => Err(RbatError::UnsupportedBinaryFormat(
-                "API hooking detection currently supports ELF, PE, and Mach-O binaries only"
-                    .to_string(),
-            )),
+            _ => {}
         }
+
+        // Supplement with YARA scan for patterns and strings
+        let yara = YaraHandler::new("api_hooking.yar".to_owned());
+        if let Ok(rules) = yara.compile_yara_rule() {
+            if let Ok(matches) = yara.scan_file(rules, self.path) {
+                for (rule_name, instances) in matches {
+                    for m in instances {
+                        let key = format!("{}:{}", rule_name, m.data);
+                        api_hooking_func.entry(key).or_insert(m.offset as u64);
+                    }
+                }
+            }
+        }
+
+        Ok(api_hooking_func)
     }
 }

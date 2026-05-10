@@ -1,7 +1,6 @@
 use crate::rbat::parser::Parser;
 use crate::rbat::yarahandler::YaraHandler;
 use crate::rbat::*;
-use crate::utils::entropy::calculate_entropy;
 use crate::utils::get_metadata::get_binary_metadata;
 use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::scoring::calculate_risk;
@@ -85,8 +84,9 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
 
         let score = calculate_risk(
             &analysis_result.section_entropy,
-            !analysis_result.string_values.is_empty(),
-            !analysis_result.api_hooking.is_empty(),
+            analysis_result.string_values.values().map(|v| v.len()).sum(),
+            analysis_result.api_hooking.len(),
+            analysis_result.process_injection.len(),
             !analysis_result.code_cave.is_empty(),
             !analysis_result.packer_signatures.is_empty(),
         );

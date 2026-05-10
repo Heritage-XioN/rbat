@@ -15,6 +15,7 @@ fn main() -> Result<()> {
     // parses terminal arguments!
     let cli = Cli::parse();
     let (analysis_result, assessment) = analyzer(&cli.path)?;
+    println!("{:#?} \n {:#?}", analysis_result, assessment); 
 
     if cli.pdf {
         let heatmap_svg =

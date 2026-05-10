@@ -56,27 +56,25 @@ rule Network_Indicators {
     meta:
         description = "Network indicators - URLs, IPs, and domains"
         author = "rBAT Project"
-        version = "0.2.0"
+        version = "0.2.1"
 
     strings:
-        /* HTTP/HTTPS URLs */
-        $url_http = /https?:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}/ nocase
+        /* HTTP/HTTPS URLs - made more specific to reduce noise */
+        $url_http = /https?:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,6}(\/[a-zA-Z0-9\-\._~:\/\?#\[\]@!\$&'\(\)\*\+,;=%]*)?/ nocase
 
         /* IP addresses in URLs */
         $url_ip = /https?:\/\/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/ nocase
 
         /* Dark web/TOR domains */
-        $tor_domain = /\.onion$/ nocase
+        $tor_domain = /\.onion/ nocase
 
         /* Common C2 ports/patterns */
-        $c2_port_4444 = "4444" ascii
-        $c2_port_5555 = "5555" ascii
-        $c2_port_6666 = "6666" ascii
-        $c2_port_7777 = "7777" ascii
-        $c2_port_8888 = "8888" ascii
+        $c2_port_4444 = ":4444" ascii
+        $c2_port_5555 = ":5555" ascii
+        $c2_port_6666 = ":6666" ascii
 
     condition:
-        any of them
+        $url_ip or $tor_domain or any of ($c2_port_*) or #url_http > 2
 }
 
 rule Windows_Suspicious_APIs {
@@ -141,53 +139,35 @@ rule Windows_Suspicious_APIs {
 
 rule ELF_Suspicious_APIs {
     meta:
-        description = "Linux/ELF suspicious system calls and functions"
+        description = "Linux/ELF suspicious system calls and functions (Low Confidence)"
         author = "rBAT Project"
-        version = "0.2.0"
+        version = "0.2.1"
 
     strings:
         /* Process manipulation */
         $elf_ptrace = "ptrace" ascii
-        $elf_ptrace_plt = "@plt" ascii
+        $elf_ptrace_plt = "ptrace@plt" ascii
 
-        /* Memory mapping */
-        $elf_mmap = "mmap" ascii
+        /* Memory mapping - often used in legitimate binaries but suspicious in some contexts */
         $elf_mprotect = "mprotect" ascii
-        $elf_madvise = "madvise" ascii
-
-        /* Dynamic library loading */
-        $elf_dlopen = "dlopen" ascii
-        $elf_dlsym = "dlsym" ascii
-        $elf_dlclose = "dlclose" ascii
+        $elf_mprotect_plt = "mprotect@plt" ascii
 
         /* Process execution */
         $elf_execve = "execve" ascii
-        $elf_fork = "fork" ascii
-        $elf_vfork = "vfork" ascii
+        $elf_execve_plt = "execve@plt" ascii
 
         /* Shell commands */
         $elf_system = "system" ascii
         $elf_popen = "popen" ascii
 
-        /* File operations */
-        $elf_chmod = "chmod" ascii
-        $elf_chown = "chown" ascii
-
-        /* Network */
+        /* Network - socket creation is common but noteworthy */
         $elf_socket = "socket" ascii
         $elf_connect = "connect" ascii
-        $elf_bind = "bind" ascii
-        $elf_listen = "listen" ascii
-        $elf_accept = "accept" ascii
-
-        /* Privilege escalation */
-        $elf_setuid = "setuid" ascii
-        $elf_setgid = "setgid" ascii
-        $elf_seteuid = "seteuid" ascii
-        $elf_setreuid = "setreuid" ascii
 
     condition:
-        any of them
+        (any of ($elf_ptrace*) and (any of ($elf_execve*) or any of ($elf_system*) or any of ($elf_mprotect*) or $elf_popen)) or
+        (any of ($elf_socket*) and any of ($elf_connect*)) or
+        (#elf_system > 1)
 }
 
 rule MachO_Suspicious_APIs {
