@@ -6,7 +6,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Cell, Gauge, List, ListItem, Padding, Paragraph, Row, Table, Tabs, Widget,
+        Block, Cell, Gauge, List, ListItem, ListState, Padding, Paragraph, Row, Table, TableState,
+        Tabs, Widget,
     },
     DefaultTerminal, Frame,
 };
@@ -55,14 +56,31 @@ pub struct App {
     analysis_result: AnalysisResult,
     assessment: RiskAssessment,
     current_tab: Tab,
+    overview_state: ListState,
+    security_state: ListState,
+    entropy_state: TableState,
+    advice_state: ListState,
 }
 
 impl App {
     pub fn new(analysis_result: AnalysisResult, assessment: RiskAssessment) -> Self {
+        let mut overview_state = ListState::default();
+        overview_state.select(Some(0));
+        let mut security_state = ListState::default();
+        security_state.select(Some(0));
+        let mut entropy_state = TableState::default();
+        entropy_state.select(Some(0));
+        let mut advice_state = ListState::default();
+        advice_state.select(Some(0));
+
         Self {
             analysis_result,
             assessment,
             current_tab: Tab::Overview,
+            overview_state,
+            security_state,
+            entropy_state,
+            advice_state,
         }
     }
 
@@ -73,8 +91,14 @@ impl App {
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') => break Ok(()),
-                    KeyCode::Tab | KeyCode::Right => self.current_tab = self.current_tab.next(),
-                    KeyCode::Left => self.current_tab = self.current_tab.prev(),
+                    KeyCode::Tab | KeyCode::Right => {
+                        self.current_tab = self.current_tab.next();
+                    }
+                    KeyCode::Left => {
+                        self.current_tab = self.current_tab.prev();
+                    }
+                    KeyCode::Down => self.next_item(),
+                    KeyCode::Up => self.previous_item(),
                     KeyCode::Char('1') => self.current_tab = Tab::Overview,
                     KeyCode::Char('2') => self.current_tab = Tab::Security,
                     KeyCode::Char('3') => self.current_tab = Tab::Entropy,
@@ -85,7 +109,129 @@ impl App {
         }
     }
 
-    fn draw(&self, frame: &mut Frame) {
+    fn next_item(&mut self) {
+        match self.current_tab {
+            Tab::Overview => {
+                let i = match self.overview_state.selected() {
+                    Some(i) => {
+                        if i >= self.assessment.findings.len().saturating_sub(1) {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.overview_state.select(Some(i));
+            }
+            Tab::Security => {
+                let total = self.analysis_result.packer_signatures.len()
+                    + self.analysis_result.string_values.len()
+                    + self.analysis_result.api_hooking.len()
+                    + self.analysis_result.process_injection.len();
+                let i = match self.security_state.selected() {
+                    Some(i) => {
+                        if i >= total.saturating_sub(1) {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.security_state.select(Some(i));
+            }
+            Tab::Entropy => {
+                let i = match self.entropy_state.selected() {
+                    Some(i) => {
+                        if i >= self.analysis_result.section_entropy.len().saturating_sub(1) {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.entropy_state.select(Some(i));
+            }
+            Tab::Advice => {
+                let i = match self.advice_state.selected() {
+                    Some(i) => {
+                        if i >= self.assessment.recommendations.len().saturating_sub(1) {
+                            0
+                        } else {
+                            i + 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.advice_state.select(Some(i));
+            }
+        }
+    }
+
+    fn previous_item(&mut self) {
+        match self.current_tab {
+            Tab::Overview => {
+                let i = match self.overview_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.assessment.findings.len().saturating_sub(1)
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.overview_state.select(Some(i));
+            }
+            Tab::Security => {
+                let total = self.analysis_result.packer_signatures.len()
+                    + self.analysis_result.string_values.len()
+                    + self.analysis_result.api_hooking.len()
+                    + self.analysis_result.process_injection.len();
+                let i = match self.security_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            total.saturating_sub(1)
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.security_state.select(Some(i));
+            }
+            Tab::Entropy => {
+                let i = match self.entropy_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.analysis_result.section_entropy.len().saturating_sub(1)
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.entropy_state.select(Some(i));
+            }
+            Tab::Advice => {
+                let i = match self.advice_state.selected() {
+                    Some(i) => {
+                        if i == 0 {
+                            self.assessment.recommendations.len().saturating_sub(1)
+                        } else {
+                            i - 1
+                        }
+                    }
+                    None => 0,
+                };
+                self.advice_state.select(Some(i));
+            }
+        }
+    }
+
+    fn draw(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let chunks = Layout::vertical([
             Constraint::Length(3), // Tabs
@@ -95,7 +241,7 @@ impl App {
         .split(area);
 
         self.render_tabs(chunks[0], frame.buffer_mut());
-        
+
         match self.current_tab {
             Tab::Overview => self.render_overview(chunks[1], frame.buffer_mut()),
             Tab::Security => self.render_security(chunks[1], frame.buffer_mut()),
@@ -113,7 +259,7 @@ impl App {
             Tab::Entropy.title(),
             Tab::Advice.title(),
         ];
-        
+
         let highlight_style = Style::default()
             .fg(match self.current_tab {
                 Tab::Overview => Color::Cyan,
@@ -131,7 +277,7 @@ impl App {
             .render(area, buf);
     }
 
-    fn render_overview(&self, area: Rect, buf: &mut Buffer) {
+    fn render_overview(&mut self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::horizontal([
             Constraint::Percentage(30),
             Constraint::Percentage(35),
@@ -140,17 +286,25 @@ impl App {
         .split(area);
 
         // Column 1: Target Info & Risk Gauge
-        let left_chunks = Layout::vertical([
-            Constraint::Length(10),
-            Constraint::Min(0),
-        ])
-        .split(chunks[0]);
+        let left_chunks = Layout::vertical([Constraint::Length(10), Constraint::Min(0)]).split(chunks[0]);
 
         let metadata = &self.analysis_result.metadata;
         let info_items = vec![
-            ListItem::new(Line::from(vec![Span::raw(" TYPE: "), Span::styled(&metadata.binary_type, Style::default().fg(Color::Cyan))])),
-            ListItem::new(Line::from(vec![Span::raw(" ARCH: "), Span::styled(metadata.architecture.to_string(), Style::default().fg(Color::Cyan))])),
-            ListItem::new(Line::from(vec![Span::raw(" ENTRY: "), Span::styled(format!("0x{:X}", metadata.entry_point), Style::default().fg(Color::Cyan))])),
+            ListItem::new(Line::from(vec![
+                Span::raw(" TYPE: "),
+                Span::styled(&metadata.binary_type, Style::default().fg(Color::Cyan)),
+            ])),
+            ListItem::new(Line::from(vec![
+                Span::raw(" ARCH: "),
+                Span::styled(metadata.architecture.to_string(), Style::default().fg(Color::Cyan)),
+            ])),
+            ListItem::new(Line::from(vec![
+                Span::raw(" ENTRY: "),
+                Span::styled(
+                    format!("0x{:X}", metadata.entry_point),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ])),
         ];
 
         List::new(info_items)
@@ -158,19 +312,37 @@ impl App {
             .render(left_chunks[0], buf);
 
         let score = self.assessment.score as f64 / 100.0;
-        let gauge_color = if score > 0.75 { Color::Red } else if score > 0.4 { Color::Yellow } else { Color::Green };
-        
+        let gauge_color = if score > 0.75 {
+            Color::Red
+        } else if score > 0.4 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+
         Gauge::default()
             .block(Block::bordered().title(" RISK LEVEL "))
             .gauge_style(Style::default().fg(gauge_color))
-            .label(format!("{}% ({})", self.assessment.score, self.assessment.severity))
+            .label(format!(
+                "{}% ({})",
+                self.assessment.score, self.assessment.severity
+            ))
             .ratio(score)
             .render(left_chunks[1], buf);
 
         // Column 2: Entropy Summary
-        let entropy_items: Vec<Row> = self.analysis_result.section_entropy.iter()
+        let entropy_items: Vec<Row> = self
+            .analysis_result
+            .section_entropy
+            .iter()
             .map(|(name, val)| {
-                let color = if *val > 7.0 { Color::Red } else if *val > 5.0 { Color::Yellow } else { Color::Green };
+                let color = if *val > 7.0 {
+                    Color::Red
+                } else if *val > 5.0 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                };
                 Row::new(vec![
                     Cell::from(name.as_str()),
                     Cell::from(format!("{:.2}", val)).style(Style::default().fg(color)),
@@ -178,13 +350,21 @@ impl App {
             })
             .collect();
 
-        Table::new(entropy_items, [Constraint::Percentage(70), Constraint::Percentage(30)])
-            .block(Block::bordered().title(" SECTION ENTROPY "))
-            .header(Row::new(vec!["Section", "H"]).style(Style::default().add_modifier(Modifier::BOLD)))
-            .render(chunks[1], buf);
+        Table::new(
+            entropy_items,
+            [Constraint::Percentage(70), Constraint::Percentage(30)],
+        )
+        .block(Block::bordered().title(" SECTION ENTROPY "))
+        .header(
+            Row::new(vec!["Section", "H"]).style(Style::default().add_modifier(Modifier::BOLD)),
+        )
+        .render(chunks[1], buf);
 
         // Column 3: Top Findings
-        let findings: Vec<ListItem> = self.assessment.findings.iter().take(10)
+        let findings: Vec<ListItem> = self
+            .assessment
+            .findings
+            .iter()
             .map(|f| {
                 let color = match f.confidence {
                     Confidence::Critical => Color::Red,
@@ -193,69 +373,84 @@ impl App {
                     Confidence::Low => Color::Green,
                 };
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("[{:?}] ", f.confidence).to_uppercase(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!("[{:?}] ", f.confidence).to_uppercase(),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(&f.indicator),
                 ]))
             })
             .collect();
 
-        List::new(findings)
-            .block(Block::bordered().title(" TOP FINDINGS "))
-            .render(chunks[2], buf);
+        let list = List::new(findings)
+            .block(Block::bordered().title(" TOP FINDINGS (Scrollable) "))
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(">> ");
+
+        ratatui::widgets::StatefulWidget::render(list, chunks[2], buf, &mut self.overview_state);
     }
 
-    fn render_security(&self, area: Rect, buf: &mut Buffer) {
-        let chunks = Layout::vertical([
-            Constraint::Percentage(40), // YARA
-            Constraint::Percentage(30), // API Hooks
-            Constraint::Percentage(30), // Injection
-        ])
-        .split(area);
+    fn render_security(&mut self, area: Rect, buf: &mut Buffer) {
+        let mut items = Vec::new();
 
-        // YARA Matches
-        let mut yara_items = Vec::new();
+        // Combine all security findings into one list for unified scrolling
         for (rule, matches) in &self.analysis_result.packer_signatures {
-            yara_items.push(ListItem::new(format!("PACKER: {} ({} matches)", rule, matches.len())).style(Style::default().fg(Color::LightRed)));
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled("PACKER: ", Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)),
+                Span::raw(format!("{} ({} matches)", rule, matches.len())),
+            ])));
         }
         for (rule, matches) in &self.analysis_result.string_values {
-            yara_items.push(ListItem::new(format!("RULE: {} ({} matches)", rule, matches.len())).style(Style::default().fg(Color::Magenta)));
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled("YARA: ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                Span::raw(format!("{} ({} matches)", rule, matches.len())),
+            ])));
+        }
+        for (api, addr) in &self.analysis_result.api_hooking {
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled("HOOK: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw(api),
+                Span::styled(format!(" @ 0x{:X}", addr), Style::default().fg(Color::DarkGray)),
+            ])));
+        }
+        for func in &self.analysis_result.process_injection {
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled("INJECT: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::raw(func),
+            ])));
         }
 
-        List::new(yara_items)
-            .block(Block::bordered().title(" YARA MATCHES "))
-            .render(chunks[0], buf);
+        let list = List::new(items)
+            .block(Block::bordered().title(" SECURITY FINDINGS (Scrollable) "))
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(">> ");
 
-        // API Hooks
-        let api_items: Vec<ListItem> = self.analysis_result.api_hooking.iter()
-            .map(|(api, addr)| {
-                ListItem::new(Line::from(vec![
-                    Span::styled("HOOK: ", Style::default().fg(Color::Yellow)),
-                    Span::raw(api),
-                    Span::styled(format!(" @ 0x{:X}", addr), Style::default().fg(Color::DarkGray)),
-                ]))
-            })
-            .collect();
-
-        List::new(api_items)
-            .block(Block::bordered().title(" API HOOKING INDICATORS "))
-            .render(chunks[1], buf);
-
-        // Injection
-        let inj_items: Vec<ListItem> = self.analysis_result.process_injection.iter()
-            .map(|f| ListItem::new(format!("SUSPICIOUS IMPORT: {}", f)).style(Style::default().fg(Color::Red)))
-            .collect();
-
-        List::new(inj_items)
-            .block(Block::bordered().title(" PROCESS INJECTION PATTERNS "))
-            .render(chunks[2], buf);
+        ratatui::widgets::StatefulWidget::render(list, area, buf, &mut self.security_state);
     }
 
-    fn render_entropy(&self, area: Rect, buf: &mut Buffer) {
-        let rows: Vec<Row> = self.analysis_result.section_entropy.iter()
+    fn render_entropy(&mut self, area: Rect, buf: &mut Buffer) {
+        let rows: Vec<Row> = self
+            .analysis_result
+            .section_entropy
+            .iter()
             .map(|(name, val)| {
-                let status = if *val > 7.5 { "CRITICAL" } else if *val > 6.8 { "PACKED?" } else if *val > 5.0 { "SUSPICIOUS" } else { "NORMAL" };
-                let color = if *val > 7.0 { Color::Red } else if *val > 5.0 { Color::Yellow } else { Color::Green };
-                
+                let status = if *val > 7.5 {
+                    "CRITICAL"
+                } else if *val > 6.8 {
+                    "PACKED?"
+                } else if *val > 5.0 {
+                    "SUSPICIOUS"
+                } else {
+                    "NORMAL"
+                };
+                let color = if *val > 7.0 {
+                    Color::Red
+                } else if *val > 5.0 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                };
+
                 Row::new(vec![
                     Cell::from(name.as_str()),
                     Cell::from(format!("{:.4}", val)).style(Style::default().fg(color)),
@@ -264,24 +459,47 @@ impl App {
             })
             .collect();
 
-        Table::new(rows, [Constraint::Percentage(40), Constraint::Percentage(30), Constraint::Percentage(30)])
-            .block(Block::bordered().title(" DETAILED SECTION ENTROPY "))
-            .header(Row::new(vec!["Section Name", "Entropy (H)", "Status"]).style(Style::default().add_modifier(Modifier::BOLD)))
-            .render(area, buf);
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Percentage(40),
+                Constraint::Percentage(30),
+                Constraint::Percentage(30),
+            ],
+        )
+        .block(Block::bordered().title(" DETAILED SECTION ENTROPY (Scrollable) "))
+        .header(
+            Row::new(vec!["Section Name", "Entropy (H)", "Status"])
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        )
+        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_symbol(">> ");
+
+        ratatui::widgets::StatefulWidget::render(table, area, buf, &mut self.entropy_state);
     }
 
-    fn render_advice(&self, area: Rect, buf: &mut Buffer) {
-        let advice_items: Vec<ListItem> = self.assessment.recommendations.iter()
+    fn render_advice(&mut self, area: Rect, buf: &mut Buffer) {
+        let advice_items: Vec<ListItem> = self
+            .assessment
+            .recommendations
+            .iter()
             .map(|r| ListItem::new(format!("• {}", r)).style(Style::default().fg(Color::Green)))
             .collect();
 
-        List::new(advice_items)
-            .block(Block::bordered().title(" SECURITY RECOMMENDATIONS ").padding(Padding::uniform(1)))
-            .render(area, buf);
+        let list = List::new(advice_items)
+            .block(
+                Block::bordered()
+                    .title(" SECURITY RECOMMENDATIONS (Scrollable) ")
+                    .padding(Padding::uniform(1)),
+            )
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(">> ");
+
+        ratatui::widgets::StatefulWidget::render(list, area, buf, &mut self.advice_state);
     }
 
     fn render_footer(&self, area: Rect, buf: &mut Buffer) {
-        let text = " [Q] Quit | [TAB] Next Tab | [1-4] Switch Tab | [Arrows] Navigate ";
+        let text = " [Q] Quit | [TAB/Arrows] Nav Tabs | [Up/Down] Scroll Content | [1-4] Jump Tab ";
         Paragraph::new(text)
             .style(Style::default().bg(Color::DarkGray).fg(Color::White))
             .alignment(Alignment::Center)
@@ -291,7 +509,6 @@ impl App {
 
 impl Widget for &App {
     fn render(self, _area: Rect, _buf: &mut Buffer) {
-        // We handle rendering inside App::draw directly to have access to Frame
-        // but this is kept for compatibility if needed.
+        // Compatibility method
     }
 }
