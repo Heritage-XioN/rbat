@@ -256,9 +256,9 @@ rule Upack_Packer_EP {
         any of them
 }
 
-rule MPRESS_Packer_Section {
+rule MPRESS_Packer {
     meta:
-        description = "MPRESS packed file - by section name"
+        description = "MPRESS packed file"
         author = "rBAT Project"
         packer = "MPRESS"
         weight = 85
@@ -266,11 +266,11 @@ rule MPRESS_Packer_Section {
     strings:
         $section_mpress = ".mpress" ascii nocase
         $section_upx = ".upx" ascii nocase
-        $str_mpress = "mpress" ascii wide
+        $str_mpress_sig = "MPRESS" ascii
         $str_mpr = ".MPR" ascii
 
     condition:
-        any of them
+        any of ($section_*) or ($str_mpress_sig and $str_mpr)
 }
 
 rule WinUpack_Packer {

@@ -1,5 +1,4 @@
-use crate::prelude::{RbatError, Result};
-use crate::types::BinaryMetadata;
+use crate::rbat::{BinaryMetadata, RbatError, Result};
 use goblin::Object;
 use std::{fs, path::PathBuf};
 

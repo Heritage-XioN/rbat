@@ -1,10 +1,10 @@
-use crate::prelude::*;
-use crate::types::DisasmType;
-use crate::types::MapValue;
-use crate::utils::entropy::calculate_entropy;
-use crate::utils::get_metadata::get_binary_metadata;
-use crate::utils::get_txt::get_txt_from_file;
-use crate::utils::scoring::calculate_risk;
+use crate::rbat::{
+    AnalysisResult, DisasmType, Factory, MapValue, RbatError, Result, RiskAssessment,
+    parser::Parser, yarahandler::YaraHandler,
+};
+use crate::utils::{
+    get_metadata::get_binary_metadata, get_txt::get_txt_from_file, scoring::calculate_risk,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -78,16 +78,20 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
             blacklisted_mnemonics,
             api_hooking,
             process_injection: process_inj,
-            entropy: calculate_entropy(bytes),
             section_entropy,
             string_values: string_eva_res,
             packer_signatures: packer_results,
         };
 
         let score = calculate_risk(
-            analysis_result.entropy,
-            !analysis_result.string_values.is_empty(),
-            !analysis_result.api_hooking.is_empty(),
+            &analysis_result.section_entropy,
+            analysis_result
+                .string_values
+                .values()
+                .map(|v| v.len())
+                .sum(),
+            analysis_result.api_hooking.len(),
+            analysis_result.process_injection.len(),
             !analysis_result.code_cave.is_empty(),
             !analysis_result.packer_signatures.is_empty(),
         );
