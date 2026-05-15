@@ -138,8 +138,7 @@ impl<'bin> Parser<'bin> {
                         if let (Some(name), Some(end)) = (
                             elf.shdr_strtab.get_at(sh.sh_name),
                             (sh.sh_offset as usize).checked_add(sh.sh_size as usize),
-                        )
-                            && name == ".text"
+                        ) && name == ".text"
                         {
                             let start = sh.sh_offset as usize;
                             let text_bytes = self.buffer.get(start..end).ok_or_else(|| {
