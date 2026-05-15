@@ -7,4 +7,5 @@ pub mod pdf;
 pub mod scoring;
 pub mod section_offset;
 pub mod viz;
+pub mod json;
 pub mod test_helpers;
