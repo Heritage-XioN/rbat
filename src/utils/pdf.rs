@@ -3,8 +3,9 @@ use crate::rbat::{AnalysisResult, Confidence, RbatError, Result, RiskAssessment}
 use askama::Template;
 use chrono::Local;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 
+/// Template context for the HTML/PDF report.
 #[derive(Template)]
 #[template(path = "report.html")]
 struct ReportTemplate {
@@ -24,11 +25,13 @@ struct ReportTemplate {
     signatures: Vec<TechnicalFinding>,
 }
 
+/// A simplified representation of a technical finding for the report tables.
 struct TechnicalFinding {
     category: String,
     details: String,
 }
 
+/// Contextual data for a specific security finding in the report.
 struct FindingContext {
     indicator: String,
     confidence: String,
@@ -41,14 +44,23 @@ struct FindingContext {
 /// Includes @page directives for proper PDF pagination.
 const REPORT_CSS: &str = include_str!("../../templates/report.css");
 
+/// Generates a professional, design-compliant PDF threat intelligence report.
+///
+/// This function:
+/// 1. Generates an entropy heatmap SVG.
+/// 2. Maps raw analysis findings to a user-friendly template.
+/// 3. Renders the template via `askama`.
+/// 4. Converts the HTML to PDF using the `fullbleed` engine.
+///
+/// If PDF generation fails, it saves the report as a standalone HTML file as a fallback.
 pub fn generate_pdf_report(
-    filename: &PathBuf,
+    filename: &Path,
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult,
     out_path: &str,
 ) -> Result<()> {
     let heatmap_svg_content = generate_entropy_heatmap_svg(&analysis_result.section_entropy);
-    let has_heatmap = heatmap_svg_content.trim().len() > 0;
+    let has_heatmap = !heatmap_svg_content.trim().is_empty();
 
     let severity_class = match assessment.severity.to_lowercase().as_str() {
         "malicious" => "malicious",
@@ -181,6 +193,7 @@ pub fn generate_pdf_report(
     }
 }
 
+/// Uses the `fullbleed` engine to render an HTML report into a PDF buffer.
 fn generate_pdf_from_html(html: &str, out_path: &str) -> Result<()> {
     use fullbleed::FullBleed;
 

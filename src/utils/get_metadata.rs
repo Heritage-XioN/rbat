@@ -1,8 +1,8 @@
 use crate::rbat::{BinaryMetadata, RbatError, Result};
 use goblin::Object;
-use std::{fs, path::PathBuf};
+use std::{fs, path::Path};
 
-pub fn get_binary_metadata(path: &PathBuf) -> Result<BinaryMetadata> {
+pub fn get_binary_metadata(path: &Path) -> Result<BinaryMetadata> {
     let buffer = fs::read(path)?;
 
     match Object::parse(&buffer)? {

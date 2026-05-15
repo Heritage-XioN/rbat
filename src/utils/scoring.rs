@@ -1,6 +1,14 @@
 use crate::rbat::{Confidence, Finding, RiskAssessment};
 use std::{cmp, collections::HashMap};
 
+/// Calculates a final risk score (0-100) based on multiple security heuristics.
+///
+/// The scoring system weights different findings based on their severity and confidence:
+/// - **Entropy**: Critical weight (40+) for high entropy (.text sections >= 7.5).
+/// - **Network Indicators**: High weight (25) for multiple C2-like strings.
+/// - **Process Injection**: Cumulative weight for suspicious API imports.
+/// - **Evasion**: High weight (35) for detected code caves (NOP sleds).
+/// - **Packers**: Critical weight (45) for known packer signature matches.
 pub fn calculate_risk(
     section_entropy: &HashMap<String, f64>,
     network_indicators: usize,
@@ -13,7 +21,8 @@ pub fn calculate_risk(
     let mut findings: Vec<Finding> = Vec::new();
 
     // Heuristic 1: Section Entropy (Focus on .text / executable sections)
-    let text_entropy = section_entropy.get(".text")
+    let text_entropy = section_entropy
+        .get(".text")
         .or_else(|| section_entropy.get("__text"))
         .or_else(|| section_entropy.get("CODE"))
         .cloned()
@@ -52,8 +61,15 @@ pub fn calculate_risk(
         score += weight;
         findings.push(Finding {
             indicator: "Network Indicators".to_string(),
-            description: format!("Detected {} network-related strings (URLs, IPs, C2 patterns).", network_indicators),
-            confidence: if network_indicators > 3 { Confidence::High } else { Confidence::Low },
+            description: format!(
+                "Detected {} network-related strings (URLs, IPs, C2 patterns).",
+                network_indicators
+            ),
+            confidence: if network_indicators > 3 {
+                Confidence::High
+            } else {
+                Confidence::Low
+            },
             weight,
         });
     }
@@ -64,7 +80,10 @@ pub fn calculate_risk(
         score += weight;
         findings.push(Finding {
             indicator: "Process Injection APIs".to_string(),
-            description: format!("Binary imports {} APIs often used for process injection or memory manipulation.", process_injection),
+            description: format!(
+                "Binary imports {} APIs often used for process injection or memory manipulation.",
+                process_injection
+            ),
             confidence: Confidence::High,
             weight,
         });
@@ -75,7 +94,10 @@ pub fn calculate_risk(
         score += weight;
         findings.push(Finding {
             indicator: "Suspicious API Hooks".to_string(),
-            description: format!("Detected {} suspicious exported functions or API hooking patterns.", suspicious_apis),
+            description: format!(
+                "Detected {} suspicious exported functions or API hooking patterns.",
+                suspicious_apis
+            ),
             confidence: Confidence::Medium,
             weight,
         });
@@ -86,7 +108,9 @@ pub fn calculate_risk(
         score += 35;
         findings.push(Finding {
             indicator: "Code Caves".to_string(),
-            description: "Large blocks of executable null bytes detected. Potential payload injection site.".to_string(),
+            description:
+                "Large blocks of executable null bytes detected. Potential payload injection site."
+                    .to_string(),
             confidence: Confidence::High,
             weight: 35,
         });
@@ -123,18 +147,26 @@ pub fn calculate_risk(
     }
 }
 
+/// Generates high-level recommendations for security analysts based on the final risk score.
 fn generate_recommendations(score: u32) -> Vec<String> {
     let mut recs = Vec::new();
 
     if score < 26 {
         recs.push("No immediate threat detected. Standard execution is permissible.".to_string());
     } else if score < 61 {
-        recs.push("Flagged for manual review. Do not execute in a production environment.".to_string());
+        recs.push(
+            "Flagged for manual review. Do not execute in a production environment.".to_string(),
+        );
         recs.push("Submit binary hash to VirusTotal for community correlation.".to_string());
     } else {
         recs.push("IMMEDIATE QUARANTINE REQUIRED.".to_string());
-        recs.push("Execute strictly within a heavily monitored, isolated sandbox environment.".to_string());
-        recs.push("Extract and block all associated network IOCs at the firewall level.".to_string());
+        recs.push(
+            "Execute strictly within a heavily monitored, isolated sandbox environment."
+                .to_string(),
+        );
+        recs.push(
+            "Extract and block all associated network IOCs at the firewall level.".to_string(),
+        );
     }
 
     recs
@@ -169,8 +201,6 @@ mod tests {
         let mut entropy = HashMap::new();
         entropy.insert(".text".to_string(), 6.9);
         let assessment = calculate_risk(&entropy, 1, 0, 0, false, false);
-        // 15 (entropy) + 10 (network) = 25
-        // Wait, 25 is still "Safe" according to 0..=25
         assert_eq!(assessment.score, 25);
         assert_eq!(assessment.severity, "Safe");
     }

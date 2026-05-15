@@ -9,10 +9,14 @@ pub fn generate_entropy_heatmap_svg(data: &HashMap<String, f64>) -> String {
     sections.sort_by(|a, b| a.0.cmp(&b.0));
 
     if sections.is_empty() {
-        return String::from("<p style='color: #666; text-align: center;'>No section data available</p>");
+        return String::from(
+            "<p style='color: #666; text-align: center;'>No section data available</p>",
+        );
     }
 
-    let mut html = String::from("<table style=\"width: 100%; border-collapse: separate; border-spacing: 10px; margin: 0 auto;\">");
+    let mut html = String::from(
+        "<table style=\"width: 100%; border-collapse: separate; border-spacing: 10px; margin: 0 auto;\">",
+    );
 
     // Draw each section cell in rows of 6
     for chunk in sections.chunks(6) {
@@ -20,7 +24,11 @@ pub fn generate_entropy_heatmap_svg(data: &HashMap<String, f64>) -> String {
         for (name, entropy) in chunk {
             let normalized = (entropy / 8.0).clamp(0.0, 1.0);
             let color_hex = entropy_to_hex(normalized);
-            let text_color = if normalized > 0.6 { "#ffffff" } else { "#000000" };
+            let text_color = if normalized > 0.6 {
+                "#ffffff"
+            } else {
+                "#000000"
+            };
 
             html.push_str(&format!(
                 "<td style=\"background-color: {} !important; width: 16%; padding: 15px 5px; border: 1px solid #dddddd; border-radius: 4px; text-align: center; vertical-align: middle;\">
@@ -30,7 +38,7 @@ pub fn generate_entropy_heatmap_svg(data: &HashMap<String, f64>) -> String {
                 color_hex, text_color, entropy, name
             ));
         }
-        
+
         // Fill remaining cells in the row if necessary
         if chunk.len() < 6 {
             for _ in 0..(6 - chunk.len()) {
@@ -44,7 +52,7 @@ pub fn generate_entropy_heatmap_svg(data: &HashMap<String, f64>) -> String {
     // Legend
     html.push_str("<div style=\"margin-top: 30px; text-align: center;\">");
     html.push_str("<table style=\"margin: 0 auto; border-collapse: collapse;\"><tr>");
-    
+
     let num_stops = 20;
     for i in 0..num_stops {
         let normalized = i as f64 / num_stops as f64;
@@ -54,14 +62,14 @@ pub fn generate_entropy_heatmap_svg(data: &HashMap<String, f64>) -> String {
             color_hex
         ));
     }
-    
+
     html.push_str("</tr></table>");
-    
+
     html.push_str("<div style=\"width: 300px; margin: 5px auto 0; font-size: 10px; color: #666666; display: flex; justify-content: space-between;\">
         <span>0.0 (Low)</span>
         <span style=\"margin-left: 190px;\">8.0 (High)</span>
     </div>");
-    
+
     html.push_str("<div style=\"font-size: 10px; color: #999999; margin-top: 10px;\">Entropy Heatmap: Packed or encrypted data spikes toward 8.0</div>");
     html.push_str("</div>");
 

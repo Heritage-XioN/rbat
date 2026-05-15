@@ -1,6 +1,6 @@
 use crate::rbat::{cli::Cli, tui::App};
 use crate::utils::pdf::generate_pdf_report;
-use crate::utils::{analyzer::analyzer, csv::generate_csv_report};
+use crate::utils::{analyzer::analyzer, csv::generate_csv_report, json::generate_json_report};
 use clap::Parser;
 use color_eyre::Result;
 
@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     }
 
     if cli.json {
-        println!("json output")
+        generate_json_report(&cli.path, &risk_assessment, &analysis_result, "report.json")?;
     }
 
     if cli.tui {
