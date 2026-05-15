@@ -34,6 +34,12 @@ RBAT is designed not just as a tool, but as a reference for learning binary inte
 
 ## 🛠️ Installation
 
+### From Crates.io (Recommended)
+```bash
+cargo install rbat
+```
+
+### From Source
 ```bash
 # Clone the repository
 git clone https://github.com/Heritage-XioN/rbat.git
