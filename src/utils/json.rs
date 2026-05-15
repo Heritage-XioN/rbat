@@ -3,7 +3,9 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-/// Generates a comprehensive JSON report of the analysis findings and risk assessment.
+/// Generates a comprehensive JSON report containing all raw analysis details and the final risk assessment.
+///
+/// This format is ideal for integration into automated security pipelines or custom visualization tools.
 pub fn generate_json_report(
     _filename: &Path,
     assessment: &RiskAssessment,

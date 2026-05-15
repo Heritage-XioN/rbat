@@ -1,6 +1,14 @@
 use crate::rbat::{Confidence, Finding, RiskAssessment};
 use std::{cmp, collections::HashMap};
 
+/// Calculates a final risk score (0-100) based on multiple security heuristics.
+///
+/// The scoring system weights different findings based on their severity and confidence:
+/// - **Entropy**: Critical weight (40+) for high entropy (.text sections >= 7.5).
+/// - **Network Indicators**: High weight (25) for multiple C2-like strings.
+/// - **Process Injection**: Cumulative weight for suspicious API imports.
+/// - **Evasion**: High weight (35) for detected code caves (NOP sleds).
+/// - **Packers**: Critical weight (45) for known packer signature matches.
 pub fn calculate_risk(
     section_entropy: &HashMap<String, f64>,
     network_indicators: usize,
@@ -139,6 +147,7 @@ pub fn calculate_risk(
     }
 }
 
+/// Generates high-level recommendations for security analysts based on the final risk score.
 fn generate_recommendations(score: u32) -> Vec<String> {
     let mut recs = Vec::new();
 

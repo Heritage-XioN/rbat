@@ -80,6 +80,26 @@ RBAT follows a modular pipeline architecture:
     - **TUI**: Provides a stateful, interactive dashboard.
     - **Reporters**: Uses `askama` templates and `fullbleed` to generate design-compliant documents.
 
+## 📂 Project Structure
+
+```text
+rbat/
+├── assets/             # Embedded YARA rules and suspicious pattern blacklists
+├── src/
+│   ├── main.rs         # Entry point and CLI orchestration
+│   ├── rbat/           # Core library components
+│   │   ├── parser.rs   # Binary format parsing (ELF/PE/Mach-O)
+│   │   ├── tui.rs      # Ratatui-based interactive dashboard
+│   │   └── ...
+│   └── utils/          # Analysis and reporting utilities
+│       ├── analyzer.rs # Analysis pipeline orchestration
+│       ├── scoring.rs  # Risk assessment heuristic engine
+│       ├── pdf.rs      # Askama/Fullbleed PDF reporting
+│       └── ...
+├── templates/          # HTML/CSS templates for generated reports
+└── tests/              # Integration tests and binary generation helpers
+```
+
 ## 🛡️ Security Considerations
 
 - **Static Only**: RBAT performs static analysis. It does **not** execute the target binary, making it safe to use on unknown or potentially malicious files.

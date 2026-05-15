@@ -8,15 +8,20 @@ use std::{
 
 use super::{DisasmType, MapValue, RbatError, Result};
 
-/// a struct to hold the parsed binary data and provide methods for analysis.
+/// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
+/// It holds the raw binary buffer and the parsed object from the `goblin` crate.
 #[derive(Debug)]
 pub struct Parser<'bin> {
+    /// Reference to the path of the binary being analyzed.
     bin_path: &'bin Path,
+    /// Raw bytes of the binary.
     buffer: Vec<u8>,
+    /// The parsed object representation.
     binary_object: Object<'bin>,
 }
 
 impl<'bin> Parser<'bin> {
+    /// Creates a new `Parser` instance.
     pub fn new(bin_path: &'bin Path, buffer: Vec<u8>, binary_object: Object<'bin>) -> Self {
         Parser {
             bin_path,
@@ -25,6 +30,9 @@ impl<'bin> Parser<'bin> {
         }
     }
 
+    /// Evaluates the Shannon entropy for each section of the binary.
+    ///
+    /// This is useful for identifying packed or encrypted sections where entropy is typically high (>= 7.5).
     pub fn evaluate_section_entropy(&self) -> Result<HashMap<String, f64>> {
         let mut section_entropy: HashMap<String, f64> = HashMap::new();
 
@@ -92,6 +100,8 @@ impl<'bin> Parser<'bin> {
         Ok(section_entropy)
     }
 
+    /// Extracts essential metadata from the binary buffer, including the target OS type,
+    /// entry point address, and raw executable bytes for disassembly.
     pub fn parse_buffer(&self) -> Result<HashMap<String, MapValue>> {
         match &self.binary_object {
             Object::Elf(elf) => {
@@ -128,7 +138,8 @@ impl<'bin> Parser<'bin> {
                         if let (Some(name), Some(end)) = (
                             elf.shdr_strtab.get_at(sh.sh_name),
                             (sh.sh_offset as usize).checked_add(sh.sh_size as usize),
-                        ) && name == ".text"
+                        )
+                            && name == ".text"
                         {
                             let start = sh.sh_offset as usize;
                             let text_bytes = self.buffer.get(start..end).ok_or_else(|| {
@@ -273,6 +284,8 @@ impl<'bin> Parser<'bin> {
         }
     }
 
+    /// Scans for suspicious functions related to process injection, memory manipulation,
+    /// or dynamic code loading across ELF, PE, and Mach-O binaries.
     pub fn check_process_injec(&self) -> Result<HashSet<String>> {
         let blacklist = get_txt_from_file("blacklisted_process_injec.txt")?;
         let mut sus_func: HashSet<String> = HashSet::new();
@@ -346,6 +359,9 @@ impl<'bin> Parser<'bin> {
         }
     }
 
+    /// Detects potential API hooking activity by scanning for exported functions and known hooking patterns.
+    ///
+    /// Combines static symbol table analysis with a YARA scan for specific code signatures.
     pub fn detect_api_hooking(&self) -> Result<HashMap<String, u64>> {
         use crate::rbat::yarahandler::YaraHandler;
         let mut api_hooking_func: HashMap<String, u64> = HashMap::new();

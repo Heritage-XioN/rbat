@@ -11,8 +11,15 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// the main analyzer function that dynamically detects binary environment
-/// and processes it accordingly.
+/// The primary entry point for the analysis pipeline.
+///
+/// This function orchestrates the entire static analysis flow:
+/// 1. Extracts basic file metadata.
+/// 2. Performs YARA scanning for suspicious strings and packer signatures.
+/// 3. Parses the binary format (ELF/PE/Mach-O) for executable code.
+/// 4. Disassembles executable sections to identify code caves and blacklisted instructions.
+/// 5. Detects API hooking and process injection patterns.
+/// 6. Calculates a final risk score based on all aggregated findings.
 pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
     let metadata = get_binary_metadata(bin_path)?;
     let string_eva = YaraHandler::new("suspicious_strings.yar".to_owned());
@@ -111,9 +118,10 @@ pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::tempdir;
+
     use super::*;
     use crate::utils::test_helpers::test_helpers;
-    use tempfile::tempdir;
 
     #[test]
     fn test_analyzer_full_elf() {

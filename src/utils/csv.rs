@@ -2,6 +2,10 @@ use crate::rbat::{Result, RiskAssessment};
 use csv::Writer;
 use std::path::Path;
 
+/// Generates a SOC-ready CSV report of the analysis findings.
+///
+/// This format is optimized for ingestion into SIEM or other security orchestration tools.
+/// Each finding is exported as an individual row with its associated risk score and severity.
 pub fn generate_csv_report(
     filename: &Path,
     assessment: &RiskAssessment,
