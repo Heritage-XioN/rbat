@@ -1,6 +1,7 @@
 use super::{AnalysisResult, Confidence, RiskAssessment};
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
+    DefaultTerminal, Frame,
     buffer::Buffer,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -9,7 +10,6 @@ use ratatui::{
         Block, Cell, Gauge, List, ListItem, ListState, Padding, Paragraph, Row, Table, TableState,
         Tabs, Widget,
     },
-    DefaultTerminal, Frame,
 };
 use std::io;
 
@@ -286,7 +286,8 @@ impl App {
         .split(area);
 
         // Column 1: Target Info & Risk Gauge
-        let left_chunks = Layout::vertical([Constraint::Length(10), Constraint::Min(0)]).split(chunks[0]);
+        let left_chunks =
+            Layout::vertical([Constraint::Length(10), Constraint::Min(0)]).split(chunks[0]);
 
         let metadata = &self.analysis_result.metadata;
         let info_items = vec![
@@ -296,7 +297,10 @@ impl App {
             ])),
             ListItem::new(Line::from(vec![
                 Span::raw(" ARCH: "),
-                Span::styled(metadata.architecture.to_string(), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    metadata.architecture.to_string(),
+                    Style::default().fg(Color::Cyan),
+                ),
             ])),
             ListItem::new(Line::from(vec![
                 Span::raw(" ENTRY: "),
@@ -355,9 +359,7 @@ impl App {
             [Constraint::Percentage(70), Constraint::Percentage(30)],
         )
         .block(Block::bordered().title(" SECTION ENTROPY "))
-        .header(
-            Row::new(vec!["Section", "H"]).style(Style::default().add_modifier(Modifier::BOLD)),
-        )
+        .header(Row::new(vec!["Section", "H"]).style(Style::default().add_modifier(Modifier::BOLD)))
         .render(chunks[1], buf);
 
         // Column 3: Top Findings
@@ -396,26 +398,47 @@ impl App {
         // Combine all security findings into one list for unified scrolling
         for (rule, matches) in &self.analysis_result.packer_signatures {
             items.push(ListItem::new(Line::from(vec![
-                Span::styled("PACKER: ", Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "PACKER: ",
+                    Style::default()
+                        .fg(Color::LightRed)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(format!("{} ({} matches)", rule, matches.len())),
             ])));
         }
         for (rule, matches) in &self.analysis_result.string_values {
             items.push(ListItem::new(Line::from(vec![
-                Span::styled("YARA: ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "YARA: ",
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(format!("{} ({} matches)", rule, matches.len())),
             ])));
         }
         for (api, addr) in &self.analysis_result.api_hooking {
             items.push(ListItem::new(Line::from(vec![
-                Span::styled("HOOK: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "HOOK: ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(api),
-                Span::styled(format!(" @ 0x{:X}", addr), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!(" @ 0x{:X}", addr),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ])));
         }
         for func in &self.analysis_result.process_injection {
             items.push(ListItem::new(Line::from(vec![
-                Span::styled("INJECT: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "INJECT: ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(func),
             ])));
         }
@@ -510,5 +533,46 @@ impl App {
 impl Widget for &App {
     fn render(self, _area: Rect, _buf: &mut Buffer) {
         // Compatibility method
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tab_navigation() {
+        let tab = Tab::Overview;
+        let next = tab.next();
+        assert_eq!(next, Tab::Security);
+        let prev = next.prev();
+        assert_eq!(prev, Tab::Overview);
+
+        assert_eq!(Tab::Advice.next(), Tab::Overview);
+        assert_eq!(Tab::Overview.prev(), Tab::Advice);
+    }
+
+    #[test]
+    fn test_app_initial_state() {
+        let app = App::new(AnalysisResult::default(), RiskAssessment::default());
+        assert_eq!(app.current_tab, Tab::Overview);
+        assert_eq!(app.overview_state.selected(), Some(0));
+        assert_eq!(app.security_state.selected(), Some(0));
+        assert_eq!(app.entropy_state.selected(), Some(0));
+        assert_eq!(app.advice_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_app_next_item_wrap() {
+        let mut app = App::new(AnalysisResult::default(), RiskAssessment::default());
+
+        // Overview tab with no findings
+        app.next_item();
+        assert_eq!(app.overview_state.selected(), Some(0));
+
+        // Switch to Security tab
+        app.current_tab = Tab::Security;
+        app.next_item();
+        assert_eq!(app.security_state.selected(), Some(0));
     }
 }

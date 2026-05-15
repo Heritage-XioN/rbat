@@ -120,6 +120,32 @@ impl<'path> Parser<'path> {
                 }
 
                 if !binary_data.contains_key("text_bytes") {
+                    for sh in &elf.section_headers {
+                        if let Some(name) = elf.shdr_strtab.get_at(sh.sh_name) {
+                            if name == ".text" {
+                                let start = sh.sh_offset as usize;
+                                let size = sh.sh_size as usize;
+                                let end = start.checked_add(size).ok_or_else(|| {
+                                    RbatError::InvalidBinaryLayout(
+                                        "Executable section offset overflowed file bounds".to_string(),
+                                    )
+                                })?;
+                                let text_bytes = buffer.get(start..end).ok_or_else(|| {
+                                    RbatError::InvalidBinaryLayout(format!(
+                                        "Executable section range {start}..{end} is outside file bounds"
+                                    ))
+                                })?;
+                                binary_data.insert(
+                                    "text_bytes".to_string(),
+                                    MapValue::Bytes(text_bytes.to_vec()),
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if !binary_data.contains_key("text_bytes") {
                     return Err(RbatError::MissingExecutableSection);
                 }
                 Ok(binary_data)
@@ -392,5 +418,55 @@ impl<'path> Parser<'path> {
         }
 
         Ok(api_hooking_func)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::test_helpers::test_helpers;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_evaluate_section_entropy_elf() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_elf");
+        test_helpers::generate_elf(&path);
+
+        let parser = Parser::new(&path);
+        let result = parser.evaluate_section_entropy();
+        assert!(result.is_ok());
+        let entropy = result.unwrap();
+        assert!(entropy.contains_key(".text"));
+    }
+
+    #[test]
+    fn test_parse_buffer_elf() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_elf");
+        test_helpers::generate_elf(&path);
+
+        let parser = Parser::new(&path);
+        let result = parser.parse_buffer();
+        match result {
+            Ok(data) => {
+                assert!(data.contains_key("os"));
+                assert!(data.contains_key("text_bytes"));
+            }
+            Err(e) => panic!("parse_buffer failed with: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_evaluate_section_entropy_macho() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_macho");
+        test_helpers::generate_macho(&path);
+
+        let parser = Parser::new(&path);
+        let result = parser.evaluate_section_entropy();
+        assert!(result.is_ok());
+        let entropy = result.unwrap();
+        assert!(entropy.contains_key("__text"));
     }
 }

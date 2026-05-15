@@ -11,14 +11,15 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     // parses terminal arguments!
     let cli = Cli::parse();
-    let (analysis_result, assessment) = analyzer(&cli.path)?;
+
+    let (analysis_result, risk_assessment) = analyzer(&cli.path)?;
 
     if cli.pdf {
-        generate_pdf_report(&cli.path, &assessment, &analysis_result, "report.pdf")?;
+        generate_pdf_report(&cli.path, &risk_assessment, &analysis_result, "report.pdf")?;
     }
 
     if cli.csv {
-        generate_csv_report(&cli.path, &assessment, "result.csv")?
+        generate_csv_report(&cli.path, &risk_assessment, "report.csv")?;
     }
 
     if cli.json {
@@ -26,7 +27,7 @@ fn main() -> Result<()> {
     }
 
     if cli.tui {
-        ratatui::run(|terminal| App::new(analysis_result, assessment.clone()).run(terminal))?;
+        ratatui::run(|terminal| App::new(analysis_result, risk_assessment.clone()).run(terminal))?;
     }
 
     Ok(())
