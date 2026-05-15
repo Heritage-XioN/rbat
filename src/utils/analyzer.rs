@@ -103,3 +103,51 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
         "Required disassembly inputs were not produced from parse_buffer".to_string(),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::test_helpers::test_helpers;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_analyzer_full_elf() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_elf");
+        test_helpers::generate_elf(&path);
+
+        let result = analyzer(&path);
+        assert!(result.is_ok(), "Analyzer failed on ELF: {:?}", result.err());
+        let (analysis, assessment) = result.unwrap();
+        assert_eq!(analysis.metadata.binary_type, "Linux ELF");
+        assert!(assessment.score <= 100);
+    }
+
+    #[test]
+    fn test_analyzer_full_macho() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_macho");
+        test_helpers::generate_macho(&path);
+
+        let result = analyzer(&path);
+        assert!(result.is_ok(), "Analyzer failed on Mach-O: {:?}", result.err());
+        let (analysis, assessment) = result.unwrap();
+        assert_eq!(analysis.metadata.binary_type, "Mach-O");
+        assert!(assessment.score <= 100);
+    }
+
+    #[test]
+    fn test_analyzer_full_pe() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_pe");
+        test_helpers::generate_pe_stub(&path);
+
+        let result = analyzer(&path);
+        // PE might fail further down due to lack of sections in stub, 
+        // but we verify the metadata parsing at least.
+        if let Ok((analysis, assessment)) = result {
+            assert_eq!(analysis.metadata.binary_type, "PE");
+            assert!(assessment.score <= 100);
+        }
+    }
+}

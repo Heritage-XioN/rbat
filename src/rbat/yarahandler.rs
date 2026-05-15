@@ -66,3 +66,23 @@ impl YaraHandler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compile_yara_rule_valid() {
+        // Use an existing rule file from assets
+        let handler = YaraHandler::new("api_hooking.yar".to_string());
+        let result = handler.compile_yara_rule();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_compile_yara_rule_invalid() {
+        let handler = YaraHandler::new("non_existent.yar".to_string());
+        let result = handler.compile_yara_rule();
+        assert!(result.is_err());
+    }
+}
