@@ -9,20 +9,20 @@ use crate::utils::{
 };
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// the main analyzer function that dynamically detects binary environment
 /// and processes it accordingly.
-pub fn analyzer(bin_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)> {
-    let metadata = get_binary_metadata(&bin_path)?;
+pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
+    let metadata = get_binary_metadata(bin_path)?;
     let string_eva = YaraHandler::new("suspicious_strings.yar".to_owned());
     let rules = string_eva.compile_yara_rule()?;
-    let string_eva_res = string_eva.scan_file(rules, &bin_path)?;
+    let string_eva_res = string_eva.scan_file(rules, bin_path)?;
 
     // Packer signature detection
     let packer_eva = YaraHandler::new("packer_signatures.yar".to_owned());
     let packer_rules = packer_eva.compile_yara_rule()?;
-    let packer_results = packer_eva.scan_file(packer_rules, &bin_path)?;
+    let packer_results = packer_eva.scan_file(packer_rules, bin_path)?;
 
     let buffer = fs::read(bin_path)?;
     let binary_object = Object::parse(&buffer)?;
@@ -44,9 +44,9 @@ pub fn analyzer(bin_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)> 
         binary_data.get("entry_addr"),
     ) {
         let factory = match os {
-            DisasmType::LinuxDisasm => Factory::disasm(DisasmType::LinuxDisasm),
-            DisasmType::WinDisasm => Factory::disasm(DisasmType::WinDisasm),
-            DisasmType::MacDisasm => Factory::disasm(DisasmType::MacDisasm),
+            DisasmType::Linux => Factory::disasm(DisasmType::Linux),
+            DisasmType::Win => Factory::disasm(DisasmType::Win),
+            DisasmType::Mac => Factory::disasm(DisasmType::Mac),
         };
         let cs = factory.disassemble()?;
         let instructions = cs.disasm_all(bytes, *entry_addr)?;

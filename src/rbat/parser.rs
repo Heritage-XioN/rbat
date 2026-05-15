@@ -3,7 +3,7 @@ use crate::utils::get_txt::get_txt_from_file;
 use goblin::Object;
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    path::Path,
 };
 
 use super::{DisasmType, MapValue, RbatError, Result};
@@ -11,13 +11,13 @@ use super::{DisasmType, MapValue, RbatError, Result};
 /// a struct to hold the parsed binary data and provide methods for analysis.
 #[derive(Debug)]
 pub struct Parser<'bin> {
-    bin_path: &'bin PathBuf,
+    bin_path: &'bin Path,
     buffer: Vec<u8>,
     binary_object: Object<'bin>,
 }
 
 impl<'bin> Parser<'bin> {
-    pub fn new(bin_path: &'bin PathBuf, buffer: Vec<u8>, binary_object: Object<'bin>) -> Self {
+    pub fn new(bin_path: &'bin Path, buffer: Vec<u8>, binary_object: Object<'bin>) -> Self {
         Parser {
             bin_path,
             buffer,
@@ -57,11 +57,11 @@ impl<'bin> Parser<'bin> {
                 goblin::mach::Mach::Binary(macho) => {
                     for segment in &macho.segments {
                         for (section, section_data) in segment.into_iter().flatten() {
-                            if let Ok(name) = section.name() {
-                                if !section_data.is_empty() {
-                                    section_entropy
-                                        .insert(name.to_string(), calculate_entropy(&section_data));
-                                }
+                            if let Ok(name) = section.name()
+                                && !section_data.is_empty()
+                            {
+                                section_entropy
+                                    .insert(name.to_string(), calculate_entropy(section_data));
                             }
                         }
                     }
@@ -71,13 +71,13 @@ impl<'bin> Parser<'bin> {
                         if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
                             for segment in &macho.segments {
                                 for (section, section_data) in segment.into_iter().flatten() {
-                                    if let Ok(name) = section.name() {
-                                        if !section_data.is_empty() {
-                                            section_entropy.insert(
-                                                name.to_string(),
-                                                calculate_entropy(&section_data),
-                                            );
-                                        }
+                                    if let Ok(name) = section.name()
+                                        && !section_data.is_empty()
+                                    {
+                                        section_entropy.insert(
+                                            name.to_string(),
+                                            calculate_entropy(section_data),
+                                        );
                                     }
                                 }
                             }
@@ -96,7 +96,7 @@ impl<'bin> Parser<'bin> {
         match &self.binary_object {
             Object::Elf(elf) => {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
-                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::LinuxDisasm));
+                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::Linux));
                 binary_data.insert("entry_addr".to_string(), MapValue::Word(elf.entry));
 
                 for ph in &elf.program_headers {
@@ -125,27 +125,23 @@ impl<'bin> Parser<'bin> {
 
                 if !binary_data.contains_key("text_bytes") {
                     for sh in &elf.section_headers {
-                        if let Some(name) = elf.shdr_strtab.get_at(sh.sh_name) {
-                            if name == ".text" {
-                                let start = sh.sh_offset as usize;
-                                let size = sh.sh_size as usize;
-                                let end = start.checked_add(size).ok_or_else(|| {
-                                    RbatError::InvalidBinaryLayout(
-                                        "Executable section offset overflowed file bounds"
-                                            .to_string(),
-                                    )
-                                })?;
-                                let text_bytes = self.buffer.get(start..end).ok_or_else(|| {
-                                    RbatError::InvalidBinaryLayout(format!(
-                                        "Executable section range {start}..{end} is outside file bounds"
-                                    ))
-                                })?;
-                                binary_data.insert(
-                                    "text_bytes".to_string(),
-                                    MapValue::Bytes(text_bytes.to_vec()),
-                                );
-                                break;
-                            }
+                        if let (Some(name), Some(end)) = (
+                            elf.shdr_strtab.get_at(sh.sh_name),
+                            (sh.sh_offset as usize).checked_add(sh.sh_size as usize),
+                        )
+                            && name == ".text"
+                        {
+                            let start = sh.sh_offset as usize;
+                            let text_bytes = self.buffer.get(start..end).ok_or_else(|| {
+                                RbatError::InvalidBinaryLayout(format!(
+                                    "Executable section range {start}..{end} is outside file bounds"
+                                ))
+                            })?;
+                            binary_data.insert(
+                                "text_bytes".to_string(),
+                                MapValue::Bytes(text_bytes.to_vec()),
+                            );
+                            break;
                         }
                     }
                 }
@@ -157,14 +153,14 @@ impl<'bin> Parser<'bin> {
             }
             Object::PE(pe) => {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
-                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::WinDisasm));
+                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::Win));
                 binary_data.insert(
                     "entry_addr".to_string(),
                     MapValue::Word(pe.image_base + pe.entry as u64),
                 );
 
                 const IMAGE_SCN_MEM_EXECUTE: u32 = 0x20000000;
-                let entry_rva = pe.entry as u32;
+                let entry_rva = pe.entry;
                 let executable_section = pe
                     .sections
                     .iter()
@@ -208,7 +204,7 @@ impl<'bin> Parser<'bin> {
             }
             Object::Mach(mach) => {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
-                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::MacDisasm));
+                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::Mac));
 
                 match mach {
                     goblin::mach::Mach::Binary(macho) => {
@@ -286,12 +282,11 @@ impl<'bin> Parser<'bin> {
             Object::Elf(elf) => {
                 // For ELF, check dynamic symbols that are imported (st_shndx == 0)
                 for dy in &elf.dynsyms {
-                    if dy.st_shndx == 0 {
-                        if let Some(name) = elf.dynstrtab.get_at(dy.st_name) {
-                            if blacklist.contains(&name.to_string()) {
-                                sus_func.insert(name.to_owned());
-                            }
-                        }
+                    if dy.st_shndx == 0
+                        && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
+                        && blacklist.contains(&name.to_string())
+                    {
+                        sus_func.insert(name.to_owned());
                     }
                 }
                 Ok(sus_func)
@@ -325,18 +320,16 @@ impl<'bin> Parser<'bin> {
                         }
                     }
 
-                    for symbol in macho.symbols() {
-                        if let Ok((name, nlist)) = symbol {
-                            if nlist.is_undefined() && matches_blacklist(name) {
-                                sus_func.insert(name.to_string());
-                            }
+                    for (name, nlist) in macho.symbols().flatten() {
+                        if nlist.is_undefined() && matches_blacklist(name) {
+                            sus_func.insert(name.to_string());
                         }
                     }
                     Ok(())
                 };
 
                 match mach {
-                    goblin::mach::Mach::Binary(macho) => collect_from_macho(&macho)?,
+                    goblin::mach::Mach::Binary(macho) => collect_from_macho(macho)?,
                     goblin::mach::Mach::Fat(fat) => {
                         for arch in fat {
                             if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
@@ -362,13 +355,12 @@ impl<'bin> Parser<'bin> {
         match &self.binary_object {
             Object::Elf(elf) => {
                 for dy in &elf.dynsyms {
-                    if dy.st_shndx > 0 {
-                        if let Some(name) = elf.dynstrtab.get_at(dy.st_name) {
-                            // Only flag if it's a known hooking-related name or suspicious export
-                            if blacklist.iter().any(|b| name.contains(b)) {
-                                api_hooking_func.insert(name.to_owned(), dy.st_value);
-                            }
-                        }
+                    if dy.st_shndx > 0
+                        && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
+                        && blacklist.iter().any(|b| name.contains(b))
+                    {
+                        // Only flag if it's a known hooking-related name or suspicious export
+                        api_hooking_func.insert(name.to_owned(), dy.st_value);
                     }
                 }
             }
@@ -384,17 +376,18 @@ impl<'bin> Parser<'bin> {
             Object::Mach(mach) => {
                 let mut collect_from_macho = |macho: &goblin::mach::MachO<'_>| -> Result<()> {
                     for (name, symbol) in macho.symbols().flatten() {
-                        if symbol.is_global() && !symbol.is_undefined() {
-                            if blacklist.iter().any(|b| name.contains(b)) {
-                                api_hooking_func.insert(name.to_string(), symbol.n_value);
-                            }
+                        if symbol.is_global()
+                            && !symbol.is_undefined()
+                            && blacklist.iter().any(|b| name.contains(b))
+                        {
+                            api_hooking_func.insert(name.to_string(), symbol.n_value);
                         }
                     }
                     Ok(())
                 };
 
                 match mach {
-                    goblin::mach::Mach::Binary(macho) => collect_from_macho(&macho)?,
+                    goblin::mach::Mach::Binary(macho) => collect_from_macho(macho)?,
                     goblin::mach::Mach::Fat(fat) => {
                         for arch in fat {
                             if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
@@ -409,13 +402,13 @@ impl<'bin> Parser<'bin> {
 
         // Supplement with YARA scan for patterns and strings
         let yara = YaraHandler::new("api_hooking.yar".to_owned());
-        if let Ok(rules) = yara.compile_yara_rule() {
-            if let Ok(matches) = yara.scan_file(rules, self.bin_path) {
-                for (rule_name, instances) in matches {
-                    for m in instances {
-                        let key = format!("{}:{}", rule_name, m.data);
-                        api_hooking_func.entry(key).or_insert(m.offset as u64);
-                    }
+        if let Ok(rules) = yara.compile_yara_rule()
+            && let Ok(matches) = yara.scan_file(rules, self.bin_path)
+        {
+            for (rule_name, instances) in matches {
+                for m in instances {
+                    let key = format!("{}:{}", rule_name, m.data);
+                    api_hooking_func.entry(key).or_insert(m.offset as u64);
                 }
             }
         }

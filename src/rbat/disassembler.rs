@@ -18,9 +18,9 @@ pub struct MacDisasm;
 pub struct Factory;
 
 pub enum DisasmType {
-    WinDisasm,
-    LinuxDisasm,
-    MacDisasm,
+    Win,
+    Linux,
+    Mac,
 }
 
 impl Disassembler for WinDisasm {
@@ -64,9 +64,9 @@ impl Disassembler for MacDisasm {
 impl Factory {
     pub fn disasm(disasm_type: DisasmType) -> Box<dyn Disassembler> {
         match disasm_type {
-            DisasmType::WinDisasm => Box::new(WinDisasm),
-            DisasmType::LinuxDisasm => Box::new(LinuxDisasm),
-            DisasmType::MacDisasm => Box::new(MacDisasm),
+            DisasmType::Win => Box::new(WinDisasm),
+            DisasmType::Linux => Box::new(LinuxDisasm),
+            DisasmType::Mac => Box::new(MacDisasm),
         }
     }
 }

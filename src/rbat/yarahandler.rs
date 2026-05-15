@@ -1,6 +1,6 @@
 use super::{Asset, RbatError, Result, YaraMatches};
 use crate::utils::section_offset::get_section_for_offset;
-use std::path::PathBuf;
+use std::path::Path;
 use std::{collections::HashMap, fs};
 use yara::{Compiler, Rules};
 
@@ -30,7 +30,7 @@ impl YaraHandler {
     pub fn scan_file(
         &self,
         compiled_rules: Rules,
-        scan_file: &PathBuf,
+        scan_file: &Path,
     ) -> Result<HashMap<String, Vec<YaraMatches>>> {
         let mut scanner = compiled_rules.scanner()?;
         let results = scanner.scan_file(scan_file)?;

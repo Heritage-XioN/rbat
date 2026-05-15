@@ -1,9 +1,9 @@
 use crate::rbat::{Result, RiskAssessment};
 use csv::Writer;
-use std::path::PathBuf;
+use std::path::Path;
 
 pub fn generate_csv_report(
-    filename: &PathBuf,
+    filename: &Path,
     assessment: &RiskAssessment,
     out_path: &str,
 ) -> Result<()> {
@@ -12,7 +12,7 @@ pub fn generate_csv_report(
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     // Standard headers expected by SOC tools
-    wtr.write_record(&[
+    wtr.write_record([
         "Timestamp",
         "Filename",
         "Risk_Score",
@@ -27,7 +27,7 @@ pub fn generate_csv_report(
 
     // Flatten the assessment findings into individual rows
     for finding in &assessment.findings {
-        wtr.write_record(&[
+        wtr.write_record([
             &timestamp,
             &filename_str,
             &score,

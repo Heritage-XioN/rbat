@@ -3,7 +3,7 @@ use crate::rbat::{AnalysisResult, Confidence, RbatError, Result, RiskAssessment}
 use askama::Template;
 use chrono::Local;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 
 #[derive(Template)]
 #[template(path = "report.html")]
@@ -42,13 +42,13 @@ struct FindingContext {
 const REPORT_CSS: &str = include_str!("../../templates/report.css");
 
 pub fn generate_pdf_report(
-    filename: &PathBuf,
+    filename: &Path,
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult,
     out_path: &str,
 ) -> Result<()> {
     let heatmap_svg_content = generate_entropy_heatmap_svg(&analysis_result.section_entropy);
-    let has_heatmap = heatmap_svg_content.trim().len() > 0;
+    let has_heatmap = !heatmap_svg_content.trim().is_empty();
 
     let severity_class = match assessment.severity.to_lowercase().as_str() {
         "malicious" => "malicious",

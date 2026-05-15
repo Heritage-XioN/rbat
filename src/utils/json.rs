@@ -1,11 +1,11 @@
 use crate::rbat::{AnalysisResult, Result, RiskAssessment};
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Generates a comprehensive JSON report of the analysis findings and risk assessment.
 pub fn generate_json_report(
-    _filename: &PathBuf,
+    _filename: &Path,
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult,
     out_path: &str,
