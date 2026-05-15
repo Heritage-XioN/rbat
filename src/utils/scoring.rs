@@ -139,3 +139,49 @@ fn generate_recommendations(score: u32) -> Vec<String> {
 
     recs
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_risk_safe() {
+        let entropy = HashMap::new();
+        let assessment = calculate_risk(&entropy, 0, 0, 0, false, false);
+        assert_eq!(assessment.score, 0);
+        assert_eq!(assessment.severity, "Safe");
+        assert!(assessment.findings.is_empty());
+    }
+
+    #[test]
+    fn test_calculate_risk_malicious_packer() {
+        let mut entropy = HashMap::new();
+        entropy.insert(".text".to_string(), 8.0);
+        let assessment = calculate_risk(&entropy, 0, 0, 0, false, true);
+        // 40 (entropy) + 45 (packer) = 85
+        assert_eq!(assessment.score, 85);
+        assert_eq!(assessment.severity, "Malicious");
+        assert_eq!(assessment.findings.len(), 2);
+    }
+
+    #[test]
+    fn test_calculate_risk_suspicious() {
+        let mut entropy = HashMap::new();
+        entropy.insert(".text".to_string(), 6.9);
+        let assessment = calculate_risk(&entropy, 1, 0, 0, false, false);
+        // 15 (entropy) + 10 (network) = 25
+        // Wait, 25 is still "Safe" according to 0..=25
+        assert_eq!(assessment.score, 25);
+        assert_eq!(assessment.severity, "Safe");
+    }
+
+    #[test]
+    fn test_calculate_risk_capped() {
+        let mut entropy = HashMap::new();
+        entropy.insert(".text".to_string(), 8.0);
+        let assessment = calculate_risk(&entropy, 10, 10, 10, true, true);
+        // 40 + 25 + 20 + 40 + 35 + 45 = 205 -> capped at 100
+        assert_eq!(assessment.score, 100);
+        assert_eq!(assessment.severity, "Malicious");
+    }
+}
