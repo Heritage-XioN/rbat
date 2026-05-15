@@ -1,35 +1,41 @@
+use crate::utils::entropy::calculate_entropy;
 use crate::utils::get_txt::get_txt_from_file;
 use goblin::Object;
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::PathBuf;
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use super::{DisasmType, MapValue, RbatError, Result};
 
 /// a struct to hold the parsed binary data and provide methods for analysis.
 #[derive(Debug)]
-pub struct Parser<'path> {
-    path: &'path PathBuf,
+pub struct Parser<'bin> {
+    bin_path: &'bin PathBuf,
+    buffer: Vec<u8>,
+    binary_object: Object<'bin>,
 }
 
-impl<'path> Parser<'path> {
-    pub fn new(path: &'path PathBuf) -> Self {
-        Parser { path }
+impl<'bin> Parser<'bin> {
+    pub fn new(bin_path: &'bin PathBuf, buffer: Vec<u8>, binary_object: Object<'bin>) -> Self {
+        Parser {
+            bin_path,
+            buffer,
+            binary_object,
+        }
     }
 
     pub fn evaluate_section_entropy(&self) -> Result<HashMap<String, f64>> {
-        use crate::utils::entropy::calculate_entropy;
         let mut section_entropy: HashMap<String, f64> = HashMap::new();
-        let buffer = fs::read(&self.path)?;
 
-        match Object::parse(&buffer)? {
+        match &self.binary_object {
             Object::Elf(elf) => {
                 for sh in &elf.section_headers {
                     if let Some(name) = elf.shdr_strtab.get_at(sh.sh_name) {
                         let start = sh.sh_offset as usize;
                         let size = sh.sh_size as usize;
-                        if size > 0 && start + size <= buffer.len() {
-                            let data = &buffer[start..start + size];
+                        if size > 0 && start + size <= self.buffer.len() {
+                            let data = &self.buffer[start..start + size];
                             section_entropy.insert(name.to_string(), calculate_entropy(data));
                         }
                     }
@@ -40,8 +46,8 @@ impl<'path> Parser<'path> {
                     if let Ok(name) = section.name() {
                         let start = section.pointer_to_raw_data as usize;
                         let size = section.size_of_raw_data as usize;
-                        if size > 0 && start + size <= buffer.len() {
-                            let data = &buffer[start..start + size];
+                        if size > 0 && start + size <= self.buffer.len() {
+                            let data = &self.buffer[start..start + size];
                             section_entropy.insert(name.to_string(), calculate_entropy(data));
                         }
                     }
@@ -61,7 +67,7 @@ impl<'path> Parser<'path> {
                     }
                 }
                 goblin::mach::Mach::Fat(fat) => {
-                    for arch in &fat {
+                    for arch in fat {
                         if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
                             for segment in &macho.segments {
                                 for (section, section_data) in segment.into_iter().flatten() {
@@ -87,9 +93,7 @@ impl<'path> Parser<'path> {
     }
 
     pub fn parse_buffer(&self) -> Result<HashMap<String, MapValue>> {
-        let buffer = fs::read(&self.path)?;
-
-        match Object::parse(&buffer)? {
+        match &self.binary_object {
             Object::Elf(elf) => {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
                 binary_data.insert("os".to_string(), MapValue::OS(DisasmType::LinuxDisasm));
@@ -106,7 +110,7 @@ impl<'path> Parser<'path> {
                                 "Executable segment offset overflowed file bounds".to_string(),
                             )
                         })?;
-                        let text_bytes = buffer.get(start..end).ok_or_else(|| {
+                        let text_bytes = self.buffer.get(start..end).ok_or_else(|| {
                             RbatError::InvalidBinaryLayout(format!(
                                 "Executable segment range {start}..{end} is outside file bounds"
                             ))
@@ -127,10 +131,11 @@ impl<'path> Parser<'path> {
                                 let size = sh.sh_size as usize;
                                 let end = start.checked_add(size).ok_or_else(|| {
                                     RbatError::InvalidBinaryLayout(
-                                        "Executable section offset overflowed file bounds".to_string(),
+                                        "Executable section offset overflowed file bounds"
+                                            .to_string(),
                                     )
                                 })?;
-                                let text_bytes = buffer.get(start..end).ok_or_else(|| {
+                                let text_bytes = self.buffer.get(start..end).ok_or_else(|| {
                                     RbatError::InvalidBinaryLayout(format!(
                                         "Executable section range {start}..{end} is outside file bounds"
                                     ))
@@ -185,7 +190,7 @@ impl<'path> Parser<'path> {
                             "PE executable section offset overflowed file bounds".to_string(),
                         )
                     })?;
-                    let text_bytes = buffer.get(start..end).ok_or_else(|| {
+                    let text_bytes = self.buffer.get(start..end).ok_or_else(|| {
                         RbatError::InvalidBinaryLayout(format!(
                             "PE executable section range {start}..{end} is outside file bounds"
                         ))
@@ -227,7 +232,7 @@ impl<'path> Parser<'path> {
                         }
                     }
                     goblin::mach::Mach::Fat(fat) => {
-                        for arch in &fat {
+                        for arch in fat {
                             if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
                                 binary_data
                                     .insert("entry_addr".to_string(), MapValue::Word(macho.entry));
@@ -274,11 +279,10 @@ impl<'path> Parser<'path> {
     }
 
     pub fn check_process_injec(&self) -> Result<HashSet<String>> {
-        let buffer = fs::read(&self.path)?;
         let blacklist = get_txt_from_file("blacklisted_process_injec.txt")?;
         let mut sus_func: HashSet<String> = HashSet::new();
 
-        match Object::parse(&buffer)? {
+        match &self.binary_object {
             Object::Elf(elf) => {
                 // For ELF, check dynamic symbols that are imported (st_shndx == 0)
                 for dy in &elf.dynsyms {
@@ -334,7 +338,7 @@ impl<'path> Parser<'path> {
                 match mach {
                     goblin::mach::Mach::Binary(macho) => collect_from_macho(&macho)?,
                     goblin::mach::Mach::Fat(fat) => {
-                        for arch in &fat {
+                        for arch in fat {
                             if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
                                 collect_from_macho(&macho)?;
                             }
@@ -353,10 +357,9 @@ impl<'path> Parser<'path> {
     pub fn detect_api_hooking(&self) -> Result<HashMap<String, u64>> {
         use crate::rbat::yarahandler::YaraHandler;
         let mut api_hooking_func: HashMap<String, u64> = HashMap::new();
-        let buffer = fs::read(&self.path)?;
         let blacklist = get_txt_from_file("api_hooking_apis.txt")?;
 
-        match Object::parse(&buffer)? {
+        match &self.binary_object {
             Object::Elf(elf) => {
                 for dy in &elf.dynsyms {
                     if dy.st_shndx > 0 {
@@ -393,7 +396,7 @@ impl<'path> Parser<'path> {
                 match mach {
                     goblin::mach::Mach::Binary(macho) => collect_from_macho(&macho)?,
                     goblin::mach::Mach::Fat(fat) => {
-                        for arch in &fat {
+                        for arch in fat {
                             if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
                                 collect_from_macho(&macho)?;
                             }
@@ -407,7 +410,7 @@ impl<'path> Parser<'path> {
         // Supplement with YARA scan for patterns and strings
         let yara = YaraHandler::new("api_hooking.yar".to_owned());
         if let Ok(rules) = yara.compile_yara_rule() {
-            if let Ok(matches) = yara.scan_file(rules, self.path) {
+            if let Ok(matches) = yara.scan_file(rules, self.bin_path) {
                 for (rule_name, instances) in matches {
                     for m in instances {
                         let key = format!("{}:{}", rule_name, m.data);
@@ -423,9 +426,11 @@ impl<'path> Parser<'path> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use tempfile::tempdir;
+
     use super::*;
     use crate::utils::test_helpers::test_helpers;
-    use tempfile::tempdir;
 
     #[test]
     fn test_evaluate_section_entropy_elf() {
@@ -433,7 +438,9 @@ mod tests {
         let path = dir.path().join("dummy_elf");
         test_helpers::generate_elf(&path);
 
-        let parser = Parser::new(&path);
+        let buffer = fs::read(&path).unwrap();
+        let binary_object = Object::parse(&buffer).unwrap();
+        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
         let result = parser.evaluate_section_entropy();
         assert!(result.is_ok());
         let entropy = result.unwrap();
@@ -446,7 +453,9 @@ mod tests {
         let path = dir.path().join("dummy_elf");
         test_helpers::generate_elf(&path);
 
-        let parser = Parser::new(&path);
+        let buffer = fs::read(&path).unwrap();
+        let binary_object = Object::parse(&buffer).unwrap();
+        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
         let result = parser.parse_buffer();
         match result {
             Ok(data) => {
@@ -463,7 +472,9 @@ mod tests {
         let path = dir.path().join("dummy_macho");
         test_helpers::generate_macho(&path);
 
-        let parser = Parser::new(&path);
+        let buffer = fs::read(&path).unwrap();
+        let binary_object = Object::parse(&buffer).unwrap();
+        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
         let result = parser.evaluate_section_entropy();
         assert!(result.is_ok());
         let entropy = result.unwrap();

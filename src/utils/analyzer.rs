@@ -1,3 +1,5 @@
+use goblin::Object;
+
 use crate::rbat::{
     AnalysisResult, DisasmType, Factory, MapValue, RbatError, Result, RiskAssessment,
     parser::Parser, yarahandler::YaraHandler,
@@ -6,28 +8,31 @@ use crate::utils::{
     get_metadata::get_binary_metadata, get_txt::get_txt_from_file, scoring::calculate_risk,
 };
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 
 /// the main analyzer function that dynamically detects binary environment
 /// and processes it accordingly.
-pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)> {
-    let metadata = get_binary_metadata(&file_path)?;
+pub fn analyzer(bin_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)> {
+    let metadata = get_binary_metadata(&bin_path)?;
     let string_eva = YaraHandler::new("suspicious_strings.yar".to_owned());
     let rules = string_eva.compile_yara_rule()?;
-    let string_eva_res = string_eva.scan_file(rules, &file_path)?;
+    let string_eva_res = string_eva.scan_file(rules, &bin_path)?;
 
     // Packer signature detection
     let packer_eva = YaraHandler::new("packer_signatures.yar".to_owned());
     let packer_rules = packer_eva.compile_yara_rule()?;
-    let packer_results = packer_eva.scan_file(packer_rules, &file_path)?;
+    let packer_results = packer_eva.scan_file(packer_rules, &bin_path)?;
 
-    let buffer = Parser::new(file_path);
+    let buffer = fs::read(bin_path)?;
+    let binary_object = Object::parse(&buffer)?;
+    let parsed = Parser::new(bin_path, buffer.to_owned(), binary_object);
     let mut counter: i32 = 0;
     let mut nop_addr: Vec<u64> = vec![];
     let mut blacklisted_mnemonics: HashMap<String, u64> = HashMap::new();
     let mut code_cave: HashMap<String, Vec<u64>> = HashMap::new();
     let blacklist = get_txt_from_file("blacklisted_mnemonics.txt")?;
-    let binary_data = buffer.parse_buffer()?;
+    let binary_data = parsed.parse_buffer()?;
 
     if let (
         Some(MapValue::OS(os)),
@@ -68,9 +73,9 @@ pub fn analyzer(file_path: &PathBuf) -> Result<(AnalysisResult, RiskAssessment)>
             }
         }
 
-        let api_hooking = buffer.detect_api_hooking()?;
-        let process_inj = buffer.check_process_injec()?;
-        let section_entropy = buffer.evaluate_section_entropy().unwrap_or_default();
+        let api_hooking = parsed.detect_api_hooking()?;
+        let process_inj = parsed.check_process_injec()?;
+        let section_entropy = parsed.evaluate_section_entropy().unwrap_or_default();
 
         let analysis_result: AnalysisResult = AnalysisResult {
             metadata,
@@ -130,7 +135,11 @@ mod tests {
         test_helpers::generate_macho(&path);
 
         let result = analyzer(&path);
-        assert!(result.is_ok(), "Analyzer failed on Mach-O: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Analyzer failed on Mach-O: {:?}",
+            result.err()
+        );
         let (analysis, assessment) = result.unwrap();
         assert_eq!(analysis.metadata.binary_type, "Mach-O");
         assert!(assessment.score <= 100);
@@ -143,7 +152,7 @@ mod tests {
         test_helpers::generate_pe_stub(&path);
 
         let result = analyzer(&path);
-        // PE might fail further down due to lack of sections in stub, 
+        // PE might fail further down due to lack of sections in stub,
         // but we verify the metadata parsing at least.
         if let Ok((analysis, assessment)) = result {
             assert_eq!(analysis.metadata.binary_type, "PE");
