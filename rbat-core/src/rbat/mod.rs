@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 pub type Result<T> = core::result::Result<T, RbatError>;
 
 #[derive(RustEmbed)]
-#[folder = "assets/"]
+#[folder = "./assets/"]
 pub struct Asset;
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
