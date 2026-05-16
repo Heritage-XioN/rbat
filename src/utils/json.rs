@@ -7,15 +7,15 @@ use std::path::Path;
 ///
 /// This format is ideal for integration into automated security pipelines or custom visualization tools.
 pub fn generate_json_report(
-    _filename: &Path,
+    filename: &Path,
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult,
     out_path: &str,
 ) -> Result<()> {
     let report = serde_json::json!({
         "target": {
-            "name": _filename.file_name().unwrap_or_default().to_string_lossy(),
-            "path": _filename.to_string_lossy(),
+            "name": filename.file_name().unwrap_or_default().to_string_lossy(),
+            "path": filename.to_string_lossy(),
         },
         "timestamp": chrono::Local::now().to_rfc3339(),
         "risk_assessment": assessment,
@@ -30,4 +30,29 @@ pub fn generate_json_report(
 
     println!("[+] JSON report generated at {}", out_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_generate_json_report() {
+        let dir = tempdir().unwrap();
+        let out_path = dir.path().join("test_report.json");
+        let out_path_str = out_path.to_str().unwrap();
+
+        let assessment = RiskAssessment::default();
+        let analysis = AnalysisResult::default();
+
+        // This will likely fallback to HTML in a CI environment without fullbleed setup
+        let result =
+            generate_json_report(Path::new("test_bin"), &assessment, &analysis, out_path_str);
+        assert!(result.is_ok());
+
+        // Check if either .pdf or .html was created
+        let html_path = dir.path().join("test_report.html");
+        assert!(out_path.exists() || html_path.exists());
+    }
 }

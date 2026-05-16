@@ -211,3 +211,28 @@ fn generate_pdf_from_html(html: &str, out_path: &str) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_generate_pdf_report() {
+        let dir = tempdir().unwrap();
+        let out_path = dir.path().join("test_report.pdf");
+        let out_path_str = out_path.to_str().unwrap();
+
+        let assessment = RiskAssessment::default();
+        let analysis = AnalysisResult::default();
+
+        // This will likely fallback to HTML in a CI environment without fullbleed setup
+        let result =
+            generate_pdf_report(Path::new("test_bin"), &assessment, &analysis, out_path_str);
+        assert!(result.is_ok());
+
+        // Check if either .pdf or .html was created
+        let html_path = dir.path().join("test_report.html");
+        assert!(out_path.exists() || html_path.exists());
+    }
+}

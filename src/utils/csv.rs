@@ -45,3 +45,27 @@ pub fn generate_csv_report(
     wtr.flush()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_generate_csv_report() {
+        let dir = tempdir().unwrap();
+        let out_path = dir.path().join("test_report.csv");
+        let out_path_str = out_path.to_str().unwrap();
+
+        let assessment = RiskAssessment {
+            score: 85,
+            severity: "Suspicious".to_string(),
+            findings: vec![],
+            recommendations: vec![],
+        };
+
+        let result = generate_csv_report(Path::new("test_bin"), &assessment, out_path_str);
+        assert!(result.is_ok());
+        assert!(out_path.exists());
+    }
+}
