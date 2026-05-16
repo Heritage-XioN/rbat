@@ -10,7 +10,7 @@ pub fn generate_json_report(
     filename: &Path,
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult,
-    out_path: &str,
+    out_path: &Path,
 ) -> Result<()> {
     let report = serde_json::json!({
         "target": {
@@ -28,7 +28,7 @@ pub fn generate_json_report(
     let mut file = File::create(out_path)?;
     file.write_all(json_string.as_bytes())?;
 
-    println!("[+] JSON report generated at {}", out_path);
+    println!("[+] JSON report generated at {}", out_path.display());
     Ok(())
 }
 
@@ -41,14 +41,12 @@ mod tests {
     fn test_generate_json_report() {
         let dir = tempdir().unwrap();
         let out_path = dir.path().join("test_report.json");
-        let out_path_str = out_path.to_str().unwrap();
 
         let assessment = RiskAssessment::default();
         let analysis = AnalysisResult::default();
 
         // This will likely fallback to HTML in a CI environment without fullbleed setup
-        let result =
-            generate_json_report(Path::new("test_bin"), &assessment, &analysis, out_path_str);
+        let result = generate_json_report(Path::new("test_bin"), &assessment, &analysis, &out_path);
         assert!(result.is_ok());
 
         // Check if either .pdf or .html was created

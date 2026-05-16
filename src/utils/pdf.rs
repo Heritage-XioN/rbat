@@ -57,7 +57,7 @@ pub fn generate_pdf_report(
     filename: &Path,
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult,
-    out_path: &str,
+    out_path: &Path,
 ) -> Result<()> {
     let heatmap_svg_content = generate_entropy_heatmap_svg(&analysis_result.section_entropy);
     let has_heatmap = !heatmap_svg_content.trim().is_empty();
@@ -176,17 +176,19 @@ pub fn generate_pdf_report(
 
     match generate_pdf_from_html(&html, out_path) {
         Ok(()) => {
-            println!("[+] PDF report generated at {}", out_path);
+            println!("[+] PDF report generated at {}", out_path.display());
             Ok(())
         }
         Err(e) => {
             // Fullbleed rendering failed — save as HTML instead
-            let html_path = out_path.replace(".pdf", ".html");
+            let mut html_path = out_path.to_path_buf();
+            html_path.set_extension("html");
             fs::write(&html_path, &html)?;
             eprintln!(
                 "[-] PDF generation failed ({}). \
                  Report saved as HTML: {}",
-                e, html_path
+                e,
+                html_path.display()
             );
             Ok(())
         }
@@ -194,7 +196,7 @@ pub fn generate_pdf_report(
 }
 
 /// Uses the `fullbleed` engine to render an HTML report into a PDF buffer.
-fn generate_pdf_from_html(html: &str, out_path: &str) -> Result<()> {
+fn generate_pdf_from_html(html: &str, out_path: &Path) -> Result<()> {
     use fullbleed::FullBleed;
 
     let engine = FullBleed::builder()
@@ -221,14 +223,12 @@ mod tests {
     fn test_generate_pdf_report() {
         let dir = tempdir().unwrap();
         let out_path = dir.path().join("test_report.pdf");
-        let out_path_str = out_path.to_str().unwrap();
 
         let assessment = RiskAssessment::default();
         let analysis = AnalysisResult::default();
 
         // This will likely fallback to HTML in a CI environment without fullbleed setup
-        let result =
-            generate_pdf_report(Path::new("test_bin"), &assessment, &analysis, out_path_str);
+        let result = generate_pdf_report(Path::new("test_bin"), &assessment, &analysis, &out_path);
         assert!(result.is_ok());
 
         // Check if either .pdf or .html was created

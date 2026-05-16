@@ -28,27 +28,17 @@ fn main() -> Result<()> {
 
     if cli.pdf {
         let pdf_path = base_dir.join("report.pdf");
-        generate_pdf_report(
-            &cli.path,
-            &risk_assessment,
-            &analysis_result,
-            &pdf_path.to_string_lossy(),
-        )?;
+        generate_pdf_report(&cli.path, &risk_assessment, &analysis_result, &pdf_path)?;
     }
 
     if cli.csv {
         let csv_path = base_dir.join("report.csv");
-        generate_csv_report(&cli.path, &risk_assessment, &csv_path.to_string_lossy())?;
+        generate_csv_report(&cli.path, &risk_assessment, &csv_path)?;
     }
 
     if cli.json {
         let json_path = base_dir.join("report.json");
-        generate_json_report(
-            &cli.path,
-            &risk_assessment,
-            &analysis_result,
-            &json_path.to_string_lossy(),
-        )?;
+        generate_json_report(&cli.path, &risk_assessment, &analysis_result, &json_path)?;
     }
 
     if cli.tui {

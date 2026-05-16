@@ -9,7 +9,7 @@ use std::path::Path;
 pub fn generate_csv_report(
     filename: &Path,
     assessment: &RiskAssessment,
-    out_path: &str,
+    out_path: &Path,
 ) -> Result<()> {
     let mut wtr = Writer::from_path(out_path)?;
     let filename_str = filename.to_string_lossy().to_string();
@@ -43,6 +43,8 @@ pub fn generate_csv_report(
     }
 
     wtr.flush()?;
+
+    println!("[+] CSV report generated at {}", out_path.display());
     Ok(())
 }
 
@@ -55,7 +57,6 @@ mod tests {
     fn test_generate_csv_report() {
         let dir = tempdir().unwrap();
         let out_path = dir.path().join("test_report.csv");
-        let out_path_str = out_path.to_str().unwrap();
 
         let assessment = RiskAssessment {
             score: 85,
@@ -64,7 +65,7 @@ mod tests {
             recommendations: vec![],
         };
 
-        let result = generate_csv_report(Path::new("test_bin"), &assessment, out_path_str);
+        let result = generate_csv_report(Path::new("test_bin"), &assessment, &out_path);
         assert!(result.is_ok());
         assert!(out_path.exists());
     }
