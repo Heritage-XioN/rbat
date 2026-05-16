@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use super::{DisasmType, MapValue, RbatError, Result};
+use super::{BinaryArch, BinaryOS, MapValue, RbatError, Result};
 
 /// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
 /// It holds the raw binary buffer and the parsed object from the `goblin` crate.
@@ -106,7 +106,21 @@ impl<'bin> Parser<'bin> {
         match &self.binary_object {
             Object::Elf(elf) => {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
-                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::Linux));
+                binary_data.insert("os".to_string(), MapValue::OS(BinaryOS::Linux));
+
+                let arch = match elf.header.e_machine {
+                    3 => BinaryArch::X86,
+                    62 => BinaryArch::X64,
+                    40 => BinaryArch::Arm,
+                    183 => BinaryArch::Arm64,
+                    other => {
+                        return Err(RbatError::UnsupportedBinaryFormat(format!(
+                            "Unsupported ELF machine architecture: {:#x}",
+                            other
+                        )));
+                    }
+                };
+                binary_data.insert("arch".to_string(), MapValue::Arch(arch));
                 binary_data.insert("entry_addr".to_string(), MapValue::Word(elf.entry));
 
                 for ph in &elf.program_headers {
@@ -162,7 +176,21 @@ impl<'bin> Parser<'bin> {
             }
             Object::PE(pe) => {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
-                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::Win));
+                binary_data.insert("os".to_string(), MapValue::OS(BinaryOS::Win));
+
+                let arch = match pe.header.coff_header.machine {
+                    0x014c => BinaryArch::X86,
+                    0x8664 => BinaryArch::X64,
+                    0x01c4 => BinaryArch::Arm,
+                    0xaa64 => BinaryArch::Arm64,
+                    other => {
+                        return Err(RbatError::UnsupportedBinaryFormat(format!(
+                            "Unsupported PE machine architecture: {:#x}",
+                            other
+                        )));
+                    }
+                };
+                binary_data.insert("arch".to_string(), MapValue::Arch(arch));
                 binary_data.insert(
                     "entry_addr".to_string(),
                     MapValue::Word(pe.image_base + pe.entry as u64),
@@ -213,10 +241,23 @@ impl<'bin> Parser<'bin> {
             }
             Object::Mach(mach) => {
                 let mut binary_data: HashMap<String, MapValue> = HashMap::new();
-                binary_data.insert("os".to_string(), MapValue::OS(DisasmType::Mac));
+                binary_data.insert("os".to_string(), MapValue::OS(BinaryOS::Mac));
 
                 match mach {
                     goblin::mach::Mach::Binary(macho) => {
+                        let arch = match macho.header.cputype {
+                            7 => BinaryArch::X86,
+                            16777223 => BinaryArch::X64,
+                            12 => BinaryArch::Arm,
+                            16777228 => BinaryArch::Arm64,
+                            other => {
+                                return Err(RbatError::UnsupportedBinaryFormat(format!(
+                                    "Unsupported Mach-O CPU type: {:#x}",
+                                    other
+                                )));
+                            }
+                        };
+                        binary_data.insert("arch".to_string(), MapValue::Arch(arch));
                         binary_data.insert("entry_addr".to_string(), MapValue::Word(macho.entry));
 
                         for segment in &macho.segments {
@@ -237,8 +278,21 @@ impl<'bin> Parser<'bin> {
                         }
                     }
                     goblin::mach::Mach::Fat(fat) => {
-                        for arch in fat {
-                            if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
+                        for arch_item in fat {
+                            if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch_item {
+                                let arch = match macho.header.cputype {
+                                    7 => BinaryArch::X86,
+                                    16777223 => BinaryArch::X64,
+                                    12 => BinaryArch::Arm,
+                                    16777228 => BinaryArch::Arm64,
+                                    other => {
+                                        return Err(RbatError::UnsupportedBinaryFormat(format!(
+                                            "Unsupported Mach-O CPU type: {:#x}",
+                                            other
+                                        )));
+                                    }
+                                };
+                                binary_data.insert("arch".to_string(), MapValue::Arch(arch));
                                 binary_data
                                     .insert("entry_addr".to_string(), MapValue::Word(macho.entry));
 
@@ -486,5 +540,23 @@ mod tests {
         assert!(result.is_ok());
         let entropy = result.unwrap();
         assert!(entropy.contains_key("__text"));
+    }
+
+    #[test]
+    fn test_parse_buffer_unsupported_arch() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("unsupported_elf");
+        test_helpers::generate_elf_unsupported(&path);
+
+        let buffer = fs::read(&path).unwrap();
+        let binary_object = Object::parse(&buffer).unwrap();
+        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let result = parser.parse_buffer();
+        match result {
+            Err(RbatError::UnsupportedBinaryFormat(msg)) => {
+                assert!(msg.contains("Unsupported ELF machine architecture: 0xffff"));
+            }
+            _ => panic!("Expected UnsupportedBinaryFormat error, got {:?}", result),
+        }
     }
 }

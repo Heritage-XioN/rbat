@@ -4,8 +4,8 @@ use std::path::PathBuf;
 /// a rust based static binary analysis tool.
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None, group(
-    ArgGroup::new("output")
-    .args(&["tui", "pdf", "csv", "json"])
+    ArgGroup::new("modes")
+    .args(&["tui", "pdf", "csv", "json", "out_dir"])
     .required(true).multiple(true))
 )]
 pub struct Cli {
@@ -27,4 +27,8 @@ pub struct Cli {
     /// JSON output
     #[arg(short, long)]
     pub json: bool,
+
+    /// Output directory for reports (default: current directory)
+    #[arg(short, long)]
+    pub out_dir: Option<PathBuf>,
 }

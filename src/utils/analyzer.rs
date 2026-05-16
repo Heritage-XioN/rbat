@@ -1,8 +1,8 @@
 use goblin::Object;
 
 use crate::rbat::{
-    AnalysisResult, DisasmType, Factory, MapValue, RbatError, Result, RiskAssessment,
-    parser::Parser, yarahandler::YaraHandler,
+    AnalysisResult, Factory, MapValue, RbatError, Result, RiskAssessment, parser::Parser,
+    yarahandler::YaraHandler,
 };
 use crate::utils::{
     get_metadata::get_binary_metadata, get_txt::get_txt_from_file, scoring::calculate_risk,
@@ -43,18 +43,17 @@ pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
 
     if let (
         Some(MapValue::OS(os)),
+        Some(MapValue::Arch(arch)),
         Some(MapValue::Bytes(bytes)),
         Some(MapValue::Word(entry_addr)),
     ) = (
         binary_data.get("os"),
+        binary_data.get("arch"),
         binary_data.get("text_bytes"),
         binary_data.get("entry_addr"),
     ) {
-        let factory = match os {
-            DisasmType::Linux => Factory::disasm(DisasmType::Linux),
-            DisasmType::Win => Factory::disasm(DisasmType::Win),
-            DisasmType::Mac => Factory::disasm(DisasmType::Mac),
-        };
+        let (os, arch) = (os, arch);
+        let factory = Factory::disasm(*os, *arch);
         let cs = factory.disassemble()?;
         let instructions = cs.disasm_all(bytes, *entry_addr)?;
 
@@ -165,6 +164,38 @@ mod tests {
         if let Ok((analysis, assessment)) = result {
             assert_eq!(analysis.metadata.binary_type, "PE");
             assert!(assessment.score <= 100);
+        }
+    }
+
+    #[test]
+    fn test_analyzer_elf_x86() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_elf_x86");
+        test_helpers::generate_elf_x86(&path);
+
+        let result = analyzer(&path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_analyzer_macho_arm64() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_macho_arm64");
+        test_helpers::generate_macho_arm64(&path);
+
+        let result = analyzer(&path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_analyzer_pe_x86() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_pe_x86");
+        test_helpers::generate_pe_x86(&path);
+
+        let result = analyzer(&path);
+        if let Ok((analysis, _)) = result {
+            assert_eq!(analysis.metadata.binary_type, "Windows PE");
         }
     }
 }
