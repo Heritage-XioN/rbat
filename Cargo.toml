@@ -1,0 +1,12 @@
+[workspace]
+members = ["rbat-core", "rbat-server"]
+resolver = "2"
+
+[workspace.dependencies]
+tokio = { version = "1.52.3", features = ["full"] }
+
+[profile.release]
+opt-level = 3       
+lto = true          
+strip = true        
+codegen-units = 1
