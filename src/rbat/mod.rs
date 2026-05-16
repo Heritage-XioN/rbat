@@ -6,7 +6,7 @@ pub mod traits;
 pub mod tui;
 pub mod yarahandler;
 
-pub use crate::rbat::disassembler::{DisasmType, Factory};
+pub use crate::rbat::disassembler::{BinaryArch, BinaryOS, Factory};
 pub use crate::rbat::error::RbatError;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,8 @@ pub struct AnalysisResult {
 pub enum MapValue {
     Bytes(Vec<u8>),
     Word(u64),
-    OS(DisasmType),
+    OS(BinaryOS),
+    Arch(BinaryArch),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]

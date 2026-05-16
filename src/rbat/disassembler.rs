@@ -1,72 +1,73 @@
 use crate::rbat::{Result, traits::*};
 
-/// windows disassembler struct
-#[derive(Debug)]
-pub struct WinDisasm;
-
-/// linux disassembler struct
-#[derive(Debug)]
-pub struct LinuxDisasm;
-
-/// mac disassembler struct
-#[derive(Debug)]
-pub struct MacDisasm;
-
 /// capstone factory implementation.
-/// returns the appropriate disassembler based on the binary's OS type.
 #[derive(Debug)]
 pub struct Factory;
 
-pub enum DisasmType {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOS {
     Win,
     Linux,
     Mac,
 }
 
-impl Disassembler for WinDisasm {
-    fn disassemble(&self) -> Result<Capstone> {
-        let cs = Capstone::new()
-            .x86()
-            .mode(arch::x86::ArchMode::Mode64)
-            .syntax(arch::x86::ArchSyntax::Intel)
-            .detail(true)
-            .build()?;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryArch {
+    X86,
+    X64,
+    Arm,
+    Arm64,
+}
 
-        Ok(cs)
+/// A generic disassembler that adapts to both OS syntax preferences
+/// and the binary's actual CPU architecture.
+#[derive(Debug)]
+pub struct GenericDisasm {
+    os: BinaryOS,
+    arch: BinaryArch,
+}
+
+impl GenericDisasm {
+    pub fn new(os: BinaryOS, arch: BinaryArch) -> Self {
+        Self { os, arch }
     }
 }
 
-impl Disassembler for LinuxDisasm {
+impl Disassembler for GenericDisasm {
     fn disassemble(&self) -> Result<Capstone> {
-        let cs = Capstone::new()
-            .x86()
-            .mode(arch::x86::ArchMode::Mode64)
-            .syntax(arch::x86::ArchSyntax::Att)
-            .detail(true)
-            .build()?;
+        match self.arch {
+            BinaryArch::X86 | BinaryArch::X64 => {
+                let mut x86 = Capstone::new().x86();
 
-        Ok(cs)
-    }
-}
+                if self.arch == BinaryArch::X64 {
+                    x86 = x86.mode(arch::x86::ArchMode::Mode64);
+                } else {
+                    x86 = x86.mode(arch::x86::ArchMode::Mode32);
+                }
 
-impl Disassembler for MacDisasm {
-    fn disassemble(&self) -> Result<Capstone> {
-        let cs = Capstone::new()
-            .arm64()
-            .mode(arch::arm64::ArchMode::Arm)
-            .detail(true)
-            .build()?;
+                x86 = match self.os {
+                    BinaryOS::Linux => x86.syntax(arch::x86::ArchSyntax::Att),
+                    _ => x86.syntax(arch::x86::ArchSyntax::Intel),
+                };
 
-        Ok(cs)
+                Ok(x86.detail(true).build()?)
+            }
+            BinaryArch::Arm => Ok(Capstone::new()
+                .arm()
+                .mode(arch::arm::ArchMode::Arm)
+                .detail(true)
+                .build()?),
+            BinaryArch::Arm64 => Ok(Capstone::new()
+                .arm64()
+                .mode(arch::arm64::ArchMode::Arm)
+                .detail(true)
+                .build()?),
+        }
     }
 }
 
 impl Factory {
-    pub fn disasm(disasm_type: DisasmType) -> Box<dyn Disassembler> {
-        match disasm_type {
-            DisasmType::Win => Box::new(WinDisasm),
-            DisasmType::Linux => Box::new(LinuxDisasm),
-            DisasmType::Mac => Box::new(MacDisasm),
-        }
+    pub fn disasm(os: BinaryOS, arch: BinaryArch) -> Box<dyn Disassembler> {
+        Box::new(GenericDisasm::new(os, arch))
     }
 }

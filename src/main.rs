@@ -14,16 +14,34 @@ fn main() -> Result<()> {
 
     let (analysis_result, risk_assessment) = analyzer(&cli.path)?;
 
+    let base_dir = cli.out_dir.unwrap_or_else(|| std::path::PathBuf::from("."));
+    if !base_dir.exists() {
+        std::fs::create_dir_all(&base_dir)?;
+    }
+
     if cli.pdf {
-        generate_pdf_report(&cli.path, &risk_assessment, &analysis_result, "report.pdf")?;
+        let pdf_path = base_dir.join("report.pdf");
+        generate_pdf_report(
+            &cli.path,
+            &risk_assessment,
+            &analysis_result,
+            &pdf_path.to_string_lossy(),
+        )?;
     }
 
     if cli.csv {
-        generate_csv_report(&cli.path, &risk_assessment, "report.csv")?;
+        let csv_path = base_dir.join("report.csv");
+        generate_csv_report(&cli.path, &risk_assessment, &csv_path.to_string_lossy())?;
     }
 
     if cli.json {
-        generate_json_report(&cli.path, &risk_assessment, &analysis_result, "report.json")?;
+        let json_path = base_dir.join("report.json");
+        generate_json_report(
+            &cli.path,
+            &risk_assessment,
+            &analysis_result,
+            &json_path.to_string_lossy(),
+        )?;
     }
 
     if cli.tui {
