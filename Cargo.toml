@@ -7,7 +7,7 @@ description = "A terminal-native binary analysis tool for security researchers a
 license = "MIT"
 repository = "https://github.com/Heritage-XioN/rbat"
 readme = "README.md"
-keywords = ["binary-analysis", "security", "reverse-engineering", "tui", "disassembly", "pe", "mach-o", "elf"]
+keywords = ["binary-analysis", "security", "reverse-engineering", "tui", "disassembly"]
 categories = ["command-line-utilities", "parsing", "security"]
 
 [dependencies]
