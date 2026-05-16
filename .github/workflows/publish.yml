@@ -2,7 +2,11 @@ name: Publish
 
 on:
   release:
-    types: [published]
+    types: [published, created]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -13,7 +17,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcapstone-dev libyara-dev
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Publish
