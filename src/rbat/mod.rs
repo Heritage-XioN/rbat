@@ -38,6 +38,7 @@ pub struct AnalysisResult {
     pub packer_signatures: HashMap<String, Vec<YaraMatches>>,
 }
 
+#[derive(Debug)]
 pub enum MapValue {
     Bytes(Vec<u8>),
     Word(u64),

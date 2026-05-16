@@ -81,4 +81,16 @@ pub mod test_helpers {
         let mut file = File::create(path).unwrap();
         file.write_all(&stub).unwrap();
     }
+
+    pub fn generate_elf_unsupported(path: &Path) {
+        let mut obj = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
+        let section_id = obj.add_section(vec![], b".text".to_vec(), SectionKind::Text);
+        obj.append_section_data(section_id, &[0x90; 100], 1);
+        let mut result = obj.write().unwrap();
+        // Overwrite e_machine with 0xFFFF (unsupported)
+        // For ELF64, e_machine is at offset 18
+        result[18..20].copy_from_slice(&0xFFFFu16.to_le_bytes());
+        let mut file = File::create(path).unwrap();
+        file.write_all(&result).unwrap();
+    }
 }

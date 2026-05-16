@@ -113,7 +113,12 @@ impl<'bin> Parser<'bin> {
                     62 => BinaryArch::X64,
                     40 => BinaryArch::Arm,
                     183 => BinaryArch::Arm64,
-                    _ => BinaryArch::X64,
+                    other => {
+                        return Err(RbatError::UnsupportedBinaryFormat(format!(
+                            "Unsupported ELF machine architecture: {:#x}",
+                            other
+                        )));
+                    }
                 };
                 binary_data.insert("arch".to_string(), MapValue::Arch(arch));
                 binary_data.insert("entry_addr".to_string(), MapValue::Word(elf.entry));
@@ -178,7 +183,12 @@ impl<'bin> Parser<'bin> {
                     0x8664 => BinaryArch::X64,
                     0x01c4 => BinaryArch::Arm,
                     0xaa64 => BinaryArch::Arm64,
-                    _ => BinaryArch::X64,
+                    other => {
+                        return Err(RbatError::UnsupportedBinaryFormat(format!(
+                            "Unsupported PE machine architecture: {:#x}",
+                            other
+                        )));
+                    }
                 };
                 binary_data.insert("arch".to_string(), MapValue::Arch(arch));
                 binary_data.insert(
@@ -240,7 +250,12 @@ impl<'bin> Parser<'bin> {
                             16777223 => BinaryArch::X64,
                             12 => BinaryArch::Arm,
                             16777228 => BinaryArch::Arm64,
-                            _ => BinaryArch::Arm64,
+                            other => {
+                                return Err(RbatError::UnsupportedBinaryFormat(format!(
+                                    "Unsupported Mach-O CPU type: {:#x}",
+                                    other
+                                )));
+                            }
                         };
                         binary_data.insert("arch".to_string(), MapValue::Arch(arch));
                         binary_data.insert("entry_addr".to_string(), MapValue::Word(macho.entry));
@@ -270,7 +285,12 @@ impl<'bin> Parser<'bin> {
                                     16777223 => BinaryArch::X64,
                                     12 => BinaryArch::Arm,
                                     16777228 => BinaryArch::Arm64,
-                                    _ => BinaryArch::Arm64,
+                                    other => {
+                                        return Err(RbatError::UnsupportedBinaryFormat(format!(
+                                            "Unsupported Mach-O CPU type: {:#x}",
+                                            other
+                                        )));
+                                    }
                                 };
                                 binary_data.insert("arch".to_string(), MapValue::Arch(arch));
                                 binary_data
@@ -520,5 +540,23 @@ mod tests {
         assert!(result.is_ok());
         let entropy = result.unwrap();
         assert!(entropy.contains_key("__text"));
+    }
+
+    #[test]
+    fn test_parse_buffer_unsupported_arch() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("unsupported_elf");
+        test_helpers::generate_elf_unsupported(&path);
+
+        let buffer = fs::read(&path).unwrap();
+        let binary_object = Object::parse(&buffer).unwrap();
+        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let result = parser.parse_buffer();
+        match result {
+            Err(RbatError::UnsupportedBinaryFormat(msg)) => {
+                assert!(msg.contains("Unsupported ELF machine architecture: 0xffff"));
+            }
+            _ => panic!("Expected UnsupportedBinaryFormat error, got {:?}", result),
+        }
     }
 }
