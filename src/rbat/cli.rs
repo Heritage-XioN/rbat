@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None, group(
     ArgGroup::new("modes")
-    .args(&["tui", "pdf", "csv", "json"])
+    .args(&["tui", "pdf", "csv", "json", "out_dir"])
     .required(true).multiple(true))
 )]
 pub struct Cli {
