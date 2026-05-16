@@ -1,7 +1,9 @@
 # RBAT: Rust Binary Analysis Tool
 
-![RBAT Logo](https://img.shields.io/badge/RBAT-Rust%20Binary%20Analysis%20Tool-orange?style=for-the-badge&logo=rust)
-![Build Status](https://img.shields.io/badge/status-stable-green?style=for-the-badge)
+[![Crates.io Version](https://img.shields.io/crates/v/rbat?style=for-the-badge&logo=rust&color=orange&label=version)](https://crates.io/crates/rbat)
+[![Crates.io Downloads](https://img.shields.io/crates/d/rbat?style=for-the-badge&color=blue&label=downloads)](https://crates.io/crates/rbat)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci.yml?style=for-the-badge&label=build)](https://github.com/Heritage-XioN/rbat/actions)
 
 **RBAT** is a high-performance, terminal-native binary analysis tool designed for security researchers, malware analysts, and reverse engineers. It provides a comprehensive suite of static analysis tools to identify potential threats, analyze binary structures, and evaluate risk levels across multiple executable formats.
 
@@ -24,6 +26,8 @@ RBAT is designed not just as a tool, but as a reference for learning binary inte
 - **Information Theory**: Explore how Shannon Entropy is applied in security to differentiate between compressed, encrypted, and plaintext data.
 - **Heuristic Modeling**: See how multiple low-confidence indicators can be combined into a high-confidence risk score.
 
+---
+
 ## 📋 Prerequisites
 
 - **Rust**: Version 1.75 or higher is recommended.
@@ -31,6 +35,8 @@ RBAT is designed not just as a tool, but as a reference for learning binary inte
   - `capstone` (for disassembly)
   - `libyara` (for pattern matching)
   - *Note: On most systems, these are handled automatically by Cargo or bundled via "vendored" features.*
+
+---
 
 ## 🛠️ Installation
 
@@ -52,29 +58,58 @@ cargo build --release
 cargo test
 ```
 
+---
+
 ## 📖 Usage
 
+### Interactive Mode
 Analyze a binary directly in the interactive **TUI**:
 ```bash
-./target/release/rbat <path_to_binary> --tui
+rbat <path_to_binary> --tui
 ```
 
+### PDF Reporting
 Generate a professional **PDF report**:
 ```bash
-./target/release/rbat <path_to_binary> --pdf
+rbat <path_to_binary> --pdf --out-dir ./reports
+```
+*Output Example (report.pdf):* A multi-page document featuring a high-level summary, detailed security findings, and an entropy heatmap visualization.
+
+### SOC/SIEM Integration
+Export results to **CSV** or **JSON** for ingestion into automated pipelines:
+```bash
+rbat <path_to_binary> --csv --json --out-dir ./logs
 ```
 
-Export results to **CSV** or **JSON**:
-```bash
-./target/release/rbat <path_to_binary> --csv
-./target/release/rbat <path_to_binary> --json
+**JSON Output Example:**
+```json
+{
+  "target": { "name": "malware.exe", "path": "/bin/malware.exe" },
+  "risk_assessment": {
+    "score": 85,
+    "severity": "Malicious",
+    "findings": [
+      { "indicator": "Suspicious Section Names", "confidence": "High", "weight": 10 }
+    ]
+  }
+}
 ```
+
+**CSV Output Example:**
+```csv
+Timestamp,Filename,Risk_Score,Severity,Indicator_Type,Confidence,Description
+2023-10-27 14:02:49,firmware.elf,85,Malicious,API Hooking,High,Suspicious function: system() @ 0x0801a2c
+```
+
+---
 
 ## ⚙️ Configuration
 
 RBAT is designed to be a "zero-config" standalone tool:
 - **Embedded Assets**: All YARA rules, blacklists, and CSS templates are embedded into the binary at compile-time using `rust-embed`.
 - **CLI Flags**: Behavior is controlled entirely through command-line arguments (run `rbat --help` for details).
+
+---
 
 ## 🏗️ Architecture
 
@@ -85,6 +120,8 @@ RBAT follows a modular pipeline architecture:
 4. **Presentation Layer**: 
     - **TUI**: Provides a stateful, interactive dashboard.
     - **Reporters**: Uses `askama` templates and `fullbleed` to generate design-compliant documents.
+
+---
 
 ## 📂 Project Structure
 
@@ -106,11 +143,15 @@ rbat/
 └── tests/              # Integration tests and binary generation helpers
 ```
 
+---
+
 ## 🛡️ Security Considerations
 
 - **Static Only**: RBAT performs static analysis. It does **not** execute the target binary, making it safe to use on unknown or potentially malicious files.
 - **Local Privacy**: All analysis is performed locally on your machine. No data is sent to external servers or cloud services.
 - **Heuristic Limits**: Risk scoring is based on common malware patterns. A high score indicates a need for manual review, while a low score does not guarantee the file is harmless.
+
+---
 
 ## ⚖️ License
 
