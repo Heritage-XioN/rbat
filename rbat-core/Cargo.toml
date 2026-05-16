@@ -32,8 +32,3 @@ askama = "0.16.0"
 object = { version = "0.39.1", features = ["write"] }
 tempfile = "3.10"
 
-[profile.release]
-opt-level = 3       
-lto = true          
-strip = true        
-codegen-units = 1
