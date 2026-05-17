@@ -1,4 +1,4 @@
-use crate::rbat::{Result, RiskAssessment};
+use crate::core::{Result, RiskAssessment};
 use csv::Writer;
 use std::path::Path;
 

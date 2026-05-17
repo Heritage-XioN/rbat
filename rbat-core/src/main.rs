@@ -1,11 +1,12 @@
-use crate::rbat::{cli::Cli, tui::App};
-use crate::utils::pdf::generate_pdf_report;
-use crate::utils::{analyzer::analyzer, csv::generate_csv_report, json::generate_json_report};
 use clap::Parser;
 use color_eyre::Result;
-
-mod rbat;
-mod utils;
+use rbat::{
+    core::{cli::Cli, tui::App},
+    utils::{
+        analyzer::analyzer, csv::generate_csv_report, json::generate_json_report,
+        pdf::generate_pdf_report,
+    },
+};
 
 fn main() -> Result<()> {
     color_eyre::install()?;

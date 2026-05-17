@@ -6,8 +6,8 @@ pub mod traits;
 pub mod tui;
 pub mod yarahandler;
 
-pub use crate::rbat::disassembler::{BinaryArch, BinaryOS, Factory};
-pub use crate::rbat::error::RbatError;
+pub use crate::core::disassembler::{BinaryArch, BinaryOS, Factory};
+pub use crate::core::error::RbatError;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

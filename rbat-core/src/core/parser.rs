@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use super::{BinaryArch, BinaryOS, MapValue, RbatError, Result};
+use super::{BinaryArch, BinaryOS, MapValue, RbatError, Result, yarahandler::YaraHandler};
 
 /// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
 /// It holds the raw binary buffer and the parsed object from the `goblin` crate.
@@ -361,7 +361,7 @@ impl<'bin> Parser<'bin> {
                     let import_name = import.name.to_string();
                     if blacklist
                         .iter()
-                        .any(|item| item.eq_ignore_ascii_case(&import_name))
+                        .any(|item: &String| item.eq_ignore_ascii_case(&import_name))
                     {
                         sus_func.insert(import_name);
                     }
@@ -373,7 +373,7 @@ impl<'bin> Parser<'bin> {
                     let normalized = name.trim_start_matches('_');
                     blacklist
                         .iter()
-                        .any(|item| item.eq_ignore_ascii_case(normalized))
+                        .any(|item: &String| item.eq_ignore_ascii_case(normalized))
                 };
 
                 let mut collect_from_macho = |macho: &goblin::mach::MachO<'_>| -> Result<()> {
@@ -416,7 +416,6 @@ impl<'bin> Parser<'bin> {
     ///
     /// Combines static symbol table analysis with a YARA scan for specific code signatures.
     pub fn detect_api_hooking(&self) -> Result<HashMap<String, u64>> {
-        use crate::rbat::yarahandler::YaraHandler;
         let mut api_hooking_func: HashMap<String, u64> = HashMap::new();
         let blacklist = get_txt_from_file("api_hooking_apis.txt")?;
 

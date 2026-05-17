@@ -1,4 +1,4 @@
-use crate::rbat::{AnalysisResult, Result, RiskAssessment};
+use crate::core::{AnalysisResult, RbatError, Result, RiskAssessment};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -23,7 +23,7 @@ pub fn generate_json_report(
     });
 
     let json_string = serde_json::to_string_pretty(&report)
-        .map_err(|e| crate::rbat::RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
 
     let mut file = File::create(out_path)?;
     file.write_all(json_string.as_bytes())?;

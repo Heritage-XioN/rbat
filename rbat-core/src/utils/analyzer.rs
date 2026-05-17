@@ -1,6 +1,6 @@
 use goblin::Object;
 
-use crate::rbat::{
+use crate::core::{
     AnalysisResult, Factory, MapValue, RbatError, Result, RiskAssessment, parser::Parser,
     yarahandler::YaraHandler,
 };

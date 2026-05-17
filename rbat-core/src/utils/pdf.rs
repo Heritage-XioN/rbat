@@ -1,5 +1,5 @@
 use super::viz::generate_entropy_heatmap_svg;
-use crate::rbat::{AnalysisResult, Confidence, RbatError, Result, RiskAssessment};
+use crate::core::{AnalysisResult, Confidence, RbatError, Result, RiskAssessment};
 use askama::Template;
 use chrono::Local;
 use std::fs;

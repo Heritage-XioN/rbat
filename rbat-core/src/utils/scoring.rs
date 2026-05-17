@@ -1,4 +1,4 @@
-use crate::rbat::{Confidence, Finding, RiskAssessment};
+use crate::core::{Confidence, Finding, RiskAssessment};
 use std::{cmp, collections::HashMap};
 
 /// Calculates a final risk score (0-100) based on multiple security heuristics.

@@ -1,4 +1,4 @@
-use crate::rbat::{Result, traits::*};
+use super::{Result, traits::*};
 
 /// capstone factory implementation.
 #[derive(Debug)]
