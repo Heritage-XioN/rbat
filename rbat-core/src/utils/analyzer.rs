@@ -40,6 +40,7 @@ pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
     let mut code_cave: HashMap<String, Vec<u64>> = HashMap::new();
     let blacklist = get_txt_from_file("blacklisted_mnemonics.txt")?;
     let binary_data = parsed.parse_buffer()?;
+    let cs: capstone::Capstone;
 
     if let (
         Some(MapValue::OS(os)),
@@ -54,7 +55,7 @@ pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
     ) {
         let (os, arch) = (os, arch);
         let factory = Factory::disasm(*os, *arch);
-        let cs = factory.disassemble()?;
+        cs = factory.disassemble()?;
         let instructions = cs.disasm_all(bytes, *entry_addr)?;
 
         for i in instructions.as_ref() {
