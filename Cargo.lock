@@ -2806,6 +2806,7 @@ dependencies = [
  "lightningcss",
  "object 0.39.1",
  "ratatui",
+ "rayon",
  "rust-embed",
  "serde",
  "serde_json",

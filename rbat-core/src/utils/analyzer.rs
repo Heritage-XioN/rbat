@@ -7,6 +7,7 @@ use crate::core::{
 use crate::utils::{
     get_metadata::get_binary_metadata, get_txt::get_txt_from_file, scoring::calculate_risk,
 };
+use capstone::{Capstone, Instructions};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -34,13 +35,9 @@ pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
     let buffer = fs::read(bin_path)?;
     let binary_object = Object::parse(&buffer)?;
     let parsed = Parser::new(bin_path, buffer.to_owned(), binary_object);
-    let mut counter: i32 = 0;
-    let mut nop_addr: Vec<u64> = vec![];
-    let mut blacklisted_mnemonics: HashMap<String, u64> = HashMap::new();
-    let mut code_cave: HashMap<String, Vec<u64>> = HashMap::new();
-    let blacklist = get_txt_from_file("blacklisted_mnemonics.txt")?;
+
     let binary_data = parsed.parse_buffer()?;
-    let cs: capstone::Capstone;
+    //let instructions: Instructions;
 
     if let (
         Some(MapValue::OS(os)),
@@ -53,32 +50,9 @@ pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
         binary_data.get("text_bytes"),
         binary_data.get("entry_addr"),
     ) {
-        let (os, arch) = (os, arch);
         let factory = Factory::disasm(*os, *arch);
-        cs = factory.disassemble()?;
+        let cs = factory.disassemble()?;
         let instructions = cs.disasm_all(bytes, *entry_addr)?;
-
-        for i in instructions.as_ref() {
-            // checking for code caves (NOP sleds)
-            let mnemonic = i.mnemonic().unwrap_or("");
-
-            if mnemonic == "nop" {
-                nop_addr.push(i.address());
-                counter += 1;
-                if counter >= 30 {
-                    code_cave.insert("nop_addr".to_owned(), nop_addr);
-                    break;
-                };
-            } else {
-                counter = 0;
-                nop_addr.clear();
-            }
-
-            // checks if there any blacklisted mneomonics for Identifying Anti-Analysis & VM Evasion
-            if !mnemonic.is_empty() && blacklist.contains(&mnemonic.to_string()) {
-                blacklisted_mnemonics.insert(mnemonic.to_string(), i.address());
-            }
-        }
 
         let api_hooking = parsed.detect_api_hooking()?;
         let process_inj = parsed.check_process_injec()?;
@@ -86,8 +60,8 @@ pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
 
         let analysis_result: AnalysisResult = AnalysisResult {
             metadata,
-            code_cave,
-            blacklisted_mnemonics,
+            code_cave: code_cave(&instructions)?,
+            blacklisted_mnemonics: anti_analysis_vm_evasion(&instructions)?,
             api_hooking,
             process_injection: process_inj,
             section_entropy,
@@ -114,6 +88,46 @@ pub fn analyzer(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
     Err(RbatError::MissingAnalysisData(
         "Required disassembly inputs were not produced from parse_buffer".to_string(),
     ))
+}
+
+pub fn code_cave(inst: &Instructions) -> Result<HashMap<String, Vec<u64>>> {
+    let mut code_cave: HashMap<String, Vec<u64>> = HashMap::new();
+    let mut nop_addr: Vec<u64> = vec![];
+    let mut counter: i32 = 0;
+
+    for i in inst.as_ref() {
+        // checking for code caves (NOP sleds)
+        let mnemonic = i.mnemonic().unwrap_or("");
+
+        if mnemonic == "nop" {
+            nop_addr.push(i.address());
+            counter += 1;
+            if counter >= 30 {
+                code_cave.insert("nop_addr".to_owned(), nop_addr);
+                break;
+            };
+        } else {
+            counter = 0;
+            nop_addr.clear();
+        }
+    }
+    Ok(code_cave)
+}
+
+pub fn anti_analysis_vm_evasion(inst: &Instructions) -> Result<HashMap<String, u64>> {
+    let mut blacklisted_mnemonics: HashMap<String, u64> = HashMap::new();
+    let blacklist = get_txt_from_file("blacklisted_mnemonics.txt")?;
+
+    for i in inst.as_ref() {
+        // checking for code caves (NOP sleds)
+        let mnemonic = i.mnemonic().unwrap_or("");
+
+        // checks if there any blacklisted mneomonics for Identifying Anti-Analysis & VM Evasion
+        if !mnemonic.is_empty() && blacklist.contains(&mnemonic.to_string()) {
+            blacklisted_mnemonics.insert(mnemonic.to_string(), i.address());
+        }
+    }
+    Ok(blacklisted_mnemonics)
 }
 
 #[cfg(test)]
