@@ -1,11 +1,8 @@
 use crate::core::{BinaryMetadata, RbatError, Result};
 use goblin::Object;
-use std::{fs, path::Path};
 
-pub fn get_binary_metadata(path: &Path) -> Result<BinaryMetadata> {
-    let buffer = fs::read(path)?;
-
-    match Object::parse(&buffer)? {
+pub fn get_binary_metadata(binary_object: &Object) -> Result<BinaryMetadata> {
+    match &binary_object {
         Object::Elf(elf) => Ok(BinaryMetadata {
             binary_type: "Linux ELF".to_string(),
             entry_point: elf.entry,
@@ -23,7 +20,7 @@ pub fn get_binary_metadata(path: &Path) -> Result<BinaryMetadata> {
                 architecture: (macho.header.cputype & 0xFFFF) as u16,
             }),
             goblin::mach::Mach::Fat(fat) => {
-                for arch in &fat {
+                for arch in fat {
                     if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch {
                         return Ok(BinaryMetadata {
                             binary_type: "Mach-O (Fat)".to_string(),

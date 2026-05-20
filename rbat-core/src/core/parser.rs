@@ -17,12 +17,12 @@ pub struct Parser<'bin> {
     /// Raw bytes of the binary.
     buffer: Vec<u8>,
     /// The parsed object representation.
-    binary_object: Object<'bin>,
+    binary_object: &'bin Object<'bin>,
 }
 
 impl<'bin> Parser<'bin> {
     /// Creates a new `Parser` instance.
-    pub fn new(bin_path: &'bin Path, buffer: Vec<u8>, binary_object: Object<'bin>) -> Self {
+    pub fn new(bin_path: &'bin Path, buffer: Vec<u8>, binary_object: &'bin Object<'bin>) -> Self {
         Parser {
             bin_path,
             buffer,
@@ -500,7 +500,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = Object::parse(&buffer).unwrap();
-        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let parser = Parser::new(&path, buffer.to_owned(), &binary_object);
         let result = parser.evaluate_section_entropy();
         assert!(result.is_ok());
         let entropy = result.unwrap();
@@ -515,7 +515,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = Object::parse(&buffer).unwrap();
-        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let parser = Parser::new(&path, buffer.to_owned(), &binary_object);
         let result = parser.parse_buffer();
         match result {
             Ok(data) => {
@@ -534,7 +534,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = Object::parse(&buffer).unwrap();
-        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let parser = Parser::new(&path, buffer.to_owned(), &binary_object);
         let result = parser.evaluate_section_entropy();
         assert!(result.is_ok());
         let entropy = result.unwrap();
@@ -549,7 +549,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = Object::parse(&buffer).unwrap();
-        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let parser = Parser::new(&path, buffer.to_owned(), &binary_object);
         let result = parser.parse_buffer();
         match result {
             Err(RbatError::UnsupportedBinaryFormat(msg)) => {

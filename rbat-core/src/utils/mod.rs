@@ -7,5 +7,6 @@ pub mod json;
 pub mod pdf;
 pub mod scoring;
 pub mod section_offset;
+pub mod stream_error_helper;
 pub mod test_helpers;
 pub mod viz;

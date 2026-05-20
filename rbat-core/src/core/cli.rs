@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None, group(
     ArgGroup::new("modes")
-    .args(&["tui", "pdf", "csv", "json", "out_dir"])
+    .args(&["tui", "pdf", "csv", "json", "out_dir", "dry_run"])
     .required(true).multiple(true))
 )]
 pub struct Cli {
@@ -31,4 +31,8 @@ pub struct Cli {
     /// Output directory for reports (default: current directory)
     #[arg(short, long)]
     pub out_dir: Option<PathBuf>,
+
+    /// runs the cli without any output
+    #[arg(short, long)]
+    pub dry_run: bool,
 }
