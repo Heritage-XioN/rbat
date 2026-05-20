@@ -1,9 +1,12 @@
+pub mod analyzer;
 pub mod cli;
 mod disassembler;
 pub mod error;
+pub mod heuristics;
 pub mod parser;
 pub mod traits;
 pub mod tui;
+pub mod types;
 pub mod yarahandler;
 
 pub use crate::core::disassembler::{BinaryArch, BinaryOS, Factory};

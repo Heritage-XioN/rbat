@@ -43,4 +43,7 @@ pub enum RbatError {
 
     #[error("csv creation error")]
     ErrorCreatingCsv(#[from] csv::Error),
+
+    #[error("an error occurred which resulted in the cancellation of the analysis process")]
+    ErrorAnalysisCancelled,
 }
