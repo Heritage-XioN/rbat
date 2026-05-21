@@ -13,3 +13,29 @@ pub fn get_txt_from_file(file: &str) -> Result<Vec<String>> {
     }
     Ok(texts)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_txt_from_file_valid() {
+        let result = get_txt_from_file("blacklisted_mnemonics.txt");
+        assert!(result.is_ok());
+        let list = result.unwrap();
+        assert!(!list.is_empty());
+        assert!(list.contains(&"rdtsc".to_string()));
+    }
+
+    #[test]
+    fn test_get_txt_from_file_invalid() {
+        let result = get_txt_from_file("non_existent_asset_file_123.txt");
+        assert!(result.is_err());
+        match result {
+            Err(RbatError::MissingAsset(name)) => {
+                assert_eq!(name, "non_existent_asset_file_123.txt");
+            }
+            _ => panic!("Expected MissingAsset error"),
+        }
+    }
+}

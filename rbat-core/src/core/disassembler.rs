@@ -71,3 +71,44 @@ impl Factory {
         Box::new(GenericDisasm::new(os, arch))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_disasm_factory_x64_intel() {
+        let disasm = Factory::disasm(BinaryOS::Win, BinaryArch::X64);
+        let cs = disasm.disassemble().unwrap();
+        let insns = cs.disasm_all(&[0x90], 0x1000).unwrap();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns.as_ref()[0].mnemonic().unwrap(), "nop");
+    }
+
+    #[test]
+    fn test_disasm_factory_x86_att() {
+        let disasm = Factory::disasm(BinaryOS::Linux, BinaryArch::X86);
+        let cs = disasm.disassemble().unwrap();
+        let insns = cs.disasm_all(&[0x90], 0x1000).unwrap();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns.as_ref()[0].mnemonic().unwrap(), "nop");
+    }
+
+    #[test]
+    fn test_disasm_factory_arm() {
+        let disasm = Factory::disasm(BinaryOS::Linux, BinaryArch::Arm);
+        let cs = disasm.disassemble().unwrap();
+        let bytes = [0x00, 0xf0, 0x20, 0xe3];
+        let insns = cs.disasm_all(&bytes, 0x1000).unwrap();
+        assert!(!insns.is_empty());
+    }
+
+    #[test]
+    fn test_disasm_factory_arm64() {
+        let disasm = Factory::disasm(BinaryOS::Linux, BinaryArch::Arm64);
+        let cs = disasm.disassemble().unwrap();
+        let bytes = [0x1f, 0x20, 0x03, 0xd5];
+        let insns = cs.disasm_all(&bytes, 0x1000).unwrap();
+        assert!(!insns.is_empty());
+    }
+}

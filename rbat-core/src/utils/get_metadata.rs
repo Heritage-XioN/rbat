@@ -45,3 +45,65 @@ pub fn get_binary_metadata(binary_object: &Object) -> Result<BinaryMetadata> {
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::test_helpers::test_helpers;
+    use tempfile::tempdir;
+    use std::fs;
+
+    #[test]
+    fn test_get_binary_metadata_elf() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mock_elf");
+        test_helpers::generate_elf(&path);
+
+        let buffer = fs::read(&path).unwrap();
+        let obj = Object::parse(&buffer).unwrap();
+
+        let meta = get_binary_metadata(&obj).unwrap();
+        assert_eq!(meta.binary_type, "Linux ELF");
+        assert_eq!(meta.architecture, goblin::elf::header::EM_X86_64);
+    }
+
+    #[test]
+    fn test_get_binary_metadata_pe() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mock_pe");
+        test_helpers::generate_pe_stub(&path);
+
+        let buffer = fs::read(&path).unwrap();
+        let obj = Object::parse(&buffer).unwrap();
+
+        let meta = get_binary_metadata(&obj).unwrap();
+        assert_eq!(meta.binary_type, "Windows PE");
+        assert_eq!(meta.architecture, 0x8664);
+    }
+
+    #[test]
+    fn test_get_binary_metadata_macho() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mock_macho");
+        test_helpers::generate_macho(&path);
+
+        let buffer = fs::read(&path).unwrap();
+        let obj = Object::parse(&buffer).unwrap();
+
+        let meta = get_binary_metadata(&obj).unwrap();
+        assert_eq!(meta.binary_type, "Mach-O");
+        assert_eq!(meta.architecture, (goblin::mach::constants::cputype::CPU_TYPE_X86_64 & 0xFFFF) as u16);
+    }
+
+    #[test]
+    fn test_get_binary_metadata_unknown() {
+        let _buffer = vec![0x41, 0x42, 0x43, 0x44];
+        let obj = Object::Unknown(0x44434241);
+        let result = get_binary_metadata(&obj);
+        assert!(result.is_err());
+        match result {
+            Err(RbatError::UnsupportedBinaryFormat(_)) => {}
+            _ => panic!("Expected UnsupportedBinaryFormat error"),
+        }
+    }
+}

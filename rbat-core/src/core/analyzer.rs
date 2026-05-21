@@ -124,3 +124,31 @@ pub fn analyze_batch(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)
     );
     Ok((analysis_result, score))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::test_helpers::test_helpers;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_analyze_batch_elf() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mock_elf");
+        test_helpers::generate_elf(&path);
+
+        let result = analyze_batch(&path);
+        assert!(result.is_ok());
+        let (analysis, assessment) = result.unwrap();
+        
+        assert_eq!(analysis.metadata.binary_type, "Linux ELF");
+        assert!(assessment.score <= 100);
+    }
+
+    #[test]
+    fn test_analyze_streaming_err() {
+        let path = Path::new("non_existent_binary_file_abc.bin");
+        let result = analyze_streaming(path, |_| {});
+        assert!(result.is_err());
+    }
+}

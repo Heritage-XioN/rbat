@@ -73,3 +73,48 @@ pub fn get_section_for_offset(ranges: &[SectionRange], offset: usize) -> String 
     }
     "".to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::test_helpers::test_helpers;
+    use tempfile::tempdir;
+    use std::fs;
+
+    #[test]
+    fn test_get_section_for_offset_match() {
+        let ranges = vec![
+            SectionRange {
+                start: 0,
+                end: 100,
+                name: ".text".to_string(),
+            },
+            SectionRange {
+                start: 100,
+                end: 200,
+                name: ".data".to_string(),
+            },
+        ];
+
+        assert_eq!(get_section_for_offset(&ranges, 50), ".text");
+        assert_eq!(get_section_for_offset(&ranges, 100), ".data");
+        assert_eq!(get_section_for_offset(&ranges, 150), ".data");
+        assert_eq!(get_section_for_offset(&ranges, 250), "");
+    }
+
+    #[test]
+    fn test_build_section_map_elf() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mock_elf");
+        test_helpers::generate_elf(&path);
+
+        let buffer = fs::read(&path).unwrap();
+        let obj = Object::parse(&buffer).unwrap();
+
+        let ranges = build_section_map(&obj, &buffer).unwrap();
+        assert!(!ranges.is_empty());
+
+        let has_text = ranges.iter().any(|r| r.name == ".text");
+        assert!(has_text);
+    }
+}
