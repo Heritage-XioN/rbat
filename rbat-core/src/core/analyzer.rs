@@ -5,13 +5,10 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
-use super::{
-    AnalysisProgress, AnalysisResult, MapValue, Result, RiskAssessment, disassemble_section,
-    packer_sig_check, parser::Parser, string_check,
-};
-use crate::utils::{
-    get_metadata::get_binary_metadata, scoring::calculate_risk,
-    stream_error_helper::capture_error_and_cancel,
+use super::{AnalysisProgress, AnalysisResult, MapValue, Result, RiskAssessment, parser::Parser};
+use crate::{
+    core::{AnalysisContext, traits::HeuristicPlugin},
+    utils::{scoring::calculate_risk, stream_error_helper::capture_error_and_cancel},
 };
 
 pub fn analyze_streaming<F>(bin_path: &Path, on_progress: F) -> Result<()>
@@ -23,13 +20,14 @@ where
 
     let buffer = fs::read(bin_path)?;
     let binary_object = Object::parse(&buffer)?;
-    let parsed = Parser::new(bin_path, buffer.to_owned(), &binary_object);
+    let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, &buffer)?;
+    let parsed = Parser::new(&buffer, &binary_object);
     let binary_data = parsed.parse_buffer()?;
 
     if let (
         Some(MapValue::OS(os)),
         Some(MapValue::Arch(arch)),
-        Some(MapValue::Bytes(bytes)),
+        Some(MapValue::Bytes(text_bytes)),
         Some(MapValue::Word(entry_addr)),
     ) = (
         binary_data.get("os"),
@@ -37,52 +35,39 @@ where
         binary_data.get("text_bytes"),
         binary_data.get("entry_addr"),
     ) {
+        let ctx = AnalysisContext {
+            path: bin_path,
+            buffer: &buffer,
+            binary_object: &binary_object,
+            section_ranges: &section_ranges,
+            os: *os,
+            arch: *arch,
+            text_bytes,
+            entry_addr: *entry_addr,
+        };
+
+        let plugins: Vec<Box<dyn HeuristicPlugin>> = vec![
+            Box::new(crate::core::plugins::DisassemblyPlugin),
+            Box::new(crate::core::plugins::StringCheckPlugin),
+            Box::new(crate::core::plugins::PackerSigCheckPlugin),
+            Box::new(crate::core::plugins::EntropyPlugin),
+            Box::new(crate::core::plugins::ApiHookingPlugin),
+            Box::new(crate::core::plugins::ProcessInjectionPlugin),
+            Box::new(crate::core::plugins::MetadataPlugin),
+        ];
+
         rayon::scope(|s| {
-            // Task 1: Disassembly
-            s.spawn(|_| match disassemble_section(bytes, entry_addr, os, arch) {
-                Ok((code_cave, blacklisted_mnemonics)) => on_progress(
-                    AnalysisProgress::Disassembly((code_cave, blacklisted_mnemonics)),
-                ),
-                Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
-            });
-
-            // Task 2: check for strings
-            s.spawn(|_| match string_check(bin_path) {
-                Ok(string_check_result) => {
-                    on_progress(AnalysisProgress::Strings(string_check_result))
-                }
-                Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
-            });
-
-            // Task 3: check for packer signatures
-            s.spawn(|_| match packer_sig_check(bin_path) {
-                Ok(packer_results) => on_progress(AnalysisProgress::PackerSigs(packer_results)),
-                Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
-            });
-
-            // Task 4: Evaluate section entropy
-            s.spawn(|_| match parsed.evaluate_section_entropy() {
-                Ok(entropy_results) => on_progress(AnalysisProgress::Entropy(entropy_results)),
-                Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
-            });
-
-            // Task 5: Detect API hooking
-            s.spawn(|_| match parsed.detect_api_hooking() {
-                Ok(api_hooking) => on_progress(AnalysisProgress::ApiHooking(api_hooking)),
-                Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
-            });
-
-            // Task 6: Check for process injection patterns
-            s.spawn(|_| match parsed.check_process_injec() {
-                Ok(prc_result) => on_progress(AnalysisProgress::ProcessInjection(prc_result)),
-                Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
-            });
-
-            // Task 6: Get bin metadata
-            s.spawn(|_| match get_binary_metadata(&binary_object) {
-                Ok(metadata) => on_progress(AnalysisProgress::BinaryMetadata(metadata)),
-                Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
-            });
+            for plugin in &plugins {
+                s.spawn(|_| {
+                    if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+                    match plugin.run(&ctx) {
+                        Ok(progress) => on_progress(progress),
+                        Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
+                    }
+                });
+            }
         });
     }
 

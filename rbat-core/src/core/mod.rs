@@ -4,6 +4,7 @@ mod disassembler;
 pub mod error;
 pub mod heuristics;
 pub mod parser;
+pub mod plugins;
 pub mod traits;
 pub mod tui;
 pub mod types;
@@ -14,8 +15,8 @@ pub use crate::core::{
     error::RbatError,
     heuristics::{disassemble_section, packer_sig_check, string_check},
     types::{
-        AnalysisProgress, AnalysisResult, Asset, BinaryMetadata, Confidence, Finding, MapValue,
-        RiskAssessment, YaraMatches,
+        AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BinaryMetadata, Confidence,
+        Finding, MapValue, RiskAssessment, SectionRange, YaraMatches,
     },
 };
 
