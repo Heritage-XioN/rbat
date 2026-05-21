@@ -1,3 +1,8 @@
+//! # RBAT Core Module
+//!
+//! This module aggregates and re-exports all submodules, configurations,
+//! error definitions, plugins, traits, and types forming the static analysis library.
+
 pub mod analyzer;
 pub mod cli;
 mod disassembler;

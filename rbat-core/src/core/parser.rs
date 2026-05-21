@@ -1,3 +1,24 @@
+//! # Multi-Format Binary Parser and Metadata Extractor
+//!
+//! This module defines the [`Parser`] structure, which provides a unified,
+//! format-agnostic abstraction for retrieving executable segments, OS target information,
+//! and CPU architecture across ELF, PE, and Mach-O files.
+//!
+//! # Example
+//! ```rust
+//! use goblin::Object;
+//! use rbat::core::parser::Parser;
+//!
+//! # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+//! let obj = Object::parse(buffer)?;
+//! let parser = Parser::new(buffer, &obj);
+//!
+//! let metadata = parser.parse_buffer()?;
+//! let entropy = parser.evaluate_section_entropy()?;
+//! # Ok(())
+//! # }
+//! ```
+
 use crate::utils::get_txt::get_txt_from_file;
 use crate::{core::SectionRange, utils::entropy::calculate_entropy};
 use goblin::Object;

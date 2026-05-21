@@ -1,4 +1,9 @@
-use super::viz::generate_entropy_heatmap_svg;
+//! # PDF Report Generation Pipeline
+//!
+//! This module compiles raw binary analysis findings and section entropy maps
+//! into a stylized HTML template (using `askama`) and generates a PDF using the `fullbleed` printing engine.
+
+use super::viz::generate_entropy_heatmap;
 use crate::core::{AnalysisResult, Confidence, RbatError, Result, RiskAssessment};
 use askama::Template;
 use chrono::Local;
@@ -59,7 +64,7 @@ pub fn generate_pdf_report(
     analysis_result: &AnalysisResult,
     out_path: &Path,
 ) -> Result<()> {
-    let heatmap_svg_content = generate_entropy_heatmap_svg(&analysis_result.section_entropy);
+    let heatmap_svg_content = generate_entropy_heatmap(&analysis_result.section_entropy);
     let has_heatmap = !heatmap_svg_content.trim().is_empty();
 
     let severity_class = match assessment.severity.to_lowercase().as_str() {

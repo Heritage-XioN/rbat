@@ -1,3 +1,8 @@
+//! # JSON Report Generator
+//!
+//! This module serializes the binary structure findings and calculated risk metrics
+//! into a pretty-printed JSON file format for automation integration.
+
 use crate::core::{AnalysisResult, RbatError, Result, RiskAssessment};
 use std::fs::File;
 use std::io::Write;
@@ -45,7 +50,6 @@ mod tests {
         let assessment = RiskAssessment::default();
         let analysis = AnalysisResult::default();
 
-        // This will likely fallback to HTML in a CI environment without fullbleed setup
         let result = generate_json_report(Path::new("test_bin"), &assessment, &analysis, &out_path);
         assert!(result.is_ok());
 

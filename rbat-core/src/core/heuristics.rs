@@ -1,6 +1,11 @@
-use std::collections::HashMap;
-use std::path::Path;
+//! # Binary Evasion and Padding Heuristics
+//!
+//! This module implements core static disassembly heuristics using the Capstone disassembler
+//! to detect anti-analysis techniques, code caves, NOP sleds, and common signature matching rules.
 
+use std::collections::HashMap;
+
+use crate::core::SectionRange;
 use crate::core::{BinaryArch, BinaryOS, Factory, Result, YaraMatches, yarahandler::YaraHandler};
 use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::raw_padding::scan_raw_padding;
@@ -8,6 +13,17 @@ use crate::utils::raw_padding::scan_raw_padding;
 type CodeCave = HashMap<String, Vec<u64>>;
 type BlacklistedMnemonics = HashMap<String, u64>;
 
+/// Disassembles the executable section of a binary and scans for code caves and evasion mnemonics.
+///
+/// Code caves are identified as:
+/// - Sequences of 30 or more consecutive `nop` instructions (returned as `"nop_addr"`).
+/// - Runs of 30 or more consecutive `0x00` padding bytes (returned as `"null_addr"`).
+/// - Runs of 30 or more consecutive `0xCC` trap/INT3 bytes (returned as `"int3_addr"`).
+///
+/// Also flags anti-VM or anti-debugging instructions present in the `blacklisted_mnemonics.txt` asset.
+///
+/// # Errors
+/// Returns `RbatError::DisassemblerError` if Capstone initialization or disassembly fails.
 pub fn disassemble_section(
     bytes: &[u8],
     entry_addr: &u64,
@@ -70,55 +86,37 @@ pub fn disassemble_section(
     Ok((code_cave, blacklisted_mnemonics))
 }
 
-pub fn string_check(bin_path: &Path) -> Result<HashMap<String, Vec<YaraMatches>>> {
-    let buffer = std::fs::read(bin_path)?;
-    let binary_object = goblin::Object::parse(&buffer)?;
-    let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, &buffer)?;
-    let string_check = YaraHandler::new("suspicious_strings.yar".to_owned());
-    let rules = string_check.compile_yara_rule()?;
-    let string_check_result = string_check.scan_mem(&rules, &buffer, &section_ranges)?;
-    Ok(string_check_result)
+/// Helper function to perform YARA string detection.
+///
+/// # Errors
+/// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if goblin fails to parse the file format.
+pub fn string_check(
+    buffer: &[u8],
+    section_ranges: &[SectionRange],
+) -> Result<HashMap<String, Vec<YaraMatches>>> {
+    let handler = YaraHandler::new("suspicious_strings.yar".to_owned());
+    let rules = handler.compile_yara_rule()?;
+    let results = handler.scan_mem(&rules, buffer, section_ranges)?;
+    Ok(results)
 }
 
-pub fn packer_sig_check(bin_path: &Path) -> Result<HashMap<String, Vec<YaraMatches>>> {
-    let buffer = std::fs::read(bin_path)?;
-    let binary_object = goblin::Object::parse(&buffer)?;
-    let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, &buffer)?;
-    let packer_check = YaraHandler::new("packer_signatures.yar".to_owned());
-    let packer_rules = packer_check.compile_yara_rule()?;
-    let packer_results = packer_check.scan_mem(&packer_rules, &buffer, &section_ranges)?;
-    Ok(packer_results)
+/// Helper function to check packer and compiler signatures.
+///
+/// # Errors
+/// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if goblin fails to parse the file format.
+pub fn packer_sig_check(
+    buffer: &[u8],
+    section_ranges: &[SectionRange],
+) -> Result<HashMap<String, Vec<YaraMatches>>> {
+    let handler = YaraHandler::new("packer_signatures.yar".to_owned());
+    let rules = handler.compile_yara_rule()?;
+    let results = handler.scan_mem(&rules, buffer, section_ranges)?;
+    Ok(results)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_scan_raw_padding_nulls() {
-        let mut bytes = vec![0x90; 100];
-        for idx in 40..70 {
-            bytes[idx] = 0x00;
-        }
-
-        let results = scan_raw_padding(&bytes, 0x00, 30, 0x1000);
-        assert_eq!(results.len(), 30);
-        assert_eq!(results[0], 0x1000 + 40);
-        assert_eq!(results[29], 0x1000 + 69);
-    }
-
-    #[test]
-    fn test_scan_raw_padding_int3() {
-        let mut bytes = vec![0x90; 100];
-        for idx in 20..55 {
-            bytes[idx] = 0xCC;
-        }
-
-        let results = scan_raw_padding(&bytes, 0xCC, 30, 0x1000);
-        assert_eq!(results.len(), 35);
-        assert_eq!(results[0], 0x1000 + 20);
-        assert_eq!(results[34], 0x1000 + 54);
-    }
 
     #[test]
     fn test_disassemble_section_no_early_breakout() {

@@ -1,3 +1,8 @@
+//! # Shannon Entropy Calculator
+//!
+//! This module calculates the Shannon entropy of a byte slice to assess the randomness
+//! of data. High entropy (approaching 8.0) suggests compressed, encrypted, or packed binary code.
+
 /// Calculates the Shannon entropy of a given byte slice.
 /// Returns a value between 0.0 and 8.0.
 pub fn calculate_entropy(data: &[u8]) -> f64 {

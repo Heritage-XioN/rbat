@@ -1,3 +1,8 @@
+//! # Interactive TUI Dashboard
+//!
+//! This module implements the ratatui-based Terminal User Interface (TUI) dashboard.
+//! It displays a multi-tab view showing general overview metadata, security findings, section entropy, and recommendations.
+
 use super::{AnalysisResult, Confidence, RiskAssessment};
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
@@ -7,18 +12,23 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Cell, Gauge, List, ListItem, ListState, Padding, Paragraph, Row, Table, TableState,
+        Block, Cell, Padding, Gauge, List, ListItem, ListState, Paragraph, Row, Table, TableState,
         Tabs, Widget,
     },
 };
 use std::io;
 
+/// Tabs representing the different dashboard views.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
+    /// General summary overview.
     #[default]
     Overview,
+    /// Detailed security warnings and indicator matches.
     Security,
+    /// Shannon entropy table and layout.
     Entropy,
+    /// Threat remediation advice and recommendations.
     Advice,
 }
 
@@ -51,6 +61,7 @@ impl Tab {
     }
 }
 
+/// The stateful TUI application container.
 #[derive(Debug, Default)]
 pub struct App {
     analysis_result: AnalysisResult,

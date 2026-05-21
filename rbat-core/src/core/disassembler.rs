@@ -1,26 +1,48 @@
+//! # Capstone Disassembler Factory
+//!
+//! This module configures and constructs the Capstone disassembly engine,
+//! adapting to target operating systems (e.g., Linux AT&T assembly syntax versus Windows/Mac Intel syntax)
+//! and multiple CPU architectures (X86, X64, ARM, ARM64).
+
 use super::{Result, traits::*};
 
-/// capstone factory implementation.
+/// A factory for creating dynamic disassembler instances.
+///
+/// # Example
+/// ```rust
+/// use rbat::core::{Factory, BinaryOS, BinaryArch};
+///
+/// let disasm = Factory::disasm(BinaryOS::Linux, BinaryArch::X64);
+/// let cs = disasm.disassemble().unwrap();
+/// ```
 #[derive(Debug)]
 pub struct Factory;
 
+/// Supported target operating systems for assembly syntax style selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOS {
+    /// Windows (Intel syntax).
     Win,
+    /// Linux (AT&T syntax).
     Linux,
+    /// macOS (Intel syntax).
     Mac,
 }
 
+/// Supported CPU architectures for disassembly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryArch {
+    /// 32-bit x86 Intel.
     X86,
+    /// 64-bit AMD64/x64.
     X64,
+    /// 32-bit ARM.
     Arm,
+    /// 64-bit ARM64/AArch64.
     Arm64,
 }
 
-/// A generic disassembler that adapts to both OS syntax preferences
-/// and the binary's actual CPU architecture.
+/// A generic Capstone-based disassembler configured for a specific OS and CPU architecture.
 #[derive(Debug)]
 pub struct GenericDisasm {
     os: BinaryOS,
@@ -28,6 +50,7 @@ pub struct GenericDisasm {
 }
 
 impl GenericDisasm {
+    /// Creates a new `GenericDisasm` instance.
     pub fn new(os: BinaryOS, arch: BinaryArch) -> Self {
         Self { os, arch }
     }
@@ -67,6 +90,7 @@ impl Disassembler for GenericDisasm {
 }
 
 impl Factory {
+    /// Returns a box containing a configured disassembler for the specified OS and CPU architecture.
     pub fn disasm(os: BinaryOS, arch: BinaryArch) -> Box<dyn Disassembler> {
         Box::new(GenericDisasm::new(os, arch))
     }

@@ -1,3 +1,20 @@
+//! # Security Scoring Engine
+//!
+//! This module implements the classification system that evaluates multiple static binary analysis
+//! indicators (such as entropy, packer matching, process injection APIs, code caves) to produce
+//! a numeric risk score (0 to 100) and actionable advice recommendations.
+//!
+//! # Example
+//! ```rust
+//! use std::collections::HashMap;
+//! use rbat::utils::scoring::calculate_risk;
+//!
+//! let mut entropy = HashMap::new();
+//! entropy.insert(".text".to_string(), 7.8);
+//! let assessment = calculate_risk(&entropy, 0, 0, 0, false, false);
+//! println!("Risk: {} ({})", assessment.score, assessment.severity);
+//! ```
+
 use crate::core::{Confidence, Finding, RiskAssessment};
 use std::{cmp, collections::HashMap};
 

@@ -1,3 +1,8 @@
+//! # Thread Error Collector
+//!
+//! This module provides a thread-safe helper to catch the first error encountered
+//! during concurrent plugin execution, signaling other threads to terminate.
+
 use std::sync::{
     Mutex,
     atomic::{AtomicBool, Ordering},
@@ -5,8 +10,8 @@ use std::sync::{
 
 use crate::core::RbatError;
 
-// A quick helper function to keep the thread closures clean.
-// It only saves the *first* error that occurs.
+/// Saves the first error that occurs to the shared Mutex and triggers the cancellation flag.
+/// Subsequent errors are discarded to preserve the root cause error.
 pub fn capture_error_and_cancel(
     state: &Mutex<Option<RbatError>>,
     err: RbatError,

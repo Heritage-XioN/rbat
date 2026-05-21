@@ -1,3 +1,9 @@
+//! # Parallel Static Analysis Orchestrator
+//!
+//! This module coordinates the concurrent execution of static analysis plugins against
+//! a target binary. It exposes both a streaming API (which pushes progress updates to a callback)
+//! and a blocking batch API (which waits for all plugins to complete and calculates a risk score).
+
 use goblin::Object;
 use rayon;
 use std::fs;
@@ -11,6 +17,24 @@ use crate::{
     utils::{scoring::calculate_risk, stream_error_helper::capture_error_and_cancel},
 };
 
+/// Starts the parallel static analysis pipeline in streaming mode.
+///
+/// Spawns analysis plugins concurrently in a Rayon thread pool scope. Progress events are sent
+/// to the `on_progress` callback. If any plugin fails, the remaining plugins are cancelled
+/// and the first encountered error is returned.
+///
+/// # Example
+/// ```rust,no_run
+/// use std::path::Path;
+/// use rbat::core::analyzer::analyze_streaming;
+///
+/// analyze_streaming(Path::new("my_binary"), |progress| {
+///     // Handle progress updates here
+/// }).unwrap();
+/// ```
+///
+/// # Errors
+/// Returns `RbatError` if file operations, binary parsing, or plugin scanning fails.
 pub fn analyze_streaming<F>(bin_path: &Path, on_progress: F) -> Result<()>
 where
     F: Fn(AnalysisProgress) + Send + Sync,
@@ -78,6 +102,22 @@ where
     Ok(())
 }
 
+/// Performs a blocking batch analysis of the specified binary file.
+///
+/// Runs the parallel heuristic plugins under the hood, aggregates all findings into
+/// an [`AnalysisResult`], and passes the result to the scoring engine to generate a [`RiskAssessment`].
+///
+/// # Example
+/// ```rust,no_run
+/// use std::path::Path;
+/// use rbat::core::analyzer::analyze_batch;
+///
+/// let (result, assessment) = analyze_batch(Path::new("my_binary")).unwrap();
+/// println!("Threat score: {}", assessment.score);
+/// ```
+///
+/// # Errors
+/// Returns `RbatError` if file reading, header parsing, or thread orchestration fails.
 pub fn analyze_batch(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
     let (tx, rx) = std::sync::mpsc::channel();
 

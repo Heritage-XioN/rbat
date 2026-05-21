@@ -1,5 +1,15 @@
+//! # Text Asset Parser
+//!
+//! This module reads line-separated text files from the embedded asset store (e.g. lists of blacklisted APIs or mnemonics)
+//! and extracts them as vectors of whitespace-split strings.
+
 use crate::core::{Asset, RbatError, Result};
 
+/// Loads and parses a text file from the embedded asset compilation.
+/// Splits lines into words/strings, filtering out extra whitespace.
+///
+/// # Errors
+/// Returns `RbatError::MissingAsset` if the asset filename is not registered in the binary assets.
 pub fn get_txt_from_file(file: &str) -> Result<Vec<String>> {
     let file = Asset::get(file).ok_or_else(|| RbatError::MissingAsset(file.to_string()))?;
 

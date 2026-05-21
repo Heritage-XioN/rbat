@@ -1,6 +1,24 @@
+//! # Section Boundary Offset Mapper
+//!
+//! This module builds a cached map of binary sections (using [`SectionRange`]) and provides
+//! lookup to determine which binary section contains a specific raw file offset.
+//! This improves YARA scan match localization performance.
+
 use crate::core::{Result, SectionRange};
 use goblin::Object;
 
+/// Builds a cached mapping of file offset boundaries for all sections in a parsed binary object.
+///
+/// # Example
+/// ```rust
+/// use goblin::Object;
+/// use rbat::utils::section_offset::build_section_map;
+///
+/// # fn run(buffer: &[u8]) {
+/// let obj = Object::parse(buffer).unwrap();
+/// let section_ranges = build_section_map(&obj, buffer).unwrap();
+/// # }
+/// ```
 pub fn build_section_map(binary_object: &Object, _buffer: &[u8]) -> Result<Vec<SectionRange>> {
     let mut ranges = Vec::new();
     match binary_object {
@@ -64,7 +82,8 @@ pub fn build_section_map(binary_object: &Object, _buffer: &[u8]) -> Result<Vec<S
     Ok(ranges)
 }
 
-/// Finds the section name based on a cached section range and offset.
+/// Finds the section name containing the given file offset.
+/// Returns an empty string if no section bounds encompass the offset.
 pub fn get_section_for_offset(ranges: &[SectionRange], offset: usize) -> String {
     for range in ranges {
         if offset >= range.start && offset < range.end {

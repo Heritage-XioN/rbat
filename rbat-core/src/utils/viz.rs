@@ -1,10 +1,15 @@
+//! # Entropy Heatmap Visualizer
+//!
+//! This module generates an HTML/CSS table-based visual heatmap of binary section entropy.
+//! Color coding shifts from cool blue (low randomness/entropy) to hot red (high randomness/entropy).
+
 use std::collections::HashMap;
 
 /// Generates an HTML heatmap string from section entropy data.
 /// Each section is rendered as a colored cell where the color intensity
 /// represents the entropy value (0.0=blue/cool to 8.0=red/hot).
 /// Uses HTML Tables for maximum compatibility with the PDF engine's background rendering.
-pub fn generate_entropy_heatmap_svg(data: &HashMap<String, f64>) -> String {
+pub fn generate_entropy_heatmap(data: &HashMap<String, f64>) -> String {
     let mut sections: Vec<(String, f64)> = data.iter().map(|(k, v)| (k.clone(), *v)).collect();
     sections.sort_by(|a, b| a.0.cmp(&b.0));
 

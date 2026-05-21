@@ -1,6 +1,15 @@
+//! # Binary Header Metadata Extractor
+//!
+//! This module extracts target platform details, machine architecture codes, and entry point
+//! addresses from a parsed [`Object`] representation of ELF, PE, and Mach-O files.
+
 use crate::core::{BinaryMetadata, RbatError, Result};
 use goblin::Object;
 
+/// Extracts high-level metadata (architecture type, entry address, name) from a parsed goblin object.
+///
+/// # Errors
+/// Returns `RbatError::UnsupportedBinaryFormat` if the parsed magic does not map to ELF, PE, or Mach-O.
 pub fn get_binary_metadata(binary_object: &Object) -> Result<BinaryMetadata> {
     match &binary_object {
         Object::Elf(elf) => Ok(BinaryMetadata {
