@@ -5,17 +5,20 @@ use crate::core::{BinaryArch, BinaryOS, Factory, Result, YaraMatches, yarahandle
 
 use crate::utils::get_txt::get_txt_from_file;
 
+type CodeCave = HashMap<String, Vec<u64>>;
+type BlacklistedMnemonics = HashMap<String, u64>;
+
 pub fn disassemble_section(
     bytes: &[u8],
     entry_addr: &u64,
     os: &BinaryOS,
     arch: &BinaryArch,
-) -> Result<(HashMap<String, Vec<u64>>, HashMap<String, u64>)> {
-    let mut code_cave: HashMap<String, Vec<u64>> = HashMap::new();
+) -> Result<(CodeCave, BlacklistedMnemonics)> {
+    let mut code_cave: CodeCave = HashMap::new();
     let mut nop_addr: Vec<u64> = vec![];
     let mut counter: i32 = 0;
 
-    let mut blacklisted_mnemonics: HashMap<String, u64> = HashMap::new();
+    let mut blacklisted_mnemonics: BlacklistedMnemonics = HashMap::new();
     let blacklist = get_txt_from_file("blacklisted_mnemonics.txt")?;
 
     let factory = Factory::disasm(*os, *arch);
