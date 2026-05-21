@@ -1,7 +1,11 @@
 use super::{BinaryArch, BinaryOS};
+use goblin::Object;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 pub enum AnalysisProgress {
     Disassembly((HashMap<String, Vec<u64>>, HashMap<String, u64>)),
@@ -75,4 +79,22 @@ pub struct BinaryMetadata {
     pub binary_type: String,
     pub entry_point: u64,
     pub architecture: u16,
+}
+
+pub struct AnalysisContext<'a> {
+    pub path: &'a Path,
+    pub buffer: &'a [u8],
+    pub binary_object: &'a Object<'a>,
+    pub section_ranges: &'a [SectionRange],
+    pub os: BinaryOS,
+    pub arch: BinaryArch,
+    pub text_bytes: &'a [u8],
+    pub entry_addr: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SectionRange {
+    pub start: usize,
+    pub end: usize,
+    pub name: String,
 }

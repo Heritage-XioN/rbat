@@ -1,7 +1,6 @@
 use super::{Asset, RbatError, Result, YaraMatches};
-use crate::utils::section_offset::get_section_for_offset;
-use std::path::Path;
-use std::{collections::HashMap, fs};
+use crate::{core::SectionRange, utils::section_offset::get_section_for_offset};
+use std::collections::HashMap;
 use yara::{Compiler, Rules};
 
 #[derive(Debug)]
@@ -25,17 +24,17 @@ impl YaraHandler {
         Ok(compiled_rule_file)
     }
 
-    /// Scans a file using the provided compiled YARA rules and returns a structured result
+    /// Scans a memory buffer using the provided compiled YARA rules and returns a structured result
     /// with offsets, sections, length and matched data.
-    pub fn scan_file(
+    pub fn scan_mem(
         &self,
-        compiled_rules: Rules,
-        scan_file: &Path,
+        compiled_rules: &Rules,
+        buffer: &[u8],
+        section_ranges: &[SectionRange],
     ) -> Result<HashMap<String, Vec<YaraMatches>>> {
         let mut scanner = compiled_rules.scanner()?;
-        let results = scanner.scan_file(scan_file)?;
+        let results = scanner.scan_mem(buffer)?;
         let mut yara_result: HashMap<String, Vec<YaraMatches>> = HashMap::new();
-        let buffer = fs::read(scan_file)?;
 
         if !results.is_empty() {
             for rule in results {
@@ -45,7 +44,7 @@ impl YaraHandler {
                     }
 
                     for m in yr_string.matches {
-                        let section_name = get_section_for_offset(m.offset, &buffer)?;
+                        let section_name = get_section_for_offset(section_ranges, m.offset);
                         let decoded_string = String::from_utf8_lossy(&m.data).to_string();
 
                         yara_result
@@ -60,10 +59,8 @@ impl YaraHandler {
                     }
                 }
             }
-            Ok(yara_result)
-        } else {
-            Ok(yara_result)
         }
+        Ok(yara_result)
     }
 }
 
