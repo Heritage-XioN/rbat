@@ -5,13 +5,14 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
-use crate::core::heuristics::{disassemble_section, packer_sig_check, string_check};
-use crate::core::types::AnalysisProgress;
-use crate::core::{AnalysisResult, RiskAssessment};
-use crate::core::{MapValue, Result, parser::Parser};
-use crate::utils::get_metadata::get_binary_metadata;
-use crate::utils::scoring::calculate_risk;
-use crate::utils::stream_error_helper::capture_error_and_cancel;
+use super::{
+    AnalysisProgress, AnalysisResult, MapValue, Result, RiskAssessment, disassemble_section,
+    packer_sig_check, parser::Parser, string_check,
+};
+use crate::utils::{
+    get_metadata::get_binary_metadata, scoring::calculate_risk,
+    stream_error_helper::capture_error_and_cancel,
+};
 
 pub fn analyze_streaming<F>(bin_path: &Path, on_progress: F) -> Result<()>
 where

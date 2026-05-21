@@ -27,8 +27,7 @@ fn main() -> Result<()> {
     // progress indicator
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
-        ProgressStyle::with_template("{spinner:.cyan} [{elapsed_precise}] {msg}")
-            .unwrap()
+        ProgressStyle::with_template("{spinner:.cyan} [{elapsed_precise}] {msg}")?
             .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✓"]),
     );
     spinner.enable_steady_tick(Duration::from_millis(100));
