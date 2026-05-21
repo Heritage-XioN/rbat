@@ -4,6 +4,7 @@ pub mod get_metadata;
 pub mod get_txt;
 pub mod json;
 pub mod pdf;
+pub mod raw_padding;
 pub mod scoring;
 pub mod section_offset;
 pub mod stream_error_helper;
