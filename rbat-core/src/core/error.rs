@@ -46,4 +46,16 @@ pub enum RbatError {
 
     #[error("an error occurred which resulted in the cancellation of the analysis process")]
     ErrorAnalysisCancelled,
+
+    #[error("HTML template rendering error: {0}")]
+    TemplateError(String),
+
+    #[error("PDF rendering error: {0}")]
+    PdfRenderError(String),
+
+    #[error("JSON error: {0}")]
+    JsonError(String),
+
+    #[error("CSV error: {0}")]
+    CsvError(String),
 }

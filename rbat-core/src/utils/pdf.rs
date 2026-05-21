@@ -172,7 +172,7 @@ pub fn generate_pdf_report(
 
     let html = template
         .render()
-        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::TemplateError(e.to_string()))?;
 
     match generate_pdf_from_html(&html, out_path) {
         Ok(()) => {
@@ -203,11 +203,11 @@ fn generate_pdf_from_html(html: &str, out_path: &Path) -> Result<()> {
         .document_title("RBAT Threat Intelligence Report")
         .document_lang("en")
         .build()
-        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::PdfRenderError(e.to_string()))?;
 
     let pdf_bytes = engine
         .render_to_buffer(html, REPORT_CSS)
-        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::PdfRenderError(e.to_string()))?;
 
     fs::write(out_path, pdf_bytes)?;
 
