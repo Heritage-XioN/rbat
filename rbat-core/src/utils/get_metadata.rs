@@ -59,8 +59,8 @@ pub fn get_binary_metadata(binary_object: &Object) -> Result<BinaryMetadata> {
 mod tests {
     use super::*;
     use crate::utils::test_helpers::test_helpers;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_get_binary_metadata_elf() {
@@ -101,7 +101,10 @@ mod tests {
 
         let meta = get_binary_metadata(&obj).unwrap();
         assert_eq!(meta.binary_type, "Mach-O");
-        assert_eq!(meta.architecture, (goblin::mach::constants::cputype::CPU_TYPE_X86_64 & 0xFFFF) as u16);
+        assert_eq!(
+            meta.architecture,
+            (goblin::mach::constants::cputype::CPU_TYPE_X86_64 & 0xFFFF) as u16
+        );
     }
 
     #[test]

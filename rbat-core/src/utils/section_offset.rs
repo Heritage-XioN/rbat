@@ -97,8 +97,8 @@ pub fn get_section_for_offset(ranges: &[SectionRange], offset: usize) -> String 
 mod tests {
     use super::*;
     use crate::utils::test_helpers::test_helpers;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_get_section_for_offset_match() {

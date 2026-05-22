@@ -12,7 +12,7 @@ use rbat::{
 };
 use std::sync::mpsc;
 use std::time::Duration;
-use tui_banner::{Banner, Style};
+use tui_banner::Banner;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -21,7 +21,20 @@ fn main() -> Result<()> {
     let mv_path = cli.path.clone();
 
     // Generate and display banner
-    let banner = Banner::new("RBAT")?.style(Style::FireWarning).render();
+    let font = tui_banner::Font::from_figlet_str(include_str!("../assets/ansishadow.flf"))
+        .map_err(|e| color_eyre::eyre::eyre!("Failed to parse ANSI Shadow font: {:?}", e))?;
+    let banner = Banner::new("RBAT")?
+        .font(font)
+        .gradient(tui_banner::Gradient::vertical(
+            tui_banner::Palette::from_hex(&[
+                "#FDBA74", // Peach/light orange
+                "#F97316", // Orange
+                "#9A3412", // Rust
+                "#431407", // Dark brown/red
+            ]),
+        ))
+        .fill(tui_banner::Fill::Keep)
+        .render();
     println!("\n {}", banner);
 
     // progress indicator

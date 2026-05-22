@@ -23,11 +23,11 @@ pub fn scan_raw_padding(
             }
             count += 1;
         } else {
-            if count >= min_length {
-                if let Some(start) = start_idx {
-                    for i in 0..count {
-                        addresses.push(text_section_offset + (start + i) as u64);
-                    }
+            if count >= min_length
+                && let Some(start) = start_idx
+            {
+                for i in 0..count {
+                    addresses.push(text_section_offset + (start + i) as u64);
                 }
             }
             start_idx = None;
@@ -35,11 +35,11 @@ pub fn scan_raw_padding(
         }
     }
 
-    if count >= min_length {
-        if let Some(start) = start_idx {
-            for i in 0..count {
-                addresses.push(text_section_offset + (start + i) as u64);
-            }
+    if count >= min_length
+        && let Some(start) = start_idx
+    {
+        for i in 0..count {
+            addresses.push(text_section_offset + (start + i) as u64);
         }
     }
     addresses

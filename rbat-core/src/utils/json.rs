@@ -27,8 +27,8 @@ pub fn generate_json_report(
         "analysis_details": analysis_result,
     });
 
-    let json_string = serde_json::to_string_pretty(&report)
-        .map_err(|e| RbatError::JsonError(e.to_string()))?;
+    let json_string =
+        serde_json::to_string_pretty(&report).map_err(|e| RbatError::JsonError(e.to_string()))?;
 
     let mut file = File::create(out_path)?;
     file.write_all(json_string.as_bytes())?;

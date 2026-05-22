@@ -12,7 +12,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Cell, Padding, Gauge, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+        Block, Cell, Gauge, List, ListItem, ListState, Padding, Paragraph, Row, Table, TableState,
         Tabs, Widget,
     },
 };

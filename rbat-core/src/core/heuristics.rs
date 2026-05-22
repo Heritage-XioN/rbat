@@ -36,7 +36,9 @@ pub fn disassemble_section(
 
     let mut blacklisted_mnemonics: BlacklistedMnemonics = HashMap::new();
     let blacklist: std::collections::HashSet<String> =
-        get_txt_from_file("blacklisted_mnemonics.txt")?.into_iter().collect();
+        get_txt_from_file("blacklisted_mnemonics.txt")?
+            .into_iter()
+            .collect();
 
     let factory = Factory::disasm(*os, *arch);
     let cs = factory.disassemble()?;
