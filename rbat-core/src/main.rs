@@ -21,7 +21,7 @@ fn main() -> Result<()> {
     let mv_path = cli.path.clone();
 
     // Generate and display banner
-    let banner = Banner::new("RBAT")?.style(Style::NeonCyber).render();
+    let banner = Banner::new("RBAT")?.style(Style::FireWarning).render();
     println!("\n {}", banner);
 
     // progress indicator
