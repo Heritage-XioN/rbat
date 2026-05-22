@@ -73,17 +73,15 @@ impl Disassembler for GenericDisasm {
                     _ => x86.syntax(arch::x86::ArchSyntax::Intel),
                 };
 
-                Ok(x86.detail(true).build()?)
+                Ok(x86.build()?)
             }
             BinaryArch::Arm => Ok(Capstone::new()
                 .arm()
                 .mode(arch::arm::ArchMode::Arm)
-                .detail(true)
                 .build()?),
             BinaryArch::Arm64 => Ok(Capstone::new()
                 .arm64()
                 .mode(arch::arm64::ArchMode::Arm)
-                .detail(true)
                 .build()?),
         }
     }

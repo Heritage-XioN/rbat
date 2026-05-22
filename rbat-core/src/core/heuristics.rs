@@ -35,7 +35,8 @@ pub fn disassemble_section(
     let mut counter: i32 = 0;
 
     let mut blacklisted_mnemonics: BlacklistedMnemonics = HashMap::new();
-    let blacklist = get_txt_from_file("blacklisted_mnemonics.txt")?;
+    let blacklist: std::collections::HashSet<String> =
+        get_txt_from_file("blacklisted_mnemonics.txt")?.into_iter().collect();
 
     let factory = Factory::disasm(*os, *arch);
     let cs = factory.disassemble()?;
@@ -59,7 +60,7 @@ pub fn disassemble_section(
         }
 
         // Checks for anti-VM / anti-debugging mnemonics
-        if !mnemonic.is_empty() && blacklist.contains(&mnemonic.to_string()) {
+        if !mnemonic.is_empty() && blacklist.contains(mnemonic) {
             blacklisted_mnemonics.insert(mnemonic.to_string(), i.address());
         }
     }
