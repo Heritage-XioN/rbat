@@ -34,7 +34,7 @@ The workspace is structured as a cargo workspace containing:
 
 ### Prerequisites
 - [Rust](https://rustup.rs/) (Stable)
-- [Node.js](https://nodejs.org/) & [npm](https://www.npmjs.com/) (For frontend client)
+- [Node.js](https://nodejs.org/) & [pnpm](https://pnpm.io/) (For frontend client)
 
 ### Useful Commands
 - Check compilation: `cargo check`

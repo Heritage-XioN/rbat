@@ -136,8 +136,7 @@ rbat <path_to_binary> --pdf --csv --json --out-dir ./reports
 
 * [Documentation (docs.rs)](https://docs.rs/rbat)
 * [Repository (GitHub)](https://github.com/Heritage-XioN/rbat)
-* [Changelog](https://github.com/Heritage-XioN/rbat/blob/main/CHANGELOG.md)
-* [Contributing Guide](https://github.com/Heritage-XioN/rbat/blob/main/CONTRIBUTING.md)
+* [Contributing Guide](../CONTRIBUTING.md)
 
 ---
 
