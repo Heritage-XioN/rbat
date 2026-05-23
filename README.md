@@ -1,11 +1,20 @@
 ```bash
-██████╗ ██████╗  █████╗ ████████╗
-██╔══██╗██╔══██╗██╔══██╗╚══██╔══╝
-██████╔╝██████╔╝███████║   ██║   
-██╔══██╗██╔══██╗██╔══██║   ██║   
-██║  ██║██████╔╝██║  ██║   ██║   
-╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝   ╚═╝   
+        ██████╗ ██████╗  █████╗ ████████╗
+        ██╔══██╗██╔══██╗██╔══██╗╚══██╔══╝
+        ██████╔╝██████╔╝███████║   ██║   
+        ██╔══██╗██╔══██╗██╔══██║   ██║   
+        ██║  ██║██████╔╝██║  ██║   ██║   
+        ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝   ╚═╝   
 ```
+
+[![Crates.io Version](https://img.shields.io/crates/v/rbat?style=for-the-badge&logo=rust&color=orange&label=core%20version)](https://crates.io/crates/rbat)
+[![Crates.io Downloads](https://img.shields.io/crates/d/rbat?style=for-the-badge&color=blue&label=downloads)](https://crates.io/crates/rbat)
+[![Rust CI Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci-rust.yml?style=for-the-badge&label=rust%20ci)](https://github.com/Heritage-XioN/rbat/actions)
+[![Client CI Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci-client.yml?style=for-the-badge&label=client%20ci)](https://github.com/Heritage-XioN/rbat/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Rust MSRV](https://img.shields.io/badge/rustc-1.75+-orange.svg?style=for-the-badge&logo=rust)](https://blog.rust-lang.org/2023/12/28/Rust-1.75.0.html)
+[![Node Version](https://img.shields.io/badge/node-%3E%3D20.0.0-green.svg?style=for-the-badge&logo=node.js)](https://nodejs.org)
+
 
 RBAT (Rust Binary Analysis Tool) is a modern, high-performance static analysis and security auditing framework for compiled binaries.
 
