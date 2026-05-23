@@ -101,6 +101,15 @@ fn main() -> Result<()> {
         }
     }
 
+    // checks for error once analysis is fully complete
+    match analysis_thread.join().unwrap() {
+        Ok(_) => spinner.finish_with_message("Analysis complete! 🚀\n"),
+        Err(e) => {
+            spinner.finish_with_message("Analysis failed! ❌\n");
+            return Err(color_eyre::eyre::eyre!(e));
+        }
+    }
+
     // computes risk assessment
     let risk_assessment = calculate_risk(
         &analysis_result.section_entropy,
@@ -115,14 +124,6 @@ fn main() -> Result<()> {
         !analysis_result.packer_signatures.is_empty(),
     );
 
-    // checks for error onces analysis to fully complete
-    match analysis_thread.join().unwrap() {
-        Ok(_) => spinner.finish_with_message("Analysis complete! 🚀\n"),
-        Err(e) => {
-            spinner.finish_with_message("Analysis failed! ❌\n");
-            eprintln!("Error: {:?}", e);
-        }
-    }
 
     // output directory
     let base_dir = cli.out_dir.unwrap_or_else(|| std::path::PathBuf::from("."));
