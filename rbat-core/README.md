@@ -1,158 +1,145 @@
-# RBAT: Rust Binary Analysis Tool
+# rbat
 
 [![Crates.io Version](https://img.shields.io/crates/v/rbat?style=for-the-badge&logo=rust&color=orange&label=version)](https://crates.io/crates/rbat)
 [![Crates.io Downloads](https://img.shields.io/crates/d/rbat?style=for-the-badge&color=blue&label=downloads)](https://crates.io/crates/rbat)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci.yml?style=for-the-badge&label=build)](https://github.com/Heritage-XioN/rbat/actions)
+[![Rust MSRV](https://img.shields.io/badge/rustc-1.75+-orange.svg?style=for-the-badge&logo=rust)](https://blog.rust-lang.org/2023/12/28/Rust-1.75.0.html)
 
-**RBAT** is a high-performance, terminal-native binary analysis tool designed for security researchers, malware analysts, and reverse engineers. It provides a comprehensive suite of static analysis tools to identify potential threats, analyze binary structures, and evaluate risk levels across multiple executable formats.
-
----
-
-## 🚀 Features
-
-- **Multi-Format Support**: Native parsing for **ELF**, **PE**, and **Mach-O** binaries using `goblin`.
-- **Dynamic Risk Scoring**: Heuristic-based risk assessment that calculates a threat level (0-100) based on entropy, suspicious imports, and behavior patterns.
-- **Rich TUI Dashboard**: An interactive terminal interface built with `ratatui` for navigating findings, metadata, and security recommendations.
-- **Entropy Heatmaps**: Visualizes section-level entropy to detect packed code, encrypted payloads, or hidden data.
-- **YARA Integration**: Built-in scanning for packer signatures and suspicious patterns using customized, embedded YARA rules.
-- **Multi-Format Reporting**: Export analysis results to professional **PDF** reports (with heatmaps), SOC-ready **CSV** logs, or **JSON** for automated pipelines.
-
-## 🎓 Educational Value
-
-RBAT is designed not just as a tool, but as a reference for learning binary internals:
-- **Binary Internals**: Learn how headers, section tables, and symbol tables differ between ELF, PE, and Mach-O.
-- **Static Analysis Techniques**: Understand how to identify "code caves," analyze import function associations, and detect API hooking signatures.
-- **Information Theory**: Explore how Shannon Entropy is applied in security to differentiate between compressed, encrypted, and plaintext data.
-- **Heuristic Modeling**: See how multiple low-confidence indicators can be combined into a high-confidence risk score.
+**rbat** is a high-performance, terminal-native binary analysis tool designed for security researchers, malware analysts, and reverse engineers. It provides a comprehensive suite of static analysis tools to identify potential threats, analyze binary structures, and evaluate risk levels across multiple executable formats.
 
 ---
 
-## 📋 Prerequisites
+## Features
 
-- **Rust**: Version 1.75 or higher is recommended.
-- **C Libraries**: 
-  - `capstone` (for disassembly)
-  - `libyara` (for pattern matching)
-  - *Note: On most systems, these are handled automatically by Cargo or bundled via "vendored" features.*
+* Multi-Format Support: Native parsing for ELF, PE, and Mach-O binaries.
+* Dynamic Risk Scoring: Heuristic-based risk assessment that calculates a threat level based on entropy, suspicious imports, and behavior patterns.
+* Rich TUI Dashboard: An interactive terminal interface for navigating findings, metadata, and security recommendations.
+* Entropy Heatmaps: Visualizes section-level entropy to detect packed code, encrypted payloads, or hidden data.
+* YARA Integration: Built-in scanning for packer signatures and suspicious patterns using customized, embedded YARA rules.
+* Multi-Format Reporting: Export analysis results to PDF reports (with heatmaps), CSV logs, or JSON for automated pipelines.
 
 ---
 
-## 🛠️ Installation
+## Installation
 
-### From Crates.io (Recommended)
-```bash
-cargo install rbat
-```
+Add this to your `Cargo.toml`:
 
-### From Source
-```bash
-# Clone the repository
-git clone https://github.com/Heritage-XioN/rbat.git
-cd rbat
-
-# Build the project
-cargo build --release
-
-# Run tests to verify setup
-cargo test
+```toml
+[dependencies]
+rbat = "0.2.0"
 ```
 
 ---
 
-## 📖 Usage
+## Quick Start
 
-### Interactive Mode
-Analyze a binary directly in the interactive **TUI**:
+The following is a minimal example demonstrating how to run a programmatic static analysis on a target binary and retrieve its risk assessment score:
+
+```rust
+use std::path::Path;
+use rbat::core::analyzer::analyze_batch;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let path = Path::new("path/to/binary");
+    let (analysis_result, risk_assessment) = analyze_batch(path)?;
+
+    println!("Analysis complete for: {}", analysis_result.metadata.binary_type);
+    println!("Threat Score: {}/100", risk_assessment.score);
+    println!("Severity: {}", risk_assessment.severity);
+
+    Ok(())
+}
+```
+
+---
+
+## Usage Examples
+
+### Programmatic Streaming Analysis
+
+You can consume analysis updates as they occur (e.g., to feed a progress bar or custom logger) using `analyze_streaming`:
+
+```rust
+use std::path::Path;
+use rbat::core::analyzer::analyze_streaming;
+use rbat::core::types::AnalysisProgress;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let path = Path::new("path/to/binary");
+
+    analyze_streaming(path, |event| match event {
+        AnalysisProgress::BinaryMetadata(meta) => {
+            println!("Target platform: {}", meta.binary_type);
+        }
+        AnalysisProgress::Entropy(sections) => {
+            println!("Calculated entropy for {} sections", sections.len());
+        }
+        AnalysisProgress::Strings(matches) => {
+            println!("YARA matched {} suspicious strings", matches.len());
+        }
+        _ => {}
+    })?;
+
+    Ok(())
+}
+```
+
+### Report Generation
+
+Generate formatted PDF, CSV, or JSON analysis reports:
+
+```rust
+use std::path::Path;
+use rbat::core::analyzer::analyze_batch;
+use rbat::utils::{
+    csv::generate_csv_report,
+    json::generate_json_report,
+    pdf::generate_pdf_report,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let binary_path = Path::new("path/to/binary");
+    let out_dir = Path::new("./reports");
+    std::fs::create_dir_all(out_dir)?;
+
+    let (result, score) = analyze_batch(binary_path)?;
+
+    // PDF Report
+    generate_pdf_report(binary_path, &score, &result, &out_dir.join("report.pdf"))?;
+
+    // CSV Report
+    generate_csv_report(binary_path, &score, &out_dir.join("report.csv"))?;
+
+    // JSON Report
+    generate_json_report(binary_path, &score, &result, &out_dir.join("report.json"))?;
+
+    Ok(())
+}
+```
+
+### CLI Mode
+
+Alternatively, run `rbat` as a command-line application.
+
+Analyze a binary and display the interactive dashboard:
 ```bash
 rbat <path_to_binary> --tui
 ```
 
-### PDF Reporting
-Generate a professional **PDF report**:
+Generate reports and save them to a directory:
 ```bash
-rbat <path_to_binary> --pdf --out-dir ./reports
+rbat <path_to_binary> --pdf --csv --json --out-dir ./reports
 ```
-*Output Example (report.pdf):* A multi-page document featuring a high-level summary, detailed security findings, and an entropy heatmap visualization.
+---
+## Links
 
-### SOC/SIEM Integration
-Export results to **CSV** or **JSON** for ingestion into automated pipelines:
-```bash
-rbat <path_to_binary> --csv --json --out-dir ./logs
-```
-
-**JSON Output Example:**
-```json
-{
-  "target": { "name": "malware.exe", "path": "/bin/malware.exe" },
-  "risk_assessment": {
-    "score": 85,
-    "severity": "Malicious",
-    "findings": [
-      { "indicator": "Suspicious Section Names", "confidence": "High", "weight": 10 }
-    ]
-  }
-}
-```
-
-**CSV Output Example:**
-```csv
-Timestamp,Filename,Risk_Score,Severity,Indicator_Type,Confidence,Description
-2023-10-27 14:02:49,firmware.elf,85,Malicious,API Hooking,High,Suspicious function: system() @ 0x0801a2c
-```
+* [Documentation (docs.rs)](https://docs.rs/rbat)
+* [Repository (GitHub)](https://github.com/Heritage-XioN/rbat)
+* [Contributing Guide](../CONTRIBUTING.md)
 
 ---
 
-## ⚙️ Configuration
+## License
 
-RBAT is designed to be a "zero-config" standalone tool:
-- **Embedded Assets**: All YARA rules, blacklists, and CSS templates are embedded into the binary at compile-time using `rust-embed`.
-- **CLI Flags**: Behavior is controlled entirely through command-line arguments (run `rbat --help` for details).
-
----
-
-## 🏗️ Architecture
-
-RBAT follows a modular pipeline architecture:
-1. **Parser Layer**: Uses `goblin` to abstract away the differences between binary formats and extract raw bytes, entry points, and symbol data.
-2. **Analysis Engine**: Orchestrates the analysis flow, feeding executable bytes to the **Disassembler (Capstone)** and the file buffer to the **YARA Scanner**.
-3. **Scoring Engine**: Consumes all findings (entropy, suspicious APIs, packer matches) and applies a weighted heuristic to produce a `RiskAssessment`.
-4. **Presentation Layer**: 
-    - **TUI**: Provides a stateful, interactive dashboard.
-    - **Reporters**: Uses `askama` templates and `fullbleed` to generate design-compliant documents.
-
----
-
-## 📂 Project Structure
-
-```text
-rbat/
-├── assets/             # Embedded YARA rules and suspicious pattern blacklists
-├── src/
-│   ├── main.rs         # Entry point and CLI orchestration
-│   ├── rbat/           # Core library components
-│   │   ├── parser.rs   # Binary format parsing (ELF/PE/Mach-O)
-│   │   ├── tui.rs      # Ratatui-based interactive dashboard
-│   │   └── ...
-│   └── utils/          # Analysis and reporting utilities
-│       ├── analyzer.rs # Analysis pipeline orchestration
-│       ├── scoring.rs  # Risk assessment heuristic engine
-│       ├── pdf.rs      # Askama/Fullbleed PDF reporting
-│       └── ...
-├── templates/          # HTML/CSS templates for generated reports
-└── tests/              # Integration tests and binary generation helpers
-```
-
----
-
-## 🛡️ Security Considerations
-
-- **Static Only**: RBAT performs static analysis. It does **not** execute the target binary, making it safe to use on unknown or potentially malicious files.
-- **Local Privacy**: All analysis is performed locally on your machine. No data is sent to external servers or cloud services.
-- **Heuristic Limits**: Risk scoring is based on common malware patterns. A high score indicates a need for manual review, while a low score does not guarantee the file is harmless.
-
----
-
-## ⚖️ License
-
-This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

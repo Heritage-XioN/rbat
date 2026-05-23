@@ -1,10 +1,28 @@
-use crate::utils::entropy::calculate_entropy;
+//! # Multi-Format Binary Parser and Metadata Extractor
+//!
+//! This module defines the [`Parser`] structure, which provides a unified,
+//! format-agnostic abstraction for retrieving executable segments, OS target information,
+//! and CPU architecture across ELF, PE, and Mach-O files.
+//!
+//! # Example
+//! ```rust
+//! use goblin::Object;
+//! use rbat::core::parser::Parser;
+//!
+//! # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+//! let obj = Object::parse(buffer)?;
+//! let parser = Parser::new(buffer, &obj);
+//!
+//! let metadata = parser.parse_buffer()?;
+//! let entropy = parser.evaluate_section_entropy()?;
+//! # Ok(())
+//! # }
+//! ```
+
 use crate::utils::get_txt::get_txt_from_file;
+use crate::{core::SectionRange, utils::entropy::calculate_entropy};
 use goblin::Object;
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::collections::{HashMap, HashSet};
 
 use super::{BinaryArch, BinaryOS, MapValue, RbatError, Result, yarahandler::YaraHandler};
 
@@ -12,19 +30,16 @@ use super::{BinaryArch, BinaryOS, MapValue, RbatError, Result, yarahandler::Yara
 /// It holds the raw binary buffer and the parsed object from the `goblin` crate.
 #[derive(Debug)]
 pub struct Parser<'bin> {
-    /// Reference to the path of the binary being analyzed.
-    bin_path: &'bin Path,
     /// Raw bytes of the binary.
-    buffer: Vec<u8>,
+    buffer: &'bin [u8],
     /// The parsed object representation.
-    binary_object: Object<'bin>,
+    binary_object: &'bin Object<'bin>,
 }
 
 impl<'bin> Parser<'bin> {
     /// Creates a new `Parser` instance.
-    pub fn new(bin_path: &'bin Path, buffer: Vec<u8>, binary_object: Object<'bin>) -> Self {
+    pub fn new(buffer: &'bin [u8], binary_object: &'bin Object<'bin>) -> Self {
         Parser {
-            bin_path,
             buffer,
             binary_object,
         }
@@ -415,7 +430,10 @@ impl<'bin> Parser<'bin> {
     /// Detects potential API hooking activity by scanning for exported functions and known hooking patterns.
     ///
     /// Combines static symbol table analysis with a YARA scan for specific code signatures.
-    pub fn detect_api_hooking(&self) -> Result<HashMap<String, u64>> {
+    pub fn detect_api_hooking(
+        &self,
+        section_ranges: &[SectionRange],
+    ) -> Result<HashMap<String, u64>> {
         let mut api_hooking_func: HashMap<String, u64> = HashMap::new();
         let blacklist = get_txt_from_file("api_hooking_apis.txt")?;
 
@@ -470,7 +488,7 @@ impl<'bin> Parser<'bin> {
         // Supplement with YARA scan for patterns and strings
         let yara = YaraHandler::new("api_hooking.yar".to_owned());
         if let Ok(rules) = yara.compile_yara_rule()
-            && let Ok(matches) = yara.scan_file(rules, self.bin_path)
+            && let Ok(matches) = yara.scan_mem(&rules, self.buffer, section_ranges)
         {
             for (rule_name, instances) in matches {
                 for m in instances {
@@ -500,7 +518,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = Object::parse(&buffer).unwrap();
-        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let parser = Parser::new(&buffer, &binary_object);
         let result = parser.evaluate_section_entropy();
         assert!(result.is_ok());
         let entropy = result.unwrap();
@@ -515,7 +533,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = Object::parse(&buffer).unwrap();
-        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let parser = Parser::new(&buffer, &binary_object);
         let result = parser.parse_buffer();
         match result {
             Ok(data) => {
@@ -534,7 +552,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = Object::parse(&buffer).unwrap();
-        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let parser = Parser::new(&buffer, &binary_object);
         let result = parser.evaluate_section_entropy();
         assert!(result.is_ok());
         let entropy = result.unwrap();
@@ -549,7 +567,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = Object::parse(&buffer).unwrap();
-        let parser = Parser::new(&path, buffer.to_owned(), binary_object);
+        let parser = Parser::new(&buffer, &binary_object);
         let result = parser.parse_buffer();
         match result {
             Err(RbatError::UnsupportedBinaryFormat(msg)) => {

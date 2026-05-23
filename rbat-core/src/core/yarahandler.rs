@@ -1,21 +1,39 @@
+//! # YARA Rules Compilation and Memory Scanning
+//!
+//! This module coordinates compiling rules from embedded assets (e.g. `api_hooking.yar`)
+//! and scanning raw byte buffers to extract signature matches with section offsets.
+
 use super::{Asset, RbatError, Result, YaraMatches};
-use crate::utils::section_offset::get_section_for_offset;
-use std::path::Path;
-use std::{collections::HashMap, fs};
+use crate::{core::SectionRange, utils::section_offset::get_section_for_offset};
+use std::collections::HashMap;
 use yara::{Compiler, Rules};
 
+/// A handler for loading, compiling, and executing YARA rule scans against in-memory buffers.
+///
+/// # Example
+/// ```rust
+/// use rbat::core::yarahandler::YaraHandler;
+///
+/// let handler = YaraHandler::new("api_hooking.yar".to_owned());
+/// let rules = handler.compile_yara_rule().unwrap();
+/// let matches = handler.scan_mem(&rules, &[0x00; 100], &[]).unwrap();
+/// ```
 #[derive(Debug)]
 pub struct YaraHandler {
     path: String,
 }
 
 impl YaraHandler {
+    /// Creates a new `YaraHandler` for the specified embedded YARA rule asset filename.
     pub fn new(path: String) -> Self {
         YaraHandler { path }
     }
 
-    /// Compiles YARA rules from the embedded assets
-    /// and returns a compiled `Rules` object that can be used for scanning.
+    /// Compiles YARA rules from the embedded assets and returns a compiled `Rules` object.
+    ///
+    /// # Errors
+    /// Returns `RbatError::MissingAsset` if the rule file does not exist in the embedded directory,
+    /// or `RbatError::YaraCompileError` if the rule string contains syntax errors.
     pub fn compile_yara_rule(&self) -> Result<Rules> {
         let file =
             Asset::get(&self.path).ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
@@ -25,17 +43,20 @@ impl YaraHandler {
         Ok(compiled_rule_file)
     }
 
-    /// Scans a file using the provided compiled YARA rules and returns a structured result
-    /// with offsets, sections, length and matched data.
-    pub fn scan_file(
+    /// Scans a memory buffer using the provided compiled YARA rules.
+    /// Maps matches to their corresponding binary section name based on their file offsets.
+    ///
+    /// # Errors
+    /// Returns `RbatError::YaraIO` if the scan engine encounters a runtime scanning error.
+    pub fn scan_mem(
         &self,
-        compiled_rules: Rules,
-        scan_file: &Path,
+        compiled_rules: &Rules,
+        buffer: &[u8],
+        section_ranges: &[SectionRange],
     ) -> Result<HashMap<String, Vec<YaraMatches>>> {
         let mut scanner = compiled_rules.scanner()?;
-        let results = scanner.scan_file(scan_file)?;
+        let results = scanner.scan_mem(buffer)?;
         let mut yara_result: HashMap<String, Vec<YaraMatches>> = HashMap::new();
-        let buffer = fs::read(scan_file)?;
 
         if !results.is_empty() {
             for rule in results {
@@ -45,7 +66,7 @@ impl YaraHandler {
                     }
 
                     for m in yr_string.matches {
-                        let section_name = get_section_for_offset(m.offset, &buffer)?;
+                        let section_name = get_section_for_offset(section_ranges, m.offset);
                         let decoded_string = String::from_utf8_lossy(&m.data).to_string();
 
                         yara_result
@@ -60,10 +81,8 @@ impl YaraHandler {
                     }
                 }
             }
-            Ok(yara_result)
-        } else {
-            Ok(yara_result)
         }
+        Ok(yara_result)
     }
 }
 
