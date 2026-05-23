@@ -60,17 +60,16 @@ pub fn build_section_map(binary_object: &Object, _buffer: &[u8]) -> Result<Vec<S
                 }
             }
             goblin::mach::Mach::Fat(fat) => {
-                if let Ok(arches) = fat.arches() {
-                    for (index, arch) in arches.iter().enumerate() {
-                        let base = arch.offset as usize;
-                        if let Ok(goblin::mach::SingleArch::MachO(macho)) = fat.get(index) {
-                            for segment in &macho.segments {
-                                for (section, _) in segment.into_iter().flatten() {
-                                    let start = base.saturating_add(section.offset as usize);
-                                    let end = start.saturating_add(section.size as usize);
-                                    let name = section.name().unwrap_or("<unnamed>").to_string();
-                                    ranges.push(SectionRange { start, end, name });
-                                }
+                let arches = fat.arches()?;
+                for (index, arch) in arches.iter().enumerate() {
+                    let base = arch.offset as usize;
+                    if let Ok(goblin::mach::SingleArch::MachO(macho)) = fat.get(index) {
+                        for segment in &macho.segments {
+                            for (section, _) in segment.into_iter().flatten() {
+                                let start = base.saturating_add(section.offset as usize);
+                                let end = start.saturating_add(section.size as usize);
+                                let name = section.name().unwrap_or("<unnamed>").to_string();
+                                ranges.push(SectionRange { start, end, name });
                             }
                         }
                     }
@@ -83,14 +82,14 @@ pub fn build_section_map(binary_object: &Object, _buffer: &[u8]) -> Result<Vec<S
 }
 
 /// Finds the section name containing the given file offset.
-/// Returns an empty string if no section bounds encompass the offset.
+/// Returns `"<unknown>"` if no section bounds encompass the offset.
 pub fn get_section_for_offset(ranges: &[SectionRange], offset: usize) -> String {
     for range in ranges {
         if offset >= range.start && offset < range.end {
             return range.name.clone();
         }
     }
-    "".to_string()
+    "<unknown>".to_string()
 }
 
 #[cfg(test)]
@@ -118,7 +117,7 @@ mod tests {
         assert_eq!(get_section_for_offset(&ranges, 50), ".text");
         assert_eq!(get_section_for_offset(&ranges, 100), ".data");
         assert_eq!(get_section_for_offset(&ranges, 150), ".data");
-        assert_eq!(get_section_for_offset(&ranges, 250), "");
+        assert_eq!(get_section_for_offset(&ranges, 250), "<unknown>");
     }
 
     #[test]

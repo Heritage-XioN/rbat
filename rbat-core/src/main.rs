@@ -124,7 +124,6 @@ fn main() -> Result<()> {
         !analysis_result.packer_signatures.is_empty(),
     );
 
-
     // output directory
     let base_dir = cli.out_dir.unwrap_or_else(|| std::path::PathBuf::from("."));
     if base_dir.exists() && !base_dir.is_dir() {

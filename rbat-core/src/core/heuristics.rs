@@ -11,7 +11,7 @@ use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::raw_padding::scan_raw_padding;
 
 type CodeCave = HashMap<String, Vec<u64>>;
-type BlacklistedMnemonics = HashMap<String, u64>;
+type BlacklistedMnemonics = HashMap<String, Vec<u64>>;
 
 /// Disassembles the executable section of a binary and scans for code caves and evasion mnemonics.
 ///
@@ -63,7 +63,10 @@ pub fn disassemble_section(
 
         // Checks for anti-VM / anti-debugging mnemonics
         if !mnemonic.is_empty() && blacklist.contains(mnemonic) {
-            blacklisted_mnemonics.insert(mnemonic.to_string(), i.address());
+            blacklisted_mnemonics
+                .entry(mnemonic.to_string())
+                .or_default()
+                .push(i.address());
         }
     }
 
@@ -134,6 +137,6 @@ mod tests {
         assert_eq!(code_cave.get("nop_addr").unwrap().len(), 30);
 
         assert!(blacklisted.contains_key("rdtsc"));
-        assert_eq!(blacklisted.get("rdtsc"), Some(&0x101E));
+        assert_eq!(blacklisted.get("rdtsc"), Some(&vec![0x101E]));
     }
 }
