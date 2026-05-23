@@ -1,4 +1,9 @@
-use super::viz::generate_entropy_heatmap_svg;
+//! # PDF Report Generation Pipeline
+//!
+//! This module compiles raw binary analysis findings and section entropy maps
+//! into a stylized HTML template (using `askama`) and generates a PDF using the `fullbleed` printing engine.
+
+use super::viz::generate_entropy_heatmap;
 use crate::core::{AnalysisResult, Confidence, RbatError, Result, RiskAssessment};
 use askama::Template;
 use chrono::Local;
@@ -59,7 +64,7 @@ pub fn generate_pdf_report(
     analysis_result: &AnalysisResult,
     out_path: &Path,
 ) -> Result<()> {
-    let heatmap_svg_content = generate_entropy_heatmap_svg(&analysis_result.section_entropy);
+    let heatmap_svg_content = generate_entropy_heatmap(&analysis_result.section_entropy);
     let has_heatmap = !heatmap_svg_content.trim().is_empty();
 
     let severity_class = match assessment.severity.to_lowercase().as_str() {
@@ -113,10 +118,25 @@ pub fn generate_pdf_report(
         });
     }
 
-    for (mnemonic, count) in &analysis_result.blacklisted_mnemonics {
+    for (mnemonic, addresses) in &analysis_result.blacklisted_mnemonics {
+        let sample = if addresses.is_empty() {
+            "".to_string()
+        } else {
+            let limit = std::cmp::min(addresses.len(), 3);
+            let formatted_addrs: Vec<String> = addresses[..limit]
+                .iter()
+                .map(|addr| format!("0x{:X}", addr))
+                .collect();
+            format!(" (at {})", formatted_addrs.join(", "))
+        };
         capabilities.push(TechnicalFinding {
             category: "Suspicious Instructions".to_string(),
-            details: format!("Instruction '{}' used {} times", mnemonic, count),
+            details: format!(
+                "Instruction '{}' used {} times{}",
+                mnemonic,
+                addresses.len(),
+                sample
+            ),
         });
     }
 
@@ -172,7 +192,7 @@ pub fn generate_pdf_report(
 
     let html = template
         .render()
-        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::TemplateError(e.to_string()))?;
 
     match generate_pdf_from_html(&html, out_path) {
         Ok(()) => {
@@ -203,11 +223,11 @@ fn generate_pdf_from_html(html: &str, out_path: &Path) -> Result<()> {
         .document_title("RBAT Threat Intelligence Report")
         .document_lang("en")
         .build()
-        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::PdfRenderError(e.to_string()))?;
 
     let pdf_bytes = engine
         .render_to_buffer(html, REPORT_CSS)
-        .map_err(|e| RbatError::UnsupportedBinaryFormat(e.to_string()))?;
+        .map_err(|e| RbatError::PdfRenderError(e.to_string()))?;
 
     fs::write(out_path, pdf_bytes)?;
 

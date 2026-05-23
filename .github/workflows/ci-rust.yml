@@ -1,4 +1,4 @@
-name: CI
+name: Rust CI
 
 on:
   pull_request:
@@ -10,11 +10,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  lint:
-    name: Lint & Format
+  lint-rust:
+    name: Lint & Format (Rust)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -22,17 +26,17 @@ jobs:
       - name: Check Formatting
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
-  test:
-    name: Run Tests
+  test-rust:
+    name: Run Tests (Rust)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcapstone-dev libyara-dev
+          sudo apt-get install -y libcapstone-dev libyara-dev protobuf-compiler
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Build
