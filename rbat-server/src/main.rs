@@ -1,11 +1,13 @@
 use axum::{Router, routing::get};
-use rbat_server::{RbatServer, transfer::analysis_server::AnalysisServer};
+use rbat_server::{handlers::GRPCservice, transfer::analysis_server::AnalysisServer};
 use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let http_router = Router::new().route("/health", get(|| async { "HTTP Health Check: OK" }));
-    let grpc_service = AnalysisServer::new(RbatServer::default());
+    let http_router = Router::new()
+        .route("/", get(|| async { "RBAT-Deamon: running" }))
+        .route("/health", get(|| async { "HTTP Health Check: OK" }));
+    let grpc_service = AnalysisServer::new(GRPCservice::default());
 
     // Tonic Routes container with service
     let tonic_router = tonic::service::Routes::new(grpc_service).into_axum_router();
