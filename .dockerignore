@@ -1,0 +1,8 @@
+target/
+rbat-client/node_modules/
+rbat-client/.next/
+.git/
+.github/
+.vscode/
+.idea/
+*.log

@@ -1,6 +1,6 @@
 use axum::{Router, routing::get};
 use rbat_server::{handlers::GRPCservice, transfer::analysis_server::AnalysisServer};
-use std::net::SocketAddr;
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,8 +15,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Merge the routers
     let app = http_router.merge(tonic_router);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let addr = format!("{}:{}", host, port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     println!("Server running multi-protocol on http://{}", addr);
     axum::serve(listener, app).await?;
