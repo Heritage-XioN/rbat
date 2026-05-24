@@ -4097,6 +4097,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "axum",
+ "color-eyre",
  "prost",
  "reqwest",
  "standardwebhooks",
@@ -4107,6 +4108,7 @@ dependencies = [
  "tonic-build",
  "tonic-prost",
  "tonic-prost-build",
+ "tui-banner",
 ]
 
 [[package]]

@@ -15,6 +15,8 @@ reqwest = "0.13.3"
 standardwebhooks = "1.0.1"
 aws-config = { version = "1.1.7", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.133.0"
+tui-banner = { workspace = true }
+color-eyre = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.14.6"

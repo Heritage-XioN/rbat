@@ -17,7 +17,6 @@ pub enum AnalysisProgress {
     /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
     /// and blacklisted anti-analysis mnemonics.
     Disassembly((HashMap<String, Vec<u64>>, HashMap<String, Vec<u64>>)),
-
     /// Extracted strings matched by YARA rules.
     Strings(HashMap<String, Vec<YaraMatches>>),
     /// Packer and compiler signatures matched by YARA rules.
@@ -59,7 +58,6 @@ pub struct AnalysisResult {
     pub code_cave: HashMap<String, Vec<u64>>,
     /// Count and location of blacklisted anti-analysis instructions.
     pub blacklisted_mnemonics: HashMap<String, Vec<u64>>,
-
     /// System and API calls associated with library/function hooking.
     pub api_hooking: HashMap<String, u64>,
     /// Indicators of process injection capabilities.

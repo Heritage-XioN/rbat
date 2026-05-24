@@ -1,9 +1,29 @@
 use axum::{Router, routing::get};
+use color_eyre::Result;
 use rbat_server::{handlers::GRPCservice, transfer::analysis_server::AnalysisServer};
-
+use tui_banner::Banner;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    color_eyre::install()?;
+    // Generate and display banner
+    let font =
+        tui_banner::Font::from_figlet_str(include_str!("../.././rbat-core/assets/ansishadow.flf"))
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse ANSI Shadow font: {:?}", e))?;
+    let banner = Banner::new("RBAT-SERVER")?
+        .font(font)
+        .gradient(tui_banner::Gradient::vertical(
+            tui_banner::Palette::from_hex(&[
+                "#FDBA74", // Peach/light orange
+                "#F97316", // Orange
+                "#9A3412", // Rust
+                "#431407", // Dark brown/red
+            ]),
+        ))
+        .fill(tui_banner::Fill::Keep)
+        .render();
+    println!("\n {}", banner);
+
     let http_router = Router::new()
         .route("/", get(|| async { "RBAT-Deamon: running" }))
         .route("/health", get(|| async { "HTTP Health Check: OK" }));
