@@ -10,6 +10,11 @@ tonic = "0.14.6"
 tonic-prost = "0.14.6"
 tokio-stream = "0.1.18"
 tokio = { workspace = true }
+tokio-retry = "0.3.1"
+reqwest = "0.13.3"
+standardwebhooks = "1.0.1"
+aws-config = { version = "1.1.7", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.133.0"
 
 [build-dependencies]
 tonic-build = "0.14.6"
