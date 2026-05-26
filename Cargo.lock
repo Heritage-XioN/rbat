@@ -751,6 +751,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-standardwebhooks"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07e50a87caad07ba04ab3bd6592304e68746098f0a0fdd61ffd6bf46dd1c5b93"
+dependencies = [
+ "axum",
+ "bytes",
+ "http 1.4.0",
+ "standardwebhooks",
+]
+
+[[package]]
 name = "az"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4097,10 +4109,15 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "axum",
+ "axum-standardwebhooks",
  "color-eyre",
  "prost",
+ "rbat",
  "reqwest",
+ "serde",
+ "serde_json",
  "standardwebhooks",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-retry",
  "tokio-stream",
@@ -4109,6 +4126,7 @@ dependencies = [
  "tonic-prost",
  "tonic-prost-build",
  "tui-banner",
+ "uuid",
 ]
 
 [[package]]

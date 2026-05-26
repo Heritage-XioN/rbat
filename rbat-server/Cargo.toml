@@ -17,6 +17,12 @@ aws-config = { version = "1.1.7", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.133.0"
 tui-banner = { workspace = true }
 color-eyre = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+axum-standardwebhooks = "1.0.0"
+uuid = { version = "1.23.1", features = ["v4"] }
+rbat = { path = "../rbat-core"}
 
 [build-dependencies]
 tonic-build = "0.14.6"
