@@ -1,11 +1,19 @@
 use axum::{Router, routing::get};
 use color_eyre::Result;
-use rbat_server::{handlers::GRPCservice, transfer::analysis_server::AnalysisServer};
+use rbat_server::{
+    AppState, handlers::GRPCservice, transfer::analysis_server::AnalysisServer,
+    utils::minio_client::setup_minio_client,
+};
+use std::sync::Arc;
 use tui_banner::Banner;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     color_eyre::install()?;
+    let state = Arc::new(AppState {
+        s3_client: setup_minio_client().await?,
+    });
+
     // Generate and display banner
     let font =
         tui_banner::Font::from_figlet_str(include_str!("../.././rbat-core/assets/ansishadow.flf"))
@@ -26,8 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let http_router = Router::new()
         .route("/", get(|| async { "RBAT-Deamon: running" }))
-        .route("/health", get(|| async { "HTTP Health Check: OK" }));
-    let grpc_service = AnalysisServer::new(GRPCservice::default());
+        .route("/health", get(|| async { "HTTP Health Check: OK" }))
+        .with_state(state.clone());
+
+    let rpc = GRPCservice {
+        state: state.clone(),
+    };
+    let grpc_service = AnalysisServer::new(rpc);
 
     // Tonic Routes container with service
     let tonic_router = tonic::service::Routes::new(grpc_service).into_axum_router();
