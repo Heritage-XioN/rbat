@@ -5,7 +5,11 @@ pub mod utils;
 pub mod transfer {
     tonic::include_proto!("transfer");
 }
+use std::fmt::Debug;
+
 use aws_sdk_s3::Client as S3Client;
+use axum::extract::FromRef;
+use axum_standardwebhooks::SharedWebhook;
 use thiserror::Error;
 
 /// Represents all possible error conditions returned by the RBAT server library.
@@ -40,7 +44,20 @@ where
 
 pub type Result<T> = core::result::Result<T, RbatServerError>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppState {
     pub s3_client: S3Client,
+    pub webhook: SharedWebhook,
 }
+
+impl FromRef<AppState> for SharedWebhook {
+    fn from_ref(state: &AppState) -> Self {
+        state.webhook.clone()
+    }
+}
+
+// impl Debug for SharedWebhook {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "{:#?}", self)
+//     }
+// }

@@ -23,6 +23,7 @@ thiserror = { workspace = true }
 axum-standardwebhooks = "1.0.0"
 uuid = { version = "1.23.1", features = ["v4"] }
 rbat = { path = "../rbat-core"}
+axum-macros = "0.4" 
 
 [build-dependencies]
 tonic-build = "0.14.6"

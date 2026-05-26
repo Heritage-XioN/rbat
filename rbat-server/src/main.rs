@@ -1,18 +1,22 @@
-use axum::{Router, routing::get};
+use axum::{Router, routing::get, routing::post};
+use axum_standardwebhooks::SharedWebhook;
 use color_eyre::Result;
 use rbat_server::{
-    AppState, handlers::GRPCservice, transfer::analysis_server::AnalysisServer,
+    AppState,
+    handlers::{GRPCservice, webhook::receive_webhook},
+    transfer::analysis_server::AnalysisServer,
     utils::minio_client::setup_minio_client,
 };
-use std::sync::Arc;
+use standardwebhooks::Webhook;
 use tui_banner::Banner;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    let state = Arc::new(AppState {
+    let state = AppState {
         s3_client: setup_minio_client().await?,
-    });
+        webhook: SharedWebhook::new(Webhook::new("whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD")?),
+    };
 
     // Generate and display banner
     let font =
@@ -35,6 +39,7 @@ async fn main() -> Result<()> {
     let http_router = Router::new()
         .route("/", get(|| async { "RBAT-Deamon: running" }))
         .route("/health", get(|| async { "HTTP Health Check: OK" }))
+        .route("/webhooks", post(receive_webhook))
         .with_state(state.clone());
 
     let rpc = GRPCservice {
