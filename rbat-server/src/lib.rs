@@ -1,5 +1,7 @@
 pub mod handlers;
+pub mod services;
 pub mod utils;
+
 pub mod transfer {
     tonic::include_proto!("transfer");
 }
@@ -12,9 +14,30 @@ pub enum RbatServerError {
     /// Standard input/output operations error.
     #[error("I/O error occurred")]
     Io(#[from] std::io::Error),
-    // #[error("rpc status")]
-    // Rpc(#[from] tonic::Status),
+
+    #[error("error analyzing binary")]
+    Rbat(#[from] rbat::core::error::RbatError),
+
+    #[error("AWS sdk error occurred: {0}")]
+    S3client(String),
+
+    #[error("Byte stream error occurred: {0}")]
+    ByteStream(#[from] aws_sdk_s3::primitives::ByteStreamError),
+
+    #[error("Task join error occurred: {0}")]
+    Join(#[from] tokio::task::JoinError),
 }
+
+impl<E, R> From<aws_sdk_s3::error::SdkError<E, R>> for RbatServerError
+where
+    E: std::fmt::Debug + std::error::Error + 'static,
+    R: std::fmt::Debug + 'static,
+{
+    fn from(err: aws_sdk_s3::error::SdkError<E, R>) -> Self {
+        RbatServerError::S3client(err.to_string())
+    }
+}
+
 pub type Result<T> = core::result::Result<T, RbatServerError>;
 
 #[derive(Debug, Clone)]
