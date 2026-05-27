@@ -13,9 +13,22 @@ use tui_banner::Banner;
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+    dotenvy::dotenv().ok(); // Ignore error if .env doesn't exist
+
+    // Initialize structured logging
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env()
+            .add_directive(tracing::Level::INFO.into()))
+        .init();
+
+    let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| {
+        tracing::warn!("WEBHOOK_SECRET environment variable not set. Falling back to default development key.");
+        "whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD".to_string()
+    });
+
     let state = AppState {
         s3_client: setup_minio_client().await?,
-        webhook: SharedWebhook::new(Webhook::new("whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD")?),
+        webhook: SharedWebhook::new(Webhook::new(&secret)?),
     };
 
     // Generate and display banner

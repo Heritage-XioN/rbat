@@ -30,6 +30,21 @@ pub enum RbatServerError {
 
     #[error("Task join error occurred: {0}")]
     Join(#[from] tokio::task::JoinError),
+
+    #[error("Environment variable error: {0}")]
+    EnvVar(#[from] std::env::VarError),
+
+    #[error("JSON serialization/deserialization error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+
+    #[error("Standard Webhooks error: {0}")]
+    StandardWebhooks(#[from] standardwebhooks::WebhookError),
+
+    #[error("HTTP client error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("Internal server error: {0}")]
+    Internal(String),
 }
 
 impl<E, R> From<aws_sdk_s3::error::SdkError<E, R>> for RbatServerError
@@ -55,9 +70,3 @@ impl FromRef<AppState> for SharedWebhook {
         state.webhook.clone()
     }
 }
-
-// impl Debug for SharedWebhook {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "{:#?}", self)
-//     }
-// }
