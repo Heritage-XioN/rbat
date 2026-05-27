@@ -6,3 +6,4 @@ rbat-client/.next/
 .vscode/
 .idea/
 *.log
+.env

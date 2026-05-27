@@ -1,4 +1,4 @@
 /target
-
+.env
 report.*
 rbat-server/src/bin/*
