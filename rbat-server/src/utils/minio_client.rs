@@ -3,9 +3,22 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::{Client as S3Client, config::Credentials};
 
 pub async fn setup_minio_client() -> Result<S3Client> {
+    let root_user = std::env::var("MINIO_ROOT_USER").unwrap_or_else(|_| {
+        tracing::warn!("MINIO_ROOT_USER not set. Using development default.");
+        "admin_user".to_string()
+    });
+    let root_password = std::env::var("MINIO_ROOT_PASSWORD").unwrap_or_else(|_| {
+        tracing::warn!("MINIO_ROOT_PASSWORD not set. Using development default.");
+        "super_secure_password_123".to_string()
+    });
+    let endpoint = std::env::var("MINIO_ENDPOINT").unwrap_or_else(|_| {
+        tracing::info!("MINIO_ENDPOINT not set. Using development default: http://localhost:9000");
+        "http://localhost:9000".to_string()
+    });
+
     let credentials = Credentials::new(
-        "admin_user",                // Your MINIO_ROOT_USER
-        "super_secure_password_123", // Your MINIO_ROOT_PASSWORD
+        root_user,
+        root_password,
         None,
         None,
         "Static",
@@ -19,7 +32,7 @@ pub async fn setup_minio_client() -> Result<S3Client> {
 
     // Force the client to point to your local container endpoint
     let s3_config = aws_sdk_s3::config::Builder::from(&config)
-        .endpoint_url("http://localhost:9000")
+        .endpoint_url(endpoint)
         .force_path_style(true) // Required for MinIO compatibility
         .build();
 
