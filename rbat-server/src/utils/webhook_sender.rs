@@ -6,15 +6,18 @@ use serde_json::Value;
 use standardwebhooks::Webhook;
 use tokio_retry::RetryIf;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
+use tracing::Instrument;
 
 pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Value) {
+    let span =
+        tracing::info_span!("dispatch_webhook", event_id = %event_id, target_url = %target_url);
     // Spawn the work to a background task so it doesn't block the caller thread
     tokio::spawn(async move {
         let client = Client::new();
         let payload_str = payload.to_string();
         let timestamp = Utc::now().timestamp();
         let secret = env::var("WEBHOOK_SECRET").unwrap_or_else(|_| {
-            tracing::warn!("WEBHOOK_SECRET environment variable not set. Falling back to default development key.");
+            tracing::debug!("WEBHOOK_SECRET environment variable not set. Falling back to default development key.");
             "whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD".to_string()
         });
 
@@ -29,7 +32,7 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
         let wh = match Webhook::new(&secret) {
             Ok(w) => w,
             Err(e) => {
-                tracing::error!("Failed to initialize webhook signer: {:?}", e);
+                tracing::error!(error = ?e, "Failed to initialize webhook signer");
                 return;
             }
         };
@@ -37,7 +40,7 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
         let signature = match wh.sign(&event_id, timestamp, payload_str.as_bytes()) {
             Ok(s) => s,
             Err(e) => {
-                tracing::error!("Failed to sign webhook payload: {:?}", e);
+                tracing::error!(error = ?e, "Failed to sign webhook payload");
                 return;
             }
         };
@@ -61,7 +64,7 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
                 let ev_type = event_type.clone();
 
                 async move {
-                    tracing::info!("Attempting to send webhook to {}...", url);
+                    tracing::debug!("Attempting to send webhook");
 
                     client
                         .post(&url)
@@ -93,22 +96,22 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
             Ok(response) => {
                 if response.status().is_success() {
                     tracing::info!(
-                        "Webhook successfully delivered! Status: {}",
-                        response.status()
+                        status = %response.status(),
+                        "Webhook successfully delivered"
                     );
                 } else {
                     tracing::error!(
-                        "Webhook gave up. Consumer returned client error status: {}",
-                        response.status()
+                        status = %response.status(),
+                        "Webhook gave up; consumer returned client error status"
                     );
                 }
             }
             Err(e) => {
                 tracing::error!(
-                    "Webhook delivery completely failed after maximum retries. Error: {:?}",
-                    e
+                    error = ?e,
+                    "Webhook delivery completely failed after maximum retries"
                 );
             }
         }
-    });
+    }.instrument(span));
 }

@@ -4,25 +4,29 @@ use aws_sdk_s3::{Client as S3Client, config::Credentials};
 
 pub async fn setup_minio_client() -> Result<S3Client> {
     let root_user = std::env::var("MINIO_ROOT_USER").unwrap_or_else(|_| {
-        tracing::warn!("MINIO_ROOT_USER not set. Using development default.");
+        tracing::warn!(
+            var = "MINIO_ROOT_USER",
+            "Environment variable not set. Using development default"
+        );
         "admin_user".to_string()
     });
     let root_password = std::env::var("MINIO_ROOT_PASSWORD").unwrap_or_else(|_| {
-        tracing::warn!("MINIO_ROOT_PASSWORD not set. Using development default.");
+        tracing::warn!(
+            var = "MINIO_ROOT_PASSWORD",
+            "Environment variable not set. Using development default"
+        );
         "super_secure_password_123".to_string()
     });
     let endpoint = std::env::var("MINIO_ENDPOINT").unwrap_or_else(|_| {
-        tracing::info!("MINIO_ENDPOINT not set. Using development default: http://localhost:9000");
+        tracing::info!(
+            var = "MINIO_ENDPOINT",
+            default = "http://localhost:9000",
+            "Environment variable not set. Using development default"
+        );
         "http://localhost:9000".to_string()
     });
 
-    let credentials = Credentials::new(
-        root_user,
-        root_password,
-        None,
-        None,
-        "Static",
-    );
+    let credentials = Credentials::new(root_user, root_password, None, None, "Static");
 
     let config = aws_config::defaults(BehaviorVersion::latest())
         .credentials_provider(credentials)

@@ -14,15 +14,16 @@ pub struct GRPCservice {
 
 #[tonic::async_trait]
 impl Analysis for GRPCservice {
+    #[tracing::instrument(skip(self, request), fields(file_id = tracing::field::Empty))]
     async fn upload_binary(
         &self,
         request: Request<Streaming<UploadRequest>>,
     ) -> Result<Response<UploadResponse>, Status> {
-        tracing::info!("upload binary request received, starting to stream chunks...");
         let mut stream = request.into_inner();
         let s3_client = &self.state.s3_client;
         let bucket = "pt-compromised-binaries";
         let file_id = Uuid::new_v4().to_string();
+        tracing::Span::current().record("file_id", &file_id);
         let mut total_bytes = 0;
 
         // Initiate the Multipart upload in MinIO
@@ -33,7 +34,7 @@ impl Analysis for GRPCservice {
             .send()
             .await
             .map_err(|e| {
-                tracing::error!("Failed to initiate S3 multipart upload: {}", e);
+                tracing::error!(bucket, error = %e, "Failed to initiate S3 multipart upload");
                 tonic::Status::internal(format!("Failed to initiate S3 multipart upload: {}", e))
             })?;
 
@@ -45,6 +46,7 @@ impl Analysis for GRPCservice {
 
         while let Some(req) = stream.message().await? {
             let bytes = req.chunk_data.clone();
+            let bytes_len = bytes.len();
 
             // Forward chunk to MinIO
             let upload_part_output = s3_client
@@ -57,12 +59,23 @@ impl Analysis for GRPCservice {
                 .send()
                 .await
                 .map_err(|e| {
-                    tracing::error!("Failed to upload part to S3: {}", e);
+                    tracing::error!(
+                        bucket,
+                        upload_id,
+                        part_number,
+                        error = %e,
+                        "Failed to upload part to S3"
+                    );
                     tonic::Status::internal(format!("Failed to upload part to S3: {}", e))
                 })?;
 
             let e_tag = upload_part_output.e_tag().ok_or_else(|| {
-                tracing::error!("MinIO/S3 did not return an ETag for the uploaded part");
+                tracing::error!(
+                    bucket,
+                    upload_id,
+                    part_number,
+                    "MinIO/S3 did not return an ETag for the uploaded part"
+                );
                 tonic::Status::internal("MinIO/S3 did not return an ETag for the uploaded part")
             })?;
 
@@ -73,6 +86,8 @@ impl Analysis for GRPCservice {
                     .part_number(part_number)
                     .build(),
             );
+
+            tracing::debug!(part_number, bytes_len, "Uploaded part to S3");
 
             part_number += 1;
             total_bytes += req.chunk_data.len() as u64;
@@ -92,11 +107,16 @@ impl Analysis for GRPCservice {
             .send()
             .await
             .map_err(|e| {
-                tracing::error!("Failed to complete S3 multipart upload: {}", e);
+                tracing::error!(
+                    bucket,
+                    upload_id,
+                    error = %e,
+                    "Failed to complete S3 multipart upload"
+                );
                 tonic::Status::internal(e.to_string())
             })?;
 
-        tracing::info!("Successfully saved upload. Total bytes: {}", total_bytes);
+        tracing::info!(total_bytes, "Successfully saved upload");
 
         Ok(Response::new(UploadResponse {
             file_id: file_id,

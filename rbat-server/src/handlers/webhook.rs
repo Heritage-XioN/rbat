@@ -16,6 +16,14 @@ pub struct WebhookPayload {
 }
 
 #[debug_handler]
+#[tracing::instrument(
+    skip(state, headers, payload),
+    fields(
+        webhook_id = tracing::field::Empty,
+        delivery_id = tracing::field::Empty,
+        event_type = tracing::field::Empty,
+    )
+)]
 pub async fn receive_webhook(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -43,14 +51,15 @@ pub async fn receive_webhook(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
 
+    let span = tracing::Span::current();
+    span.record("webhook_id", webhook_id);
+    span.record("delivery_id", delivery_id);
+    span.record("event_type", event_type);
+
     tracing::info!(
-        "Webhook signature successfully verified! \
-         [Headers -> webhook-id: {}, webhook-timestamp: {}, webhook-signature: {}, x-rbat-event: {}, x-delivery-id: {}]",
-        webhook_id,
         webhook_timestamp,
         webhook_signature,
-        event_type,
-        delivery_id
+        "Webhook signature successfully verified"
     );
 
     match payload.event_type.as_str() {
@@ -66,7 +75,7 @@ pub async fn receive_webhook(
             analyze_stored_binary(&state.s3_client, file_id)
                 .await
                 .map_err(|e| {
-                    tracing::error!("Failed to analyze stored binary {}: {:?}", file_id, e);
+                    tracing::error!(file_id = %file_id, error = ?e, "Failed to analyze stored binary");
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Analysis failed: {}", e),
@@ -74,7 +83,7 @@ pub async fn receive_webhook(
                 })?;
         }
         _ => {
-            tracing::warn!("Received unknown event type: {}", payload.event_type);
+            tracing::warn!(event_type = %payload.event_type, "Received unknown event type");
         }
     }
 
