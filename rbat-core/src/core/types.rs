@@ -7,10 +7,7 @@ use super::{BinaryArch, BinaryOS};
 use goblin::Object;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::collections::{HashMap, HashSet};
 
 /// Represents the progress updates emitted during static analysis.
 pub enum AnalysisProgress {
@@ -162,8 +159,6 @@ pub struct BinaryMetadata {
 /// };
 /// ```
 pub struct AnalysisContext<'a> {
-    /// Path to the binary file on disk.
-    pub path: &'a Path,
     /// Raw byte buffer of the binary.
     pub buffer: &'a [u8],
     /// Parsed representation of the executable headers and sections.

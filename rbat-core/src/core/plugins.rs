@@ -178,7 +178,6 @@ mod tests {
             crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
 
         let ctx = AnalysisContext {
-            path: &path,
             buffer: &buffer,
             binary_object: &obj,
             section_ranges: &section_ranges,
@@ -209,7 +208,6 @@ mod tests {
             crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
 
         let ctx = AnalysisContext {
-            path: &path,
             buffer: &buffer,
             binary_object: &obj,
             section_ranges: &section_ranges,
@@ -242,7 +240,6 @@ mod tests {
         let text_bytes = vec![0x90; 30];
 
         let ctx = AnalysisContext {
-            path: &path,
             buffer: &buffer,
             binary_object: &obj,
             section_ranges: &section_ranges,

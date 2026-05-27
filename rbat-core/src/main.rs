@@ -10,8 +10,8 @@ use rbat::{
         scoring::calculate_risk,
     },
 };
-use std::sync::mpsc;
 use std::time::Duration;
+use std::{fs, sync::mpsc};
 use tui_banner::Banner;
 
 fn main() -> Result<()> {
@@ -19,6 +19,7 @@ fn main() -> Result<()> {
     // parses terminal arguments!
     let cli = Cli::parse();
     let mv_path = cli.path.clone();
+    let buffer = fs::read(mv_path)?;
 
     // Generate and display banner
     let font = tui_banner::Font::from_figlet_str(include_str!("../assets/ansishadow.flf"))
@@ -51,7 +52,7 @@ fn main() -> Result<()> {
     // this just runs the streaming analysis on a separate thread so the main thread
     // is free to consume the channel and update the progress spinner.
     let analysis_thread = std::thread::spawn(move || {
-        analyze_streaming(&mv_path, move |event| {
+        analyze_streaming(&buffer, move |event| {
             let _ = tx.send(event);
         })
     });

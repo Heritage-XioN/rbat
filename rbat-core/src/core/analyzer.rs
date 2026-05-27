@@ -6,8 +6,6 @@
 
 use goblin::Object;
 use rayon;
-use std::fs;
-use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
@@ -35,14 +33,13 @@ use crate::{
 ///
 /// # Errors
 /// Returns `RbatError` if file operations, binary parsing, or plugin scanning fails.
-pub fn analyze_streaming<F>(bin_path: &Path, on_progress: F) -> Result<()>
+pub fn analyze_streaming<F>(buffer: &[u8], on_progress: F) -> Result<()>
 where
     F: Fn(AnalysisProgress) + Send + Sync,
 {
     let error_state = Mutex::new(None);
     let cancel_flag = AtomicBool::new(false);
 
-    let buffer = fs::read(bin_path)?;
     let binary_object = Object::parse(&buffer)?;
     let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, &buffer)?;
     let parsed = Parser::new(&buffer, &binary_object);
@@ -60,7 +57,6 @@ where
         binary_data.get("entry_addr"),
     ) {
         let ctx = AnalysisContext {
-            path: bin_path,
             buffer: &buffer,
             binary_object: &binary_object,
             section_ranges: &section_ranges,
@@ -118,10 +114,10 @@ where
 ///
 /// # Errors
 /// Returns `RbatError` if file reading, header parsing, or thread orchestration fails.
-pub fn analyze_batch(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)> {
+pub fn analyze_batch(buffer: &[u8]) -> Result<(AnalysisResult, RiskAssessment)> {
     let (tx, rx) = std::sync::mpsc::channel();
 
-    analyze_streaming(bin_path, move |event| {
+    analyze_streaming(buffer, move |event| {
         let _ = tx.send(event);
     })?;
 
@@ -169,6 +165,8 @@ pub fn analyze_batch(bin_path: &Path) -> Result<(AnalysisResult, RiskAssessment)
 mod tests {
     use super::*;
     use crate::utils::test_helpers::test_helpers;
+    use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
 
     #[test]
@@ -176,8 +174,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("mock_elf");
         test_helpers::generate_elf(&path);
+        let buffer = fs::read(&path).unwrap();
 
-        let result = analyze_batch(&path);
+        let result = analyze_batch(&buffer);
         assert!(result.is_ok());
         let (analysis, assessment) = result.unwrap();
 
@@ -188,7 +187,8 @@ mod tests {
     #[test]
     fn test_analyze_streaming_err() {
         let path = Path::new("non_existent_binary_file_abc.bin");
-        let result = analyze_streaming(path, |_| {});
+        let buffer = fs::read(&path).unwrap();
+        let result = analyze_streaming(&buffer, |_| {});
         assert!(result.is_err());
     }
 }
