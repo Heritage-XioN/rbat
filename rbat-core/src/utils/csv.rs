@@ -1,3 +1,8 @@
+//! # CSV Report Formatter
+//!
+//! This module formats risk assessments and threat findings into a SOC-ready CSV format,
+//! optimized for ingestion into SIEM or other security orchestration tools.
+
 use crate::core::{Result, RiskAssessment};
 use csv::Writer;
 use std::path::Path;

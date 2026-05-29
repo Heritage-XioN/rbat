@@ -1,48 +1,68 @@
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use tonic::{Request, Response, Status, Streaming};
+pub mod handlers;
+pub mod services;
+pub mod utils;
 
 pub mod transfer {
     tonic::include_proto!("transfer");
 }
-use transfer::analysis_server::Analysis;
-use transfer::{UploadRequest, UploadResponse};
+use std::fmt::Debug;
 
-#[derive(Default)]
-pub struct RbatServer;
+use axum::extract::FromRef;
+use axum_standardwebhooks::SharedWebhook;
+use s3::Bucket as S3Client;
+use thiserror::Error;
 
-#[tonic::async_trait]
-impl Analysis for RbatServer {
-    async fn upload_binary(
-        &self,
-        request: Request<Streaming<UploadRequest>>,
-    ) -> Result<Response<UploadResponse>, Status> {
-        let mut stream = request.into_inner();
-        let mut file: Option<File> = None;
-        let mut total_bytes = 0;
+/// Represents all possible error conditions returned by the RBAT server library.
+#[derive(Debug, Error)]
+pub enum RbatServerError {
+    /// Standard input/output operations error.
+    #[error("I/O error occurred")]
+    Io(#[from] std::io::Error),
 
-        while let Some(req) = stream.message().await? {
-            if file.is_none() {
-                // Creates a file in the local directory named after what the client sent
-                let safe_name = format!("server_received_{}", req.filename);
-                file = Some(File::create(&safe_name).await.map_err(|e| {
-                    Status::internal(format!("Failed to create destination file: {e}"))
-                })?);
-            }
+    #[error("error analyzing binary")]
+    Rbat(#[from] rbat::core::error::RbatError),
 
-            if let Some(ref mut f) = file {
-                f.write_all(&req.chunk_data)
-                    .await
-                    .map_err(|e| Status::internal(format!("Write pipeline failure: {e}")))?;
-                total_bytes += req.chunk_data.len() as u64;
-            }
-        }
+    #[error("AWS sdk error occurred: {0}")]
+    S3client(String),
 
-        println!("Successfully saved upload. Total bytes: {}", total_bytes);
+    #[error("Byte stream error occurred: {0}")]
+    ByteStream(String),
 
-        Ok(Response::new(UploadResponse {
-            file_id: "generated-uuid-string".to_string(),
-            total_bytes_received: total_bytes,
-        }))
+    #[error("Task join error occurred: {0}")]
+    Join(#[from] tokio::task::JoinError),
+
+    #[error("Environment variable error: {0}")]
+    EnvVar(#[from] std::env::VarError),
+
+    #[error("JSON serialization/deserialization error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+
+    #[error("Standard Webhooks error: {0}")]
+    StandardWebhooks(#[from] standardwebhooks::WebhookError),
+
+    #[error("HTTP client error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("Internal server error: {0}")]
+    Internal(String),
+}
+
+impl From<s3::error::S3Error> for RbatServerError {
+    fn from(err: s3::error::S3Error) -> Self {
+        RbatServerError::S3client(err.to_string())
+    }
+}
+
+pub type Result<T> = core::result::Result<T, RbatServerError>;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub s3_client: S3Client,
+    pub webhook: SharedWebhook,
+}
+
+impl FromRef<AppState> for SharedWebhook {
+    fn from_ref(state: &AppState) -> Self {
+        state.webhook.clone()
     }
 }
