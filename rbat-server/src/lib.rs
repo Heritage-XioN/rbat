@@ -7,7 +7,7 @@ pub mod transfer {
 }
 use std::fmt::Debug;
 
-use aws_sdk_s3::Client as S3Client;
+use s3::Bucket as S3Client;
 use axum::extract::FromRef;
 use axum_standardwebhooks::SharedWebhook;
 use thiserror::Error;
@@ -26,7 +26,7 @@ pub enum RbatServerError {
     S3client(String),
 
     #[error("Byte stream error occurred: {0}")]
-    ByteStream(#[from] aws_sdk_s3::primitives::ByteStreamError),
+    ByteStream(String),
 
     #[error("Task join error occurred: {0}")]
     Join(#[from] tokio::task::JoinError),
@@ -47,12 +47,8 @@ pub enum RbatServerError {
     Internal(String),
 }
 
-impl<E, R> From<aws_sdk_s3::error::SdkError<E, R>> for RbatServerError
-where
-    E: std::fmt::Debug + std::error::Error + 'static,
-    R: std::fmt::Debug + 'static,
-{
-    fn from(err: aws_sdk_s3::error::SdkError<E, R>) -> Self {
+impl From<s3::error::S3Error> for RbatServerError {
+    fn from(err: s3::error::S3Error) -> Self {
         RbatServerError::S3client(err.to_string())
     }
 }

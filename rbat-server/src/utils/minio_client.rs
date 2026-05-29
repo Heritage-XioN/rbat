@@ -1,6 +1,7 @@
-use crate::Result;
-use aws_config::BehaviorVersion;
-use aws_sdk_s3::{Client as S3Client, config::Credentials};
+use crate::{Result, RbatServerError};
+use s3::Bucket as S3Client;
+use s3::creds::Credentials;
+use s3::{Region, BucketConfiguration};
 
 pub async fn setup_minio_client() -> Result<S3Client> {
     let root_user = std::env::var("MINIO_ROOT_USER").unwrap_or_else(|_| {
@@ -26,19 +27,35 @@ pub async fn setup_minio_client() -> Result<S3Client> {
         "http://localhost:9000".to_string()
     });
 
-    let credentials = Credentials::new(root_user, root_password, None, None, "Static");
+    let credentials = Credentials::new(Some(&root_user), Some(&root_password), None, None, None)
+        .map_err(|e| RbatServerError::S3client(e.to_string()))?;
 
-    let config = aws_config::defaults(BehaviorVersion::latest())
-        .credentials_provider(credentials)
-        .region(aws_config::Region::new("us-east-1")) // Dummy region required by SDK
-        .load()
-        .await;
+    let region = Region::Custom {
+        region: "us-east-1".to_string(),
+        endpoint: endpoint.clone(),
+    };
 
-    // Force the client to point to your local container endpoint
-    let s3_config = aws_sdk_s3::config::Builder::from(&config)
-        .endpoint_url(endpoint)
-        .force_path_style(true) // Required for MinIO compatibility
-        .build();
+    let bucket_name = "pt-compromised-binaries";
+    let mut bucket = S3Client::new(bucket_name, region.clone(), credentials.clone())
+        .map_err(|e| RbatServerError::S3client(e.to_string()))?;
+    bucket.set_path_style();
 
-    Ok(S3Client::from_conf(s3_config))
+    // Check if the bucket exists. If not, create it.
+    let exists = bucket.exists().await.unwrap_or(false);
+    if !exists {
+        tracing::info!(bucket = bucket_name, "Bucket does not exist. Creating it...");
+        S3Client::create_with_path_style(
+            bucket_name,
+            region,
+            credentials,
+            BucketConfiguration::default(),
+        )
+        .await
+        .map_err(|e| RbatServerError::S3client(e.to_string()))?;
+        tracing::info!(bucket = bucket_name, "Bucket created successfully.");
+    } else {
+        tracing::info!(bucket = bucket_name, "Bucket already exists.");
+    }
+
+    Ok(bucket)
 }

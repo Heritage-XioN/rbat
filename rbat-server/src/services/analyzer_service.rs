@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::utils::webhook_sender::dispatch_webhook;
-use aws_sdk_s3::Client as S3Client;
+use s3::Bucket as S3Client;
 use rbat::core::analyzer::analyze_batch;
 use serde_json::{json, to_value};
 use tokio::sync::oneshot;
@@ -16,21 +16,14 @@ pub async fn analyze_stored_binary(s3_client: &S3Client, file_id: &str) -> Resul
         "Downloading binary from S3"
     );
 
-    let mut download_output = s3_client
-        .get_object()
-        .bucket(bucket)
-        .key(file_id)
-        .send()
+    let download_output = s3_client
+        .get_object(file_id)
         .await
         .map_err(|e| {
             crate::RbatServerError::S3client(format!("Failed to get object from S3: {}", e))
         })?;
 
-    let mut payload = Vec::new();
-    while let Some(chunk) = download_output.body.next().await {
-        let bytes = chunk.map_err(|e| crate::RbatServerError::ByteStream(e))?;
-        payload.extend_from_slice(&bytes);
-    }
+    let payload = download_output.bytes().to_vec();
 
     let file_id_clone = file_id.to_string();
     let span = tracing::info_span!("analyze_stored_binary_background", file_id = %file_id_clone);
@@ -96,13 +89,7 @@ pub async fn analyze_stored_binary(s3_client: &S3Client, file_id: &str) -> Resul
     );
 
     // drop minio copy
-    if let Err(e) = s3_client
-        .delete_object()
-        .bucket(bucket)
-        .key(file_id)
-        .send()
-        .await
-    {
+    if let Err(e) = s3_client.delete_object(file_id).await {
         tracing::error!(bucket, key = %file_id, error = ?e, "Failed to delete binary from MinIO");
     } else {
         tracing::info!(bucket, key = %file_id, "Successfully deleted binary copy from MinIO");
