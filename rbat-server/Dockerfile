@@ -1,12 +1,12 @@
 # ============================================
 # Stage 1: Build the Rust binary
 # ============================================
-FROM rust:1.85 AS builder
+FROM rust:1.93-bookworm AS builder
 
 WORKDIR /app
 
 # Install protobuf compiler for tonic-build (gRPC)
-RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y protobuf-compiler clang libclang-dev && rm -rf /var/lib/apt/lists/*
 
 # Copy workspace configuration and source directories
 COPY Cargo.toml Cargo.lock ./
@@ -18,18 +18,22 @@ COPY rbat-core ./rbat-core
 # Use cache mounts for cargo registry and target directory to speed up rebuilds
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
+    rm -rf target/* || true && \
     cargo build --release --package rbat-server && \
-    cp target/release/rbat-server /app/rbat-server
+    cp target/release/rbat-server /app/rbat-server-binary
 
 # ============================================
 # Stage 2: Runtime Environment
 # ============================================
 FROM debian:bookworm-slim AS runner
 
+# Install ca-certificates and libssl3 (which provides libcrypto.so.3)
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy the compiled binary from builder
-COPY --from=builder /app/rbat-server /usr/local/bin/rbat-server
+COPY --from=builder /app/rbat-server-binary /usr/local/bin/rbat-server
 
 # Set production environment variables
 ENV HOST=0.0.0.0

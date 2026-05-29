@@ -3,9 +3,9 @@
 # ============================================
 
 # IMPORTANT: Node.js Version Maintenance
-# This Dockerfile uses Node.js 24.13.0-slim, which was the latest LTS version at the time of writing.
+# This Dockerfile uses Node.js 24.16.0-slim, which was the latest LTS version at the time of writing.
 # To ensure security and compatibility, regularly update the NODE_VERSION ARG to the latest LTS version.
-ARG NODE_VERSION=24.13.0-slim
+ARG NODE_VERSION=24.16.0-slim
 
 FROM node:${NODE_VERSION} AS dependencies
 
@@ -16,6 +16,7 @@ WORKDIR /app
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./
 
 # Install project dependencies with frozen lockfile for reproducible builds
+ENV PNPM_CONFIG_DANGEROUSLY_ALLOW_ALL_BUILDS=true
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
     --mount=type=cache,target=/root/.local/share/pnpm/store \
@@ -24,7 +25,7 @@ RUN --mount=type=cache,target=/root/.npm \
   elif [ -f yarn.lock ]; then \
     corepack enable yarn && yarn install --frozen-lockfile --production=false; \
   elif [ -f pnpm-lock.yaml ]; then \
-    corepack enable pnpm && pnpm install --frozen-lockfile; \
+    corepack enable pnpm && pnpm install --frozen-lockfile --fetch-timeout 1200000 --fetch-retries 5; \
   else \
     echo "No lockfile found." && exit 1; \
   fi
