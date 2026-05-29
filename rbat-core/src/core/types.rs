@@ -7,17 +7,13 @@ use super::{BinaryArch, BinaryOS};
 use goblin::Object;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::collections::{HashMap, HashSet};
 
 /// Represents the progress updates emitted during static analysis.
 pub enum AnalysisProgress {
     /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
     /// and blacklisted anti-analysis mnemonics.
     Disassembly((HashMap<String, Vec<u64>>, HashMap<String, Vec<u64>>)),
-
     /// Extracted strings matched by YARA rules.
     Strings(HashMap<String, Vec<YaraMatches>>),
     /// Packer and compiler signatures matched by YARA rules.
@@ -59,7 +55,6 @@ pub struct AnalysisResult {
     pub code_cave: HashMap<String, Vec<u64>>,
     /// Count and location of blacklisted anti-analysis instructions.
     pub blacklisted_mnemonics: HashMap<String, Vec<u64>>,
-
     /// System and API calls associated with library/function hooking.
     pub api_hooking: HashMap<String, u64>,
     /// Indicators of process injection capabilities.
@@ -164,8 +159,6 @@ pub struct BinaryMetadata {
 /// };
 /// ```
 pub struct AnalysisContext<'a> {
-    /// Path to the binary file on disk.
-    pub path: &'a Path,
     /// Raw byte buffer of the binary.
     pub buffer: &'a [u8],
     /// Parsed representation of the executable headers and sections.
