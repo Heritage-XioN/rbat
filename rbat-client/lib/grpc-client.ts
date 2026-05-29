@@ -29,7 +29,7 @@ let UploadResponse = transfer.UploadResponse;
 export function uploadBinary(
   filename: string,
   buffer: Buffer,
-): Promise<typeof UploadResponse> {
+): Promise<{ file_id: string; total_bytes_received: number }> {
   return new Promise((resolve, reject) => {
     const call = client.UploadBinary((err: any, response: any) => {
       if (err) {
