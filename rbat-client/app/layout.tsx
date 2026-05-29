@@ -16,9 +16,41 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RBAT — Binary Analysis Toolkit",
+  title: "RBAT — Binary Analysis Toolkit & Reverse Engineering Dashboard",
   description:
-    "RBAT is a reverse-engineering binary analysis toolkit for identifying vulnerabilities, entropy anomalies, and malicious patterns in compiled binaries.",
+    "RBAT is a professional reverse-engineering static analysis toolkit for identifying security vulnerabilities, packing signatures, code caves, and malicious heuristics in compiled binaries (ELF, PE, Mach-O).",
+  keywords: [
+    "binary analysis",
+    "reverse engineering",
+    "static analysis",
+    "security audit",
+    "malware heuristics",
+    "YARA rules",
+    "ELF parser",
+    "PE parser",
+    "Mach-O disassembler",
+    "code cave detection",
+  ],
+  authors: [{ name: "RBAT Core Team" }],
+  openGraph: {
+    title: "RBAT — Binary Analysis Toolkit & Reverse Engineering Dashboard",
+    description:
+      "Perform high-performance static analysis and security auditing on compiled binaries directly from a secure web dashboard.",
+    type: "website",
+    locale: "en_US",
+    siteName: "RBAT Toolkit",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RBAT — Binary Analysis Toolkit & Reverse Engineering Dashboard",
+    description:
+      "Perform high-performance static analysis and security auditing on compiled binaries.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    nocache: true,
+  },
 };
 
 export default function RootLayout({
