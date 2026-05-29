@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::utils::webhook_sender::dispatch_webhook;
-use s3::Bucket as S3Client;
 use rbat::core::analyzer::analyze_batch;
+use s3::Bucket as S3Client;
 use serde_json::{json, to_value};
 use tokio::sync::oneshot;
 use tracing::Instrument;
@@ -16,12 +16,9 @@ pub async fn analyze_stored_binary(s3_client: &S3Client, file_id: &str) -> Resul
         "Downloading binary from S3"
     );
 
-    let download_output = s3_client
-        .get_object(file_id)
-        .await
-        .map_err(|e| {
-            crate::RbatServerError::S3client(format!("Failed to get object from S3: {}", e))
-        })?;
+    let download_output = s3_client.get_object(file_id).await.map_err(|e| {
+        crate::RbatServerError::S3client(format!("Failed to get object from S3: {}", e))
+    })?;
 
     let payload = download_output.bytes().to_vec();
 

@@ -7,9 +7,9 @@ pub mod transfer {
 }
 use std::fmt::Debug;
 
-use s3::Bucket as S3Client;
 use axum::extract::FromRef;
 use axum_standardwebhooks::SharedWebhook;
+use s3::Bucket as S3Client;
 use thiserror::Error;
 
 /// Represents all possible error conditions returned by the RBAT server library.

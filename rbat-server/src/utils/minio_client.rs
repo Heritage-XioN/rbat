@@ -1,7 +1,7 @@
-use crate::{Result, RbatServerError};
+use crate::{RbatServerError, Result};
 use s3::Bucket as S3Client;
 use s3::creds::Credentials;
-use s3::{Region, BucketConfiguration};
+use s3::{BucketConfiguration, Region};
 
 pub async fn setup_minio_client() -> Result<S3Client> {
     let root_user = std::env::var("MINIO_ROOT_USER").unwrap_or_else(|_| {
@@ -43,7 +43,10 @@ pub async fn setup_minio_client() -> Result<S3Client> {
     // Check if the bucket exists. If not, create it.
     let exists = bucket.exists().await.unwrap_or(false);
     if !exists {
-        tracing::info!(bucket = bucket_name, "Bucket does not exist. Creating it...");
+        tracing::info!(
+            bucket = bucket_name,
+            "Bucket does not exist. Creating it..."
+        );
         S3Client::create_with_path_style(
             bucket_name,
             region,
