@@ -108,6 +108,7 @@ export function UploadZone() {
             ? 0
             : -1
         }
+        id="binary-upload-dropzone"
         role="button"
         aria-label="Upload binary for analysis"
         className={`flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-12 text-center transition-all focus:outline-none focus:ring-1 focus:ring-rbat-accent ${
@@ -122,6 +123,8 @@ export function UploadZone() {
       >
         <input
           ref={fileInputRef}
+          id="binary-file-input"
+          name="binary-file-input"
           type="file"
           className="hidden"
           onChange={handleChange}
