@@ -1,13 +1,21 @@
-interface EmbeddedString {
-  offset: string;
-  value: string;
-}
+"use client";
 
-interface StringsSnapshotProps {
-  strings?: EmbeddedString[];
-}
+import { useAnalysisStore } from "@/lib/store/analysis-store";
 
-export function StringsSnapshot({ strings }: StringsSnapshotProps) {
+export function StringsSnapshot() {
+  const { analysisData } = useAnalysisStore();
+
+  // Map all YARA matching strings to list
+  const strings = Object.values(
+    analysisData?.analysis_result?.string_values || {},
+  )
+    .flat()
+    .map((match) => ({
+      offset: `0x${match.offset.toString(16).toUpperCase()}`,
+      value: match.data,
+    }))
+    .slice(0, 7); // Show top 7
+
   return (
     <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5">
       {/* Header */}
@@ -28,19 +36,28 @@ export function StringsSnapshot({ strings }: StringsSnapshotProps) {
         </div>
 
         {/* Table rows */}
-        {strings?.map((str, index) => (
-          <div
-            key={`${str.offset}-${index}`}
-            className="grid grid-cols-[100px_1fr] gap-4 border-b border-rbat-border/30 py-2.5 last:border-b-0"
-          >
-            <span className="font-mono text-xs text-rbat-text-secondary">
-              {str.offset}
-            </span>
-            <span className="truncate font-mono text-xs text-rbat-text">
-              {str.value}
-            </span>
+        {strings.length > 0 ? (
+          strings.map((str, index) => (
+            <div
+              key={`${str.offset}-${index}`}
+              className="grid grid-cols-[100px_1fr] gap-4 border-b border-rbat-border/30 py-2.5 last:border-b-0"
+            >
+              <span className="font-mono text-xs text-rbat-text-secondary">
+                {str.offset}
+              </span>
+              <span
+                className="truncate font-mono text-xs text-rbat-text"
+                title={str.value}
+              >
+                {str.value}
+              </span>
+            </div>
+          ))
+        ) : (
+          <div className="text-center py-8 text-xs font-mono text-rbat-muted">
+            No strings indexed
           </div>
-        ))}
+        )}
       </div>
     </div>
   );

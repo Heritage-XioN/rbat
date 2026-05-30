@@ -1,12 +1,17 @@
+"use client";
+
 import { Download, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useAnalysisStore } from "@/lib/store/analysis-store";
 
-interface AnalysisHeaderProps {
-  fileName?: string;
-}
+export function AnalysisHeader() {
+  const { fileName, reset } = useAnalysisStore();
 
-export function AnalysisHeader({ fileName }: AnalysisHeaderProps) {
+  const handleReanalyze = () => {
+    reset();
+  };
+
   return (
     <section className="mx-auto w-full max-w-7xl px-6 pt-8 pb-4">
       {/* Label */}
@@ -37,13 +42,6 @@ export function AnalysisHeader({ fileName }: AnalysisHeaderProps) {
           >
             <Download className="size-4" />
             <span className="hidden sm:inline">Export Report</span>
-          </Button>
-          <Button
-            id="re-analyze-btn"
-            className="gap-2 border border-rbat-accent/30 bg-rbat-accent/10 text-rbat-accent hover:bg-rbat-accent/20"
-          >
-            <RefreshCw className="size-4" />
-            Re-analyze
           </Button>
         </div>
       </div>

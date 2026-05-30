@@ -1,3 +1,6 @@
+"use client";
+
+import { useAnalysisStore } from "@/lib/store/analysis-store";
 import { Navbar } from "@/components/block/navbar";
 import { UploadZone } from "@/components/block/upload-zone";
 import { AnalysisHeader } from "@/components/block/analysis-header";
@@ -9,8 +12,12 @@ import { PathsNetwork } from "@/components/block/paths-network";
 import { BinaryComposition } from "@/components/block/binary-composition";
 import { AiInsight } from "@/components/block/ai-insight";
 import { Footer } from "@/components/block/footer";
+import { TransitionWrapper } from "@/components/ui/transition-wrapper";
 
 export function Dashboard() {
+  const status = useAnalysisStore((state) => state.status);
+  const showResults = status === "completed";
+
   return (
     <div className="flex min-h-screen flex-col bg-rbat-bg">
       {/* Navbar */}
@@ -20,19 +27,27 @@ export function Dashboard() {
       <UploadZone />
 
       {/* Analysis Header */}
-      <AnalysisHeader fileName="" />
+      <TransitionWrapper show={showResults} delay="delay-[0ms]">
+        <AnalysisHeader />
+      </TransitionWrapper>
 
       {/* Main Analysis Grid */}
       <section className="mx-auto w-full max-w-7xl px-6 py-4">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {/* File Metrics — spans 1 col */}
-          <FileMetrics />
+          <TransitionWrapper show={showResults} delay="delay-[100ms]">
+            <FileMetrics />
+          </TransitionWrapper>
 
           {/* Risk Assessment — spans 1 col */}
-          <RiskAssessment />
+          <TransitionWrapper show={showResults} delay="delay-[200ms]">
+            <RiskAssessment />
+          </TransitionWrapper>
 
           {/* Vulnerability Findings — spans 1 col */}
-          <VulnerabilityFindings />
+          <TransitionWrapper show={showResults} delay="delay-[300ms]">
+            <VulnerabilityFindings />
+          </TransitionWrapper>
         </div>
       </section>
 
@@ -40,19 +55,27 @@ export function Dashboard() {
       <section className="mx-auto w-full max-w-7xl px-6 py-4">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {/* Embedded Strings */}
-          <StringsSnapshot />
+          <TransitionWrapper show={showResults} delay="delay-[400ms]">
+            <StringsSnapshot />
+          </TransitionWrapper>
 
           {/* Paths & Network */}
-          <PathsNetwork />
+          <TransitionWrapper show={showResults} delay="delay-[500ms]">
+            <PathsNetwork />
+          </TransitionWrapper>
 
           {/* Binary Composition */}
-          <BinaryComposition />
+          <TransitionWrapper show={showResults} delay="delay-[600ms]">
+            <BinaryComposition />
+          </TransitionWrapper>
         </div>
       </section>
 
       {/* AI Insight — full width */}
       <section className="mx-auto w-full max-w-7xl px-6 py-4">
-        <AiInsight />
+        <TransitionWrapper show={showResults} delay="delay-[700ms]">
+          <AiInsight />
+        </TransitionWrapper>
       </section>
 
       {/* Footer */}

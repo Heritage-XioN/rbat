@@ -1,18 +1,19 @@
+"use client";
+
 import { RiskGauge } from "@/components/ui/risk-gauge";
+import { useAnalysisStore } from "@/lib/store/analysis-store";
 
-interface RiskAssessmentProps {
-  score?: number;
-  severity?: string;
-  threatLevel?: string;
-  description?: string;
-}
+export function RiskAssessment() {
+  const { analysisData } = useAnalysisStore();
+  const risk = analysisData?.risk_assesment;
 
-export function RiskAssessment({
-  score,
-  severity,
-  threatLevel,
-  description,
-}: RiskAssessmentProps) {
+  const score = risk?.score ?? 0;
+  const severity = risk?.severity ?? "Safe";
+  const findings = risk?.findings ?? [];
+  const description =
+    findings[0]?.description ||
+    "No critical static analysis anomalies or signatures detected in the binary space.";
+
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-rbat-border bg-rbat-card p-5">
       {/* Header */}
@@ -30,7 +31,7 @@ export function RiskAssessment({
           <p className="text-[10px] font-semibold uppercase tracking-widest text-rbat-muted">
             Threat Level
           </p>
-          <p className="text-lg font-bold text-rbat-text">{threatLevel}</p>
+          <p className="text-lg font-bold text-rbat-text">{severity}</p>
         </div>
       </div>
 

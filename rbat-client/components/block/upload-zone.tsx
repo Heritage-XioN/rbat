@@ -8,34 +8,78 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { FormatBadge } from "@/components/ui/format-badge";
-
+import { useAnalysisStore } from "@/lib/store/analysis-store";
 
 export function UploadZone() {
-  const [status, setStatus] = useState<
-    "idle" | "uploading" | "analyzing" | "completed" | "failed"
-  >("idle");
-  const [fileName, setFileName] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
+  const {
+    status,
+    fileName,
+    errorMessage,
+    setStatus,
+    setFileName,
+    setFileInfo,
+    setAnalysisData,
+    setErrorMessage,
+    reset,
+  } = useAnalysisStore();
+
   const [isDragActive, setIsDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const startUpload = async (file: File) => {
+    reset(); // Clear previous reports
     setStatus("uploading");
     setFileName(file.name);
-    setErrorMessage("");
 
     try {
       const formData = new FormData();
       formData.append("file", file);
 
-     
+      // 1. Upload to Next.js API route
+      const uploadRes = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!uploadRes.ok) {
+        const errData = await uploadRes.json();
+        throw new Error(errData.error || "Failed to upload file");
+      }
+
+      const { fileId, md5Hash, size } = await uploadRes.json();
+      setFileInfo(md5Hash, size);
       setStatus("analyzing");
 
+      // 2. Connect to Server-Sent Events (SSE) stream to listen for analysis completion
+      const eventSource = new EventSource(`/api/events?fileId=${fileId}`);
+
+      eventSource.addEventListener("complete", (event) => {
+        const payloadData = JSON.parse(event.data);
+        setAnalysisData(payloadData);
+        setStatus("completed");
+        eventSource.close();
+      });
+
+      eventSource.addEventListener("failed", (event) => {
+        const payloadData = JSON.parse(event.data);
+        const errStr = payloadData.error || "Heuristic analysis failed";
+        setErrorMessage(errStr);
+        setStatus("failed");
+        eventSource.close();
+      });
+
+      eventSource.onerror = (err) => {
+        console.error("SSE stream connection error:", err);
+        const errStr = "Lost connection to the analysis event stream";
+        setErrorMessage(errStr);
+        setStatus("failed");
+        eventSource.close();
+      };
     } catch (err: any) {
       console.error("Upload error:", err);
-      setStatus("failed");
       const uploadErr = err.message || "Upload failed";
       setErrorMessage(uploadErr);
+      setStatus("failed");
     }
   };
 
@@ -76,9 +120,7 @@ export function UploadZone() {
 
   const resetZone = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setStatus("idle");
-    setFileName("");
-    setErrorMessage("");
+    reset();
   };
 
   return (
@@ -108,9 +150,9 @@ export function UploadZone() {
             ? 0
             : -1
         }
-        id="binary-upload-dropzone"
         role="button"
         aria-label="Upload binary for analysis"
+        id="binary-upload-dropzone"
         className={`flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-12 text-center transition-all focus:outline-none focus:ring-1 focus:ring-rbat-accent ${
           status === "idle" || status === "completed" || status === "failed"
             ? "cursor-pointer"
@@ -149,10 +191,10 @@ export function UploadZone() {
         {/* Title */}
         <h2 className="mb-2 text-lg font-semibold text-rbat-text">
           {status === "uploading" && "Uploading Binary..."}
-          {status === "analyzing" && "Performing static binary analysis..."}
+          {status === "analyzing" && "Analyzing Static Heuristics..."}
           {status === "completed" && "Analysis Completed"}
           {status === "failed" && "Analysis Failed"}
-          {status === "idle" && "Start New Analysis"}
+          {status === "idle" && "Initialize New Analysis"}
         </h2>
 
         {/* Description / Prompt */}

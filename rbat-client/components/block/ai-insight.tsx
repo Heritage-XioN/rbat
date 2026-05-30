@@ -77,7 +77,7 @@ export function AiInsight() {
       )}
 
       {/* Generate report link */}
-      <div className="flex justify-end">
+      {/* <div className="flex justify-end">
         <button
           type="button"
           className="group flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-rbat-muted transition-colors hover:text-rbat-accent"
@@ -85,7 +85,7 @@ export function AiInsight() {
           Generate Full AI Report
           <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
         </button>
-      </div>
+      </div> */}
     </div>
   );
 }

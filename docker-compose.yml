@@ -82,6 +82,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      GRPC_SERVER_URL: ${GRPC_SERVER_URL}
+      WEBHOOK_RECEIVER_URL: ${WEBHOOK_RECEIVER_URL}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
     ports:
       - "3000:3000"
     networks:
@@ -156,6 +160,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_ENDPOINT: http://minio:9000
+      WEBHOOK_TARGET_URL: ${WEBHOOK_TARGET_URL}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
     networks:
       - proxy
       - backend

@@ -1,14 +1,46 @@
-import { google } from "@ai-sdk/google";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamText } from "ai";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { analysis_result, risk_assesment } = body;
+    console.log("AI Insight API incoming body keys:", Object.keys(body));
+    console.log("AI Insight API prompt length:", body.prompt?.length || 0);
+
+    const promptStr = body.prompt;
+    if (!promptStr) {
+      return new Response(
+        JSON.stringify({ error: "Missing prompt in request body" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    let data: any;
+    try {
+      data = JSON.parse(promptStr);
+    } catch (parseError: any) {
+      console.error("AI Insight JSON parse error:", parseError);
+      return new Response(
+        JSON.stringify({ error: `Invalid JSON string in prompt: ${parseError.message}` }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const { analysis_result, risk_assesment } = data;
 
     if (!analysis_result || !risk_assesment) {
+      console.warn("AI Insight validation failed. Missing analysis_result or risk_assesment. Keys in data:", Object.keys(data));
       return new Response(
-        JSON.stringify({ error: "Missing analysis data in request body" }),
+        JSON.stringify({
+          error: "Missing analysis_result or risk_assesment in prompt payload",
+          receivedKeys: Object.keys(data),
+        }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -39,13 +71,23 @@ Static heuristics show suspicious API calls matching process injection technique
 We recommend sandbox execution and dynamic behavioral analysis to inspect memory dumps before deploying this binary in production.
 `;
 
+    // Retrieve API key from environment variables
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Missing Google Generative AI API key in environment variables (GEMINI_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY)");
+    }
+
+    const googleProvider = createGoogleGenerativeAI({
+      apiKey,
+    });
+
     // Stream text using Gemini 2.5 Flash model
     const result = streamText({
-      model: google("gemini-2.5-flash"),
+      model: googleProvider("gemini-2.5-flash"),
       prompt,
     });
 
-    return result.toTextStreamResponse();
+    return result.toUIMessageStreamResponse();
   } catch (error: any) {
     console.error("AI Insight Route Error:", error);
     return new Response(
