@@ -15,7 +15,7 @@ export function RiskAssessment() {
     "No critical static analysis anomalies or signatures detected in the binary space.";
 
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-rbat-border bg-rbat-card p-5">
+    <div className="flex flex-col items-center justify-center rounded-xl border border-rbat-border bg-rbat-card p-5 h-107.5">
       {/* Header */}
       <h3 className="mb-6 self-start text-[11px] font-bold uppercase tracking-widest text-rbat-muted">
         Risk Assessment

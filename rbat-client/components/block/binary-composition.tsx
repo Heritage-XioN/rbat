@@ -28,14 +28,14 @@ export function BinaryComposition() {
   });
 
   return (
-    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5">
+    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-[380px]">
       {/* Header */}
       <h3 className="mb-4 text-[11px] font-bold uppercase tracking-widest text-rbat-muted">
         Binary Composition
       </h3>
 
       {/* Progress bars */}
-      <div className="space-y-4 max-h-[280px] overflow-y-auto pr-1">
+      <div className="space-y-4 flex-1 overflow-y-auto scrollbar-none pr-1">
         {sections.length > 0 ? (
           sections.map((section) => (
             <div key={section.name} className="space-y-1.5">

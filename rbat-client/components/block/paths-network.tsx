@@ -21,7 +21,7 @@ export function PathsNetwork() {
     .slice(0, 7); // Show top 7
 
   return (
-    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5">
+    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-[380px]">
       {/* Header with legend */}
       <div className="mb-4 flex items-center gap-4">
         <div className="flex items-center gap-1.5">
@@ -39,9 +39,9 @@ export function PathsNetwork() {
       </div>
 
       {/* Table */}
-      <div className="space-y-0">
+      <div className="space-y-0 flex-1 overflow-y-auto scrollbar-none pr-1">
         {/* Table header */}
-        <div className="grid grid-cols-[100px_1fr] gap-4 border-b border-rbat-border/50 pb-2">
+        <div className="grid grid-cols-[100px_1fr] gap-4 border-b border-rbat-border/50 pb-2 sticky top-0 bg-rbat-card z-10">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-rbat-muted">
             Offset
           </span>

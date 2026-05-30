@@ -17,16 +17,16 @@ export function StringsSnapshot() {
     .slice(0, 7); // Show top 7
 
   return (
-    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5">
+    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-[380px]">
       {/* Header */}
       <h3 className="mb-4 text-[11px] font-bold uppercase tracking-widest text-rbat-muted">
         Embedded Strings Snapshot
       </h3>
 
       {/* Table */}
-      <div className="space-y-0">
+      <div className="space-y-0 flex-1 overflow-y-auto scrollbar-none pr-1">
         {/* Table header */}
-        <div className="grid grid-cols-[100px_1fr] gap-4 border-b border-rbat-border/50 pb-2">
+        <div className="grid grid-cols-[100px_1fr] gap-4 border-b border-rbat-border/50 pb-2 sticky top-0 bg-rbat-card z-10">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-rbat-muted">
             Offset
           </span>

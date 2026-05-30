@@ -38,7 +38,7 @@ export function FileMetrics() {
   ).map(([name, entropy]) => ({ name, entropy }));
 
   return (
-    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5">
+    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-107.5">
       {/* Header */}
       <h3 className="mb-4 text-[11px] font-bold uppercase tracking-widest text-rbat-muted">
         File Data Metrics
@@ -63,11 +63,7 @@ export function FileMetrics() {
 
       {/* Entropy Heatmap */}
       <div className="mt-4">
-        {entropySections.length > 0 ? (
-          <EntropyHeatmap sections={entropySections} />
-        ) : (
-          <EntropyHeatmap />
-        )}
+        <EntropyHeatmap sections={entropySections} />
       </div>
     </div>
   );

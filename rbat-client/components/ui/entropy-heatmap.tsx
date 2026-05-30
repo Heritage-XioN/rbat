@@ -31,14 +31,7 @@ function entropyToColor(entropy: number): string {
 }
 
 export function EntropyHeatmap({ sections, className }: EntropyHeatmapProps) {
-  const displaySections = sections ?? [
-    { name: ".text", entropy: 6.85 },
-    { name: ".data", entropy: 3.21 },
-    { name: ".rodata", entropy: 5.44 },
-    { name: ".bss", entropy: 0.0 },
-    { name: ".plt", entropy: 5.12 },
-    { name: ".got", entropy: 2.88 },
-  ];
+  const displaySections = sections || [];
 
   return (
     <div className={cn("space-y-2", className)}>
@@ -46,28 +39,37 @@ export function EntropyHeatmap({ sections, className }: EntropyHeatmapProps) {
         <span className="inline-block size-1.5 rounded-full bg-rbat-accent animate-pulse" />
         Live Entropy Mapping
       </div>
-      <div className="grid grid-cols-3 gap-1">
-        {displaySections.map((section) => (
-          <div
-            key={section.name}
-            className="relative rounded-sm p-2 text-center transition-all hover:scale-105"
-            style={{ backgroundColor: entropyToColor(section.entropy) }}
-          >
-            <div className="text-[9px] font-mono font-semibold text-white/90">
-              {section.name}
-            </div>
-            <div className="text-[8px] font-mono text-white/60">
-              {section.entropy.toFixed(2)}
-            </div>
+
+      {displaySections.length > 0 ? (
+        <>
+          <div className="grid grid-cols-3 gap-1">
+            {displaySections.map((section) => (
+              <div
+                key={section.name}
+                className="relative rounded-sm p-2 text-center transition-all hover:scale-105"
+                style={{ backgroundColor: entropyToColor(section.entropy) }}
+              >
+                <div className="text-[9px] font-mono font-semibold text-white/90 truncate" title={section.name}>
+                  {section.name}
+                </div>
+                <div className="text-[8px] font-mono text-white/60">
+                  {section.entropy.toFixed(2)}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      {/* Entropy scale legend */}
-      <div className="flex items-center gap-1 pt-1">
-        <span className="text-[8px] text-rbat-muted">0.0</span>
-        <div className="h-1.5 flex-1 rounded-full bg-gradient-to-r from-blue-500/50 via-purple-500/70 to-pink-500/80" />
-        <span className="text-[8px] text-rbat-muted">8.0</span>
-      </div>
+          {/* Entropy scale legend */}
+          <div className="flex items-center gap-1 pt-1">
+            <span className="text-[8px] text-rbat-muted">0.0</span>
+            <div className="h-1.5 flex-1 rounded-full bg-gradient-to-r from-blue-500/50 via-purple-500/70 to-pink-500/80" />
+            <span className="text-[8px] text-rbat-muted">8.0</span>
+          </div>
+        </>
+      ) : (
+        <div className="text-center py-6 text-xs font-mono text-rbat-muted border border-dashed border-rbat-border/50 rounded-lg">
+          No entropy data mapped
+        </div>
+      )}
     </div>
   );
 }
