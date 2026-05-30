@@ -9,14 +9,14 @@ pub async fn setup_minio_client() -> Result<S3Client> {
             var = "MINIO_ROOT_USER",
             "Environment variable not set. Using development default"
         );
-        "admin_user".to_string()
+        "admin".to_string()
     });
     let root_password = std::env::var("MINIO_ROOT_PASSWORD").unwrap_or_else(|_| {
         tracing::warn!(
             var = "MINIO_ROOT_PASSWORD",
             "Environment variable not set. Using development default"
         );
-        "super_secure_password_123".to_string()
+        "password123".to_string()
     });
     let endpoint = std::env::var("MINIO_ENDPOINT").unwrap_or_else(|_| {
         tracing::info!(
