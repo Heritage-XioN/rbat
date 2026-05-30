@@ -28,7 +28,7 @@ export function BinaryComposition() {
   });
 
   return (
-    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-[380px]">
+    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-95">
       {/* Header */}
       <h3 className="mb-4 text-[11px] font-bold uppercase tracking-widest text-rbat-muted">
         Binary Composition
@@ -50,7 +50,7 @@ export function BinaryComposition() {
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-rbat-border">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-rbat-accent to-pink-400 transition-all duration-700"
+                  className="h-full rounded-full bg-linear-to-r from-rbat-accent to-pink-400 transition-all duration-700"
                   style={{ width: `${section.percentage}%` }}
                 />
               </div>

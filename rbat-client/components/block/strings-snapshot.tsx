@@ -17,7 +17,7 @@ export function StringsSnapshot() {
     .slice(0, 7); // Show top 7
 
   return (
-    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-[380px]">
+    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-95">
       {/* Header */}
       <h3 className="mb-4 text-[11px] font-bold uppercase tracking-widest text-rbat-muted">
         Embedded Strings Snapshot

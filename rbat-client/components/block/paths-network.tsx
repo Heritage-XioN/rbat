@@ -21,7 +21,7 @@ export function PathsNetwork() {
     .slice(0, 7); // Show top 7
 
   return (
-    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-[380px]">
+    <div className="flex flex-col rounded-xl border border-rbat-border bg-rbat-card p-5 h-95">
       {/* Header with legend */}
       <div className="mb-4 flex items-center gap-4">
         <div className="flex items-center gap-1.5">

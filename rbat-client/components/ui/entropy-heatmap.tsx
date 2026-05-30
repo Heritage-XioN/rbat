@@ -61,7 +61,7 @@ export function EntropyHeatmap({ sections, className }: EntropyHeatmapProps) {
           {/* Entropy scale legend */}
           <div className="flex items-center gap-1 pt-1">
             <span className="text-[8px] text-rbat-muted">0.0</span>
-            <div className="h-1.5 flex-1 rounded-full bg-gradient-to-r from-blue-500/50 via-purple-500/70 to-pink-500/80" />
+            <div className="h-1.5 flex-1 rounded-full bg-linear-to-r from-blue-500/50 via-purple-500/70 to-pink-500/80" />
             <span className="text-[8px] text-rbat-muted">8.0</span>
           </div>
         </>
