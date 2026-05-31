@@ -138,17 +138,14 @@ pub struct BinaryMetadata {
 ///
 /// # Example
 /// ```rust
-/// use std::path::Path;
 /// use goblin::Object;
 /// use rbat::core::{AnalysisContext, BinaryArch, BinaryOS};
 ///
-/// let path = Path::new("test_bin");
 /// let buffer = vec![0x90; 100];
 /// let obj = Object::parse(&buffer).unwrap();
 /// let section_ranges = vec![];
 ///
 /// let ctx = AnalysisContext {
-///     path: &path,
 ///     buffer: &buffer,
 ///     binary_object: &obj,
 ///     section_ranges: &section_ranges,

@@ -17,13 +17,11 @@
 //! use rbat::core::traits::HeuristicPlugin;
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
-//! let path = Path::new("test_elf");
 //! let buffer = vec![0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 62, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 56, 0, 1, 0, 64, 0, 0, 0, 0, 0];
 //! let obj = Object::parse(&buffer)?;
 //! let section_ranges = vec![];
 //!
 //! let ctx = AnalysisContext {
-//!     path: &path,
 //!     buffer: &buffer,
 //!     binary_object: &obj,
 //!     section_ranges: &section_ranges,

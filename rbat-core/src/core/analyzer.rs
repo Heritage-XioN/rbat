@@ -23,10 +23,9 @@ use crate::{
 ///
 /// # Example
 /// ```rust,no_run
-/// use std::path::Path;
 /// use rbat::core::analyzer::analyze_streaming;
 ///
-/// analyze_streaming(Path::new("my_binary"), |progress| {
+/// analyze_streaming(b"some binary bytes", |progress| {
 ///     // Handle progress updates here
 /// }).unwrap();
 /// ```
@@ -40,9 +39,9 @@ where
     let error_state = Mutex::new(None);
     let cancel_flag = AtomicBool::new(false);
 
-    let binary_object = Object::parse(&buffer)?;
-    let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, &buffer)?;
-    let parsed = Parser::new(&buffer, &binary_object);
+    let binary_object = Object::parse(buffer)?;
+    let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, buffer)?;
+    let parsed = Parser::new(buffer, &binary_object);
     let binary_data = parsed.parse_buffer()?;
 
     if let (
@@ -57,7 +56,7 @@ where
         binary_data.get("entry_addr"),
     ) {
         let ctx = AnalysisContext {
-            buffer: &buffer,
+            buffer,
             binary_object: &binary_object,
             section_ranges: &section_ranges,
             os: *os,
@@ -105,10 +104,9 @@ where
 ///
 /// # Example
 /// ```rust,no_run
-/// use std::path::Path;
 /// use rbat::core::analyzer::analyze_batch;
 ///
-/// let (result, assessment) = analyze_batch(Path::new("my_binary")).unwrap();
+/// let (result, assessment) = analyze_batch(b"some binary bytes").unwrap();
 /// println!("Threat score: {}", assessment.score);
 /// ```
 ///
@@ -166,7 +164,6 @@ mod tests {
     use super::*;
     use crate::utils::test_helpers::test_helpers;
     use std::fs;
-    use std::path::Path;
     use tempfile::tempdir;
 
     #[test]
@@ -186,8 +183,7 @@ mod tests {
 
     #[test]
     fn test_analyze_streaming_err() {
-        let path = Path::new("non_existent_binary_file_abc.bin");
-        let buffer = fs::read(&path).unwrap();
+        let buffer = b"invalid_binary_data_format".to_vec();
         let result = analyze_streaming(&buffer, |_| {});
         assert!(result.is_err());
     }
