@@ -88,7 +88,7 @@ impl Analysis for GRPCservice {
         tracing::info!(total_bytes, "Successfully saved upload");
 
         Ok(Response::new(UploadResponse {
-            file_id: file_id,
+            file_id,
             total_bytes_received: total_bytes,
         }))
     }

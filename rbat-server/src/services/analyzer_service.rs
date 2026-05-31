@@ -26,6 +26,18 @@ pub async fn analyze_stored_binary(s3_client: &S3Client, file_id: &str) -> Resul
     let span = tracing::info_span!("analyze_stored_binary_background", file_id = %file_id_clone);
     tokio::spawn(
         async move {
+            let webhook_url = match std::env::var("WEBHOOK_TARGET_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    tracing::warn!(
+                        var = "WEBHOOK_TARGET_URL",
+                        "Environment variable not set. Skipping webhook dispatch"
+                    );
+                    return;
+                }
+            };
+            let event_id = uuid::Uuid::new_v4().to_string();
+
             // Bridge to safely get the struct back from Rayon
             let (tx, rx) = oneshot::channel();
 
@@ -61,23 +73,19 @@ pub async fn analyze_stored_binary(s3_client: &S3Client, file_id: &str) -> Resul
                             }
                         });
 
-                        let webhook_url = match std::env::var("WEBHOOK_TARGET_URL") {
-                            Ok(url) => url,
-                            Err(_) => {
-                                tracing::warn!(
-                                    var = "WEBHOOK_TARGET_URL",
-                                    "Environment variable not set. Skipping webhook dispatch"
-                                );
-                                return;
-                            }
-                        };
-                        let event_id = uuid::Uuid::new_v4().to_string();
-
                         dispatch_webhook(webhook_url, event_id, report_json).await;
                     }
                     Err(e) => {
                         // Handle malformed binary or processing error
+                        let report_json = json!({
+                            "event_type": "analysis.failed",
+                            "data": {
+                                "file_id": file_id_clone,
+                                "error": e
+                            }
+                        });
                         tracing::error!(error = ?e, "Analysis failed for binary");
+                        dispatch_webhook(webhook_url, event_id, report_json).await;
                     }
                 }
             }
