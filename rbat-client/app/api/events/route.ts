@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
         controller.close();
       };
 
-      const onFailure = (error: string) => {
+      const onFailure = (error: any) => {
         controller.enqueue(
           encoder.encode(`event: failed\ndata: ${JSON.stringify({ error })}\n\n`),
         );

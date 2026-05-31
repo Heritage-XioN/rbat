@@ -35,7 +35,7 @@ export function UploadZone() {
       const formData = new FormData();
       formData.append("file", file);
 
-      // 1. Upload to Next.js API route
+      // Upload to API route
       const uploadRes = await fetch("/api/upload", {
         method: "POST",
         body: formData,
@@ -50,7 +50,7 @@ export function UploadZone() {
       setFileInfo(md5Hash, size);
       setStatus("analyzing");
 
-      // 2. Connect to Server-Sent Events (SSE) stream to listen for analysis completion
+      // Connect to Server-Sent Events (SSE) stream to listen for analysis completion
       const eventSource = new EventSource(`/api/events?fileId=${fileId}`);
 
       eventSource.addEventListener("complete", (event) => {
@@ -62,7 +62,8 @@ export function UploadZone() {
 
       eventSource.addEventListener("failed", (event) => {
         const payloadData = JSON.parse(event.data);
-        const errStr = payloadData.error || "Heuristic analysis failed";
+        const errObj = Object.values(payloadData.error)[0] || "Heuristic analysis failed";
+        const errStr = Object.values(errObj)[0];
         setErrorMessage(errStr);
         setStatus("failed");
         eventSource.close();

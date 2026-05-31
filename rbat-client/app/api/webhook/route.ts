@@ -37,6 +37,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (payload.event_type === "analysis.failed") {
+      const fileId = payload.data?.file_id;
+      if (fileId) {
+        //saveAnalysis(fileId, payload.data);
+        console.error(`Error processing file with id: ${fileId}`);
+
+        // Notify any active event streams of completion
+        analysisEvents.emit(`failed:${fileId}`, payload.data);
+      }
+    }
+
     return NextResponse.json({ status: "success" });
   } catch (error: any) {
     console.error("Webhook receiver error:", error);
