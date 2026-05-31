@@ -4,38 +4,67 @@
 //! classification, disassembling, scanning, template rendering, and file I/O error states
 //! produced by the RBAT core library.
 
+use serde::Serialize;
 use thiserror::Error;
 
 /// Represents all possible error conditions returned by the RBAT core library.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Serialize)]
 pub enum RbatError {
     /// Standard input/output operations error.
     #[error("I/O error occurred")]
-    Io(#[from] std::io::Error),
+    Io(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        std::io::Error,
+    ),
 
     /// Executable binary header parsing failure.
     #[error("Error occurred while parsing binary")]
-    ParseError(#[from] goblin::error::Error),
+    ParseError(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        goblin::error::Error,
+    ),
 
     /// Capstone disassembly engine failure.
     #[error("Error occurred while disassembling binary bytes")]
-    DisassemblerError(#[from] capstone::Error),
+    DisassemblerError(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        capstone::Error,
+    ),
 
     /// YARA rules compilation failure.
     #[error("Error occurred while compiling YARA rules")]
-    YaraCompileError(#[from] yara::errors::YaraError),
+    YaraCompileError(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        yara::errors::YaraError,
+    ),
 
     /// Memory scan execution failure in YARA backend.
     #[error("Error occurred while performing I/O with YARA")]
-    YaraIO(#[from] yara::Error),
+    YaraIO(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        yara::Error,
+    ),
 
     /// Serialization/deserialization failure.
     #[error("Serialization error")]
-    SerializationError(#[from] serde_json::Error),
+    SerializationError(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        serde_json::Error,
+    ),
 
     /// CLI argument parser validation failure.
     #[error("CLI error")]
-    CliError(#[from] clap::error::Error),
+    CliError(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        clap::error::Error,
+    ),
 
     /// Non-supported formats or corrupted machine layouts.
     #[error("Unsupported binary format: {0}")]
@@ -59,11 +88,19 @@ pub enum RbatError {
 
     /// UTF8 decoding failure.
     #[error("Invalid UTF-8 in embedded asset")]
-    Utf8Error(#[from] std::string::FromUtf8Error),
+    Utf8Error(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        std::string::FromUtf8Error,
+    ),
 
     /// CSV formatter error.
     #[error("csv creation error")]
-    ErrorCreatingCsv(#[from] csv::Error),
+    ErrorCreatingCsv(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        csv::Error,
+    ),
 
     /// Pipeline cancellation indicator.
     #[error("an error occurred which resulted in the cancellation of the analysis process")]
@@ -84,4 +121,12 @@ pub enum RbatError {
     /// CSV writer output failure.
     #[error("CSV error: {0}")]
     CsvError(String),
+}
+
+fn serialize_to_string<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+where
+    T: std::fmt::Display,
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&value.to_string())
 }
