@@ -56,11 +56,12 @@ pub async fn receive_webhook(
     span.record("delivery_id", delivery_id);
     span.record("event_type", event_type);
 
-    tracing::info!(
+    tracing::debug!(
         webhook_timestamp,
         webhook_signature,
-        "Webhook signature successfully verified"
+        "Webhook signature successfully verified detail"
     );
+    tracing::info!("Webhook signature successfully verified");
 
     match payload.event_type.as_str() {
         "analysis.start" => {

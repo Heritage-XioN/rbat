@@ -4,20 +4,40 @@ use s3::creds::Credentials;
 use s3::{BucketConfiguration, Region};
 
 pub async fn setup_minio_client() -> Result<S3Client> {
-    let root_user = std::env::var("MINIO_ROOT_USER").unwrap_or_else(|_| {
-        tracing::warn!(
-            var = "MINIO_ROOT_USER",
-            "Environment variable not set. Using development default"
-        );
-        "admin".to_string()
-    });
-    let root_password = std::env::var("MINIO_ROOT_PASSWORD").unwrap_or_else(|_| {
-        tracing::warn!(
-            var = "MINIO_ROOT_PASSWORD",
-            "Environment variable not set. Using development default"
-        );
-        "password123".to_string()
-    });
+    let is_prod = std::env::var("RUN_MODE").unwrap_or_default() == "production";
+
+    let root_user = match std::env::var("MINIO_ROOT_USER") {
+        Ok(val) => val,
+        Err(_) => {
+            if is_prod {
+                return Err(RbatServerError::Internal(
+                    "MINIO_ROOT_USER environment variable is missing in production!".to_string(),
+                ));
+            }
+            tracing::warn!(
+                var = "MINIO_ROOT_USER",
+                "Environment variable not set. Using development default"
+            );
+            "admin".to_string()
+        }
+    };
+
+    let root_password = match std::env::var("MINIO_ROOT_PASSWORD") {
+        Ok(val) => val,
+        Err(_) => {
+            if is_prod {
+                return Err(RbatServerError::Internal(
+                    "MINIO_ROOT_PASSWORD environment variable is missing in production!"
+                        .to_string(),
+                ));
+            }
+            tracing::warn!(
+                var = "MINIO_ROOT_PASSWORD",
+                "Environment variable not set. Using development default"
+            );
+            "password123".to_string()
+        }
+    };
     let endpoint = std::env::var("MINIO_ENDPOINT").unwrap_or_else(|_| {
         tracing::info!(
             var = "MINIO_ENDPOINT",

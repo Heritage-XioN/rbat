@@ -17,6 +17,10 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
         let payload_str = payload.to_string();
         let timestamp = Utc::now().timestamp();
         let secret = env::var("WEBHOOK_SECRET").unwrap_or_else(|_| {
+            let is_prod = env::var("RUN_MODE").unwrap_or_default() == "production";
+            if is_prod {
+                panic!("CRITICAL CONFIG ERROR: WEBHOOK_SECRET environment variable is missing in production background task!");
+            }
             tracing::debug!("WEBHOOK_SECRET environment variable not set. Falling back to default development key.");
             "whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD".to_string()
         });

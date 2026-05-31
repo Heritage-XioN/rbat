@@ -5,7 +5,10 @@ use rbat_server::{
     AppState,
     handlers::{GRPCservice, webhook::receive_webhook},
     transfer::analysis_server::AnalysisServer,
-    utils::{log_time::LocalTimeWithoutMillis, minio_client::setup_minio_client},
+    utils::{
+        log_time::LocalTimeWithoutMillis, minio_client::setup_minio_client,
+        shutdown_signal::shutdown_signal,
+    },
 };
 use standardwebhooks::Webhook;
 
@@ -14,7 +17,7 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     dotenvy::dotenv().ok(); // Ignore error if .env doesn't exist
 
-    // Initialize structured logging with custom timer (no milliseconds)
+    // Initialize logging
     tracing_subscriber::fmt()
         .with_timer(LocalTimeWithoutMillis)
         .with_env_filter(
@@ -24,6 +27,10 @@ async fn main() -> Result<()> {
         .init();
 
     let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| {
+        let is_prod = std::env::var("RUN_MODE").unwrap_or_default() == "production";
+        if is_prod {
+            panic!("CRITICAL CONFIG ERROR: WEBHOOK_SECRET environment variable is missing in production!");
+        }
         tracing::warn!(
             key = "WEBHOOK_SECRET",
             "Environment variable not set. Falling back to default development key."
@@ -58,8 +65,12 @@ async fn main() -> Result<()> {
     let addr = format!("{}:{}", host, port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    tracing::info!(address = %addr, "Server running multi-protocol");
-    axum::serve(listener, app).await?;
+    tracing::info!(address = %addr, "Server: started multi-protocol");
+
+    // Serve with graceful shutdown
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     Ok(())
 }
