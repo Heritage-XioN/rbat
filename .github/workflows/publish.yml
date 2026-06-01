@@ -5,6 +5,9 @@ on:
     types: [published]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   publish:
     name: Publish to Crates.io
@@ -17,6 +20,8 @@ jobs:
           sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
       - name: Verify Tests Pass
         run: cargo test --verbose
       - name: Publish

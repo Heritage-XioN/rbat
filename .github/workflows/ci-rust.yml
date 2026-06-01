@@ -3,8 +3,29 @@ name: Rust CI
 on:
   pull_request:
     branches: [ master ]
+    paths:
+      - 'rbat-core/**'
+      - 'rbat-server/**'
+      - 'proto/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci-rust.yml'
   push:
     branches: [ master ]
+    paths:
+      - 'rbat-core/**'
+      - 'rbat-server/**'
+      - 'proto/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci-rust.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,11 +39,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
       - name: Check Formatting
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -36,9 +59,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcapstone-dev libyara-dev protobuf-compiler
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --verbose
       - name: Run tests
