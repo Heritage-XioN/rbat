@@ -1,3 +1,10 @@
+//! # Binary Analysis Service
+//!
+//! Handles fetching, analyzing, and reporting on stored binary targets asynchronously.
+//! Once called, it retrieves the binary file buffer from the object store, delegates the static
+//! processing pipeline to heavy-CPU Rayon worker threads, and sends the completion status
+//! payload to the client via Webhook dispatch.
+
 use crate::Result;
 use crate::utils::webhook_sender::dispatch_webhook;
 use rbat::core::analyzer::analyze_batch;
@@ -6,6 +13,15 @@ use serde_json::{json, to_value};
 use tokio::sync::oneshot;
 use tracing::Instrument;
 
+/// Pulls a binary from the object store and triggers background static analysis.
+///
+/// Analysis calculations are executed on a Rayon CPU-bound worker thread, ensuring the async network
+/// loop remains unblocked. When completed, findings are dispatched via webhook to the client callback,
+/// and the temporary binary file is deleted from object storage.
+///
+/// # Errors
+/// Returns an error if the S3 client fails to pull the object, or if we cannot delete the S3 object
+/// after analysis (though the background thread still completes analysis on failure to delete).
 #[tracing::instrument(skip(s3_client))]
 pub async fn analyze_stored_binary(s3_client: &S3Client, file_id: &str) -> Result<&'static str> {
     let bucket = "pt-compromised-binaries";

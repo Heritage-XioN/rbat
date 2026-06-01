@@ -1,3 +1,9 @@
+//! # gRPC Service Handler
+//!
+//! Provides the implementations for protocol buffer RPC interfaces defined in `transfer.proto`.
+//! This handler accepts streaming binary uploads from the client and forwards chunks in real-time
+//! to MinIO object storage using multipart uploading.
+
 use crate::{
     AppState,
     transfer::{UploadRequest, UploadResponse, analysis_server::Analysis},
@@ -7,12 +13,22 @@ use s3::serde_types::Part;
 use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
 
+/// Implementation of the `Analysis` gRPC service.
+///
+/// It processes binary uploads in a streaming fashion, storing the binary chunks directly
+/// into MinIO/S3 object storage, then returning the assigned file ID.
 pub struct GRPCservice {
+    /// The global application state sharing the storage and webhook configurations.
     pub state: AppState,
 }
 
 #[tonic::async_trait]
 impl Analysis for GRPCservice {
+    /// Streams a binary from the client, performing S3 multipart uploading chunks concurrently.
+    ///
+    /// # Errors
+    /// Returns a `tonic::Status::internal` if the multipart upload fails to initiate,
+    /// fails during chunk uploads, or fails during the completion of the multipart upload on S3.
     #[tracing::instrument(skip(self, request), fields(file_id = tracing::field::Empty))]
     async fn upload_binary(
         &self,

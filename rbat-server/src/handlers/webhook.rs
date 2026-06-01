@@ -1,3 +1,8 @@
+//! # HTTP Webhooks Router Handler
+//!
+//! Exposes HTTP endpoints allowing external clients or background proxies to verify
+//! and dispatch analytical operations via secure standard webhooks signing schemes.
+
 use crate::AppState;
 use crate::services::analyzer_service::analyze_stored_binary;
 use axum::Json;
@@ -9,12 +14,23 @@ use axum_standardwebhooks::StandardWebhook;
 use serde::Deserialize;
 use serde_json::Value;
 
+/// Expected structure of the incoming webhook payload body.
 #[derive(Deserialize)]
 pub struct WebhookPayload {
-    event_type: String,
-    data: Value,
+    /// The event classification, e.g. `analysis.start`.
+    pub event_type: String,
+    /// Inner payload data matching the event category (e.g. metadata or file identifiers).
+    pub data: Value,
 }
 
+/// Receives, authenticates, and dispatches webhook events.
+///
+/// Under standard configuration, signature verification is handled implicitly
+/// by the `StandardWebhook` extractor using the `WEBHOOK_SECRET` key.
+///
+/// # Errors
+/// Returns a `StatusCode::BAD_REQUEST` if the event is valid but lacks expected fields (like `file_id`),
+/// or `StatusCode::INTERNAL_SERVER_ERROR` if the background static analysis initialization fails.
 #[debug_handler]
 #[tracing::instrument(
     skip(state, headers, payload),
@@ -90,4 +106,33 @@ pub async fn receive_webhook(
 
     // Instantly return 200 OK to the sender
     Ok((StatusCode::OK, "OK"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_webhook_payload_deserialization() {
+        let valid_json = json!({
+            "event_type": "analysis.start",
+            "data": {
+                "file_id": "936da01f-9abd-4d9d-80c7-02af85c822a8"
+            }
+        });
+
+        let payload: WebhookPayload = serde_json::from_value(valid_json).unwrap();
+        assert_eq!(payload.event_type, "analysis.start");
+        assert_eq!(
+            payload.data["file_id"].as_str().unwrap(),
+            "936da01f-9abd-4d9d-80c7-02af85c822a8"
+        );
+
+        let invalid_json = json!({
+            "data": {}
+        });
+        let result: Result<WebhookPayload, _> = serde_json::from_value(invalid_json);
+        assert!(result.is_err());
+    }
 }

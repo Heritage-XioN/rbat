@@ -1,3 +1,11 @@
+//! # Shutdown Signal Utility
+//!
+//! Provides standard Unix and generic event listners to handle graceful application server termination.
+
+/// Listens for Ctrl+C (SIGINT) or Unix termination (SIGTERM) signals.
+///
+/// Suspends execution until a termination signal is received, letting the caller trigger
+/// a graceful shutdown process for the web application servers.
 pub async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()

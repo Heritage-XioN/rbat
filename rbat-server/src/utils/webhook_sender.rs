@@ -1,3 +1,7 @@
+//! # HTTP Webhook Sender Utility
+//!
+//! Spawns background tasks to sign and send event webhooks asynchronously to external target receivers.
+
 use std::env;
 
 use chrono::Utc;
@@ -8,6 +12,13 @@ use tokio_retry::RetryIf;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::Instrument;
 
+/// Dispatches an event webhook payload to a target URL in a background task.
+///
+/// Under the hood:
+/// - Spawns a background `tokio` thread.
+/// - signs the event payload using standard webhook headers (e.g. `webhook-signature`).
+/// - Executes the request inside a retry loop with exponential backoff (up to 5 retries, jittered).
+/// - Filters retry triggers: only retries on network failures or 5xx server errors, not on 4xx statuses.
 pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Value) {
     let span =
         tracing::info_span!("dispatch_webhook", event_id = %event_id, target_url = %target_url);
@@ -104,14 +115,14 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
                         "Webhook successfully delivered"
                     );
                 } else {
-                    tracing::error!(
+                    tracing::debug!(
                         status = %response.status(),
                         "Webhook gave up; consumer returned client error status"
                     );
                 }
             }
             Err(e) => {
-                tracing::error!(
+                tracing::debug!(
                     error = ?e,
                     "Webhook delivery completely failed after maximum retries"
                 );

@@ -1,8 +1,20 @@
+//! # MinIO Storage Client Setup
+//!
+//! Provides helper functions to connect to, verify, and initialize a target S3 bucket in MinIO.
+
 use crate::{RbatServerError, Result};
 use s3::Bucket as S3Client;
 use s3::creds::Credentials;
 use s3::{BucketConfiguration, Region};
 
+/// Initializes the MinIO / S3 storage bucket and client wrapper.
+///
+/// Verifies credentials and checks if the bucket `pt-compromised-binaries` exists.
+/// If not, it attempts to create it with path-style access.
+///
+/// # Errors
+/// Returns `RbatServerError::Internal` in production mode if either `MINIO_ROOT_USER` or `MINIO_ROOT_PASSWORD`
+/// is missing from the environment variables, or `RbatServerError::S3client` if connection / creation fails.
 pub async fn setup_minio_client() -> Result<S3Client> {
     let is_prod = std::env::var("RUN_MODE").unwrap_or_default() == "production";
 
@@ -81,4 +93,54 @@ pub async fn setup_minio_client() -> Result<S3Client> {
     }
 
     Ok(bucket)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use once_cell::sync::Lazy;
+    use std::sync::Mutex;
+
+    // Use a global mutex to prevent race conditions during env changes in parallel tests
+    static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    #[tokio::test]
+    async fn test_setup_minio_client_prod_missing_vars() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        // Backup existing env vars
+        let backup_run_mode = std::env::var("RUN_MODE").ok();
+        let backup_root_user = std::env::var("MINIO_ROOT_USER").ok();
+        let backup_root_password = std::env::var("MINIO_ROOT_PASSWORD").ok();
+
+        // Set env to mimic production with missing credentials
+        unsafe {
+            std::env::set_var("RUN_MODE", "production");
+            std::env::remove_var("MINIO_ROOT_USER");
+            std::env::remove_var("MINIO_ROOT_PASSWORD");
+        }
+
+        let result = setup_minio_client().await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RbatServerError::Internal(_)));
+
+        // Restore env vars
+        unsafe {
+            if let Some(val) = backup_run_mode {
+                std::env::set_var("RUN_MODE", val);
+            } else {
+                std::env::remove_var("RUN_MODE");
+            }
+            if let Some(val) = backup_root_user {
+                std::env::set_var("MINIO_ROOT_USER", val);
+            } else {
+                std::env::remove_var("MINIO_ROOT_USER");
+            }
+            if let Some(val) = backup_root_password {
+                std::env::set_var("MINIO_ROOT_PASSWORD", val);
+            } else {
+                std::env::remove_var("MINIO_ROOT_PASSWORD");
+            }
+        }
+    }
 }

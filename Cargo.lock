@@ -4076,6 +4076,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "dotenvy",
+ "once_cell",
  "prost",
  "rayon",
  "rbat",
