@@ -7,7 +7,12 @@ interface DataRowProps {
   mono?: boolean;
 }
 
-export function DataRow({ label, value, className, mono = false }: DataRowProps) {
+export function DataRow({
+  label,
+  value,
+  className,
+  mono = false,
+}: DataRowProps) {
   return (
     <div
       className={cn(

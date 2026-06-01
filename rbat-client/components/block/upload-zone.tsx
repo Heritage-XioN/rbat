@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useRef, type DragEvent, type ChangeEvent } from "react";
 import {
-  TerminalSquare,
-  Loader2,
-  CheckCircle2,
   AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  TerminalSquare,
 } from "lucide-react";
+import { type ChangeEvent, type DragEvent, useRef, useState } from "react";
 import { FormatBadge } from "@/components/ui/format-badge";
 import { useAnalysisStore } from "@/lib/store/analysis-store";
 
@@ -62,7 +62,8 @@ export function UploadZone() {
 
       eventSource.addEventListener("failed", (event) => {
         const payloadData = JSON.parse(event.data);
-        const errObj = Object.values(payloadData.error)[0] || "Heuristic analysis failed";
+        const errObj =
+          Object.values(payloadData.error)[0] || "Heuristic analysis failed";
         const errStr = Object.values(errObj)[0];
         setErrorMessage(errStr);
         setStatus("failed");

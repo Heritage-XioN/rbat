@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
-import { AlertOctagon, RefreshCcw, Home } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { AlertOctagon, Home, RefreshCcw } from "lucide-react";
 import Link from "next/link";
+import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
 
 interface ErrorProps {
   error: Error & { digest?: string };
@@ -37,14 +37,17 @@ export default function Error({ error, reset }: ErrorProps) {
 
         {/* Message */}
         <p className="mb-6 font-mono text-sm leading-relaxed text-rbat-muted">
-          An unexpected error occurred within the RBAT client runtime. The current analysis session may be unstable. Please review the error details below and take appropriate action.
+          An unexpected error occurred within the RBAT client runtime. The
+          current analysis session may be unstable. Please review the error
+          details below and take appropriate action.
         </p>
 
         {/* Diagnostic console snippet */}
         <div className="mb-8 w-full rounded-lg border border-rbat-border bg-black/60 p-4 text-left font-mono text-[10px] text-red-400/80">
           <p className="font-bold text-red-400"># EXCEPTION LOG:</p>
           <p className="mt-1 break-all">
-            {error.name || "Error"}: {error.message || "Unknown segmentation fault"}
+            {error.name || "Error"}:{" "}
+            {error.message || "Unknown segmentation fault"}
           </p>
           {error.digest && (
             <p className="mt-1 text-rbat-muted break-all">

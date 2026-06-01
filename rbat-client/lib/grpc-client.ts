@@ -1,7 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import path from "path";
-import { ProtoGrpcType } from './proto/transfer';
+import type { ProtoGrpcType } from "./proto/transfer";
 
 const PROTO_PATH = path.join(process.cwd(), "../proto/transfer.proto");
 
@@ -13,7 +13,9 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   oneofs: true,
 });
 
-const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as unknown as ProtoGrpcType;
+const protoDescriptor = grpc.loadPackageDefinition(
+  packageDefinition,
+) as unknown as ProtoGrpcType;
 export const transfer = protoDescriptor.transfer;
 
 // Fallback to local daemon, or read env (e.g. from docker environment)
@@ -23,8 +25,6 @@ export const client = new transfer.Analysis(
   serverUrl,
   grpc.credentials.createInsecure(),
 );
-
-let UploadResponse = transfer.UploadResponse;
 
 export function uploadBinary(
   filename: string,

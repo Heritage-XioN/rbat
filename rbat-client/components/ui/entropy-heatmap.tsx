@@ -49,7 +49,10 @@ export function EntropyHeatmap({ sections, className }: EntropyHeatmapProps) {
                 className="relative rounded-sm p-2 text-center transition-all hover:scale-105"
                 style={{ backgroundColor: entropyToColor(section.entropy) }}
               >
-                <div className="text-[9px] font-mono font-semibold text-white/90 truncate" title={section.name}>
+                <div
+                  className="text-[9px] font-mono font-semibold text-white/90 truncate"
+                  title={section.name}
+                >
                   {section.name}
                 </div>
                 <div className="text-[8px] font-mono text-white/60">

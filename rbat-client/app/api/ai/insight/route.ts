@@ -1,12 +1,10 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamText } from "ai";
+import { logger } from "@/lib/logger";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    console.log("AI Insight API incoming body keys:", Object.keys(body));
-    console.log("AI Insight API prompt length:", body.prompt?.length || 0);
-
     const promptStr = body.prompt;
     if (!promptStr) {
       return new Response(
@@ -22,9 +20,13 @@ export async function POST(request: Request) {
     try {
       data = JSON.parse(promptStr);
     } catch (parseError: any) {
-      console.error("AI Insight JSON parse error:", parseError);
+      logger.warn(
+        `AI Insight JSON parse error: (parseError.message || parseError)`,
+      );
       return new Response(
-        JSON.stringify({ error: `Invalid JSON string in prompt: ${parseError.message}` }),
+        JSON.stringify({
+          error: `Invalid JSON string in prompt: ${parseError.message}`,
+        }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -35,7 +37,10 @@ export async function POST(request: Request) {
     const { analysis_result, risk_assesment } = data;
 
     if (!analysis_result || !risk_assesment) {
-      console.warn("AI Insight validation failed. Missing analysis_result or risk_assesment. Keys in data:", Object.keys(data));
+      logger.warn(
+        `AI Insight validation failed. Missing analysis_result or risk_assesment. Keys in data:
+          Object.keys(data).join(", ")`,
+      );
       return new Response(
         JSON.stringify({
           error: "Missing analysis_result or risk_assesment in prompt payload",
@@ -72,9 +77,12 @@ We recommend sandbox execution and dynamic behavioral analysis to inspect memory
 `;
 
     // Retrieve API key from environment variables
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const apiKey =
+      process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
     if (!apiKey) {
-      throw new Error("Missing Google Generative AI API key in environment variables (GEMINI_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY)");
+      throw new Error(
+        "Missing Google Generative AI API key in environment variables (GEMINI_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY)",
+      );
     }
 
     const googleProvider = createGoogleGenerativeAI({
@@ -89,13 +97,10 @@ We recommend sandbox execution and dynamic behavioral analysis to inspect memory
 
     return result.toUIMessageStreamResponse();
   } catch (error: any) {
-    console.error("AI Insight Route Error:", error);
-    return new Response(
-      JSON.stringify({ error: error.message || "Internal Server Error" }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
+    logger.error(`AI Insight Route Error: ${error.message || error}`);
+    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }

@@ -1,4 +1,4 @@
-import { type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { analysisEvents } from "@/lib/events";
 import { getAnalysis } from "@/lib/store";
 
@@ -18,7 +18,9 @@ export async function GET(request: NextRequest) {
       const existingData = getAnalysis(fileId);
       if (existingData) {
         controller.enqueue(
-          encoder.encode(`event: complete\ndata: ${JSON.stringify(existingData)}\n\n`),
+          encoder.encode(
+            `event: complete\ndata: ${JSON.stringify(existingData)}\n\n`,
+          ),
         );
         controller.close();
         return;
@@ -34,7 +36,9 @@ export async function GET(request: NextRequest) {
 
       const onFailure = (error: any) => {
         controller.enqueue(
-          encoder.encode(`event: failed\ndata: ${JSON.stringify({ error })}\n\n`),
+          encoder.encode(
+            `event: failed\ndata: ${JSON.stringify({ error })}\n\n`,
+          ),
         );
         controller.close();
       };

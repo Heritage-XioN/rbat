@@ -1,9 +1,9 @@
 "use client";
 
-import { useAnalysisStore } from "@/lib/store/analysis-store";
 import { useCompletion } from "@ai-sdk/react";
-import { useEffect, useRef } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { useAnalysisStore } from "@/lib/store/analysis-store";
 
 export function AiInsight() {
   // Subscribe to the analysis data from our global Zustand store
@@ -75,17 +75,6 @@ export function AiInsight() {
           &ldquo;{recommendation}&rdquo;
         </blockquote>
       )}
-
-      {/* Generate report link */}
-      {/* <div className="flex justify-end">
-        <button
-          type="button"
-          className="group flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-rbat-muted transition-colors hover:text-rbat-accent"
-        >
-          Generate Full AI Report
-          <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-        </button>
-      </div> */}
     </div>
   );
 }

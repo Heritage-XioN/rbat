@@ -1,18 +1,18 @@
 "use client";
 
-import { useAnalysisStore } from "@/lib/store/analysis-store";
-import { Navbar } from "@/components/block/navbar";
-import { UploadZone } from "@/components/block/upload-zone";
-import { AnalysisHeader } from "@/components/block/analysis-header";
-import { FileMetrics } from "@/components/block/file-metrics";
-import { RiskAssessment } from "@/components/block/risk-assessment";
-import { VulnerabilityFindings } from "@/components/block/vulnerability-findings";
-import { StringsSnapshot } from "@/components/block/strings-snapshot";
-import { PathsNetwork } from "@/components/block/paths-network";
-import { BinaryComposition } from "@/components/block/binary-composition";
 import { AiInsight } from "@/components/block/ai-insight";
+import { AnalysisHeader } from "@/components/block/analysis-header";
+import { BinaryComposition } from "@/components/block/binary-composition";
+import { FileMetrics } from "@/components/block/file-metrics";
 import { Footer } from "@/components/block/footer";
+import { Navbar } from "@/components/block/navbar";
+import { PathsNetwork } from "@/components/block/paths-network";
+import { RiskAssessment } from "@/components/block/risk-assessment";
+import { StringsSnapshot } from "@/components/block/strings-snapshot";
+import { UploadZone } from "@/components/block/upload-zone";
+import { VulnerabilityFindings } from "@/components/block/vulnerability-findings";
 import { TransitionWrapper } from "@/components/ui/transition-wrapper";
+import { useAnalysisStore } from "@/lib/store/analysis-store";
 
 export function Dashboard() {
   const status = useAnalysisStore((state) => state.status);

@@ -1,5 +1,5 @@
+import { Home, TerminalSquare } from "lucide-react";
 import Link from "next/link";
-import { TerminalSquare, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
@@ -24,8 +24,7 @@ export default function NotFound() {
 
         {/* Message */}
         <p className="mb-8 font-mono text-sm leading-relaxed text-rbat-muted">
-          The requested resource could not be
-          located.
+          The requested resource could not be located.
         </p>
 
         {/* Go back CTA */}

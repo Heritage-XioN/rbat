@@ -26,10 +26,7 @@ export function Footer() {
           >
             Privacy
           </Link>
-          <Link
-            href="/docs"
-            className="transition-colors hover:text-rbat-text"
-          >
+          <Link href="/docs" className="transition-colors hover:text-rbat-text">
             Documentation
           </Link>
           <Link href="/api" className="transition-colors hover:text-rbat-text">

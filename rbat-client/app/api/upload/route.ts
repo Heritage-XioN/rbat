@@ -1,7 +1,8 @@
+import crypto from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
-import { uploadBinary } from "@/lib/grpc-client";
 import { Webhook } from "standardwebhooks";
-import crypto from "crypto";
+import { uploadBinary } from "@/lib/grpc-client";
+import { logger } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,12 +23,23 @@ export async function POST(request: NextRequest) {
     const { file_id } = uploadRes;
 
     // 2. Dispatch analysis.start webhook to the Rust backend to kick off analysis
-    const webhookSecret =
-      process.env.WEBHOOK_SECRET || "whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD";
+    const webhookSecret = process.env.WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(
+          "Missing WEBHOOK_SECRET environment variable in production!",
+        );
+      }
+      logger.warn(
+        "WEBHOOK_SECRET is not set. Falling back to default development key.",
+      );
+    }
+    const secret = webhookSecret || "whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD";
+
     const webhookReceiverUrl =
       process.env.WEBHOOK_RECEIVER_URL || "http://localhost:8080/webhooks";
 
-    const wh = new Webhook(webhookSecret);
+    const wh = new Webhook(secret);
     const eventId = crypto.randomUUID();
     const timestamp = new Date();
     const payload = {
@@ -39,7 +51,7 @@ export async function POST(request: NextRequest) {
     const payloadStr = JSON.stringify(payload);
     const signature = wh.sign(eventId, timestamp, payloadStr);
 
-    console.log(
+    logger.info(
       `Sending analysis.start webhook to ${webhookReceiverUrl} for file ${file_id}`,
     );
     const webhookResponse = await fetch(webhookReceiverUrl, {
@@ -56,12 +68,11 @@ export async function POST(request: NextRequest) {
     });
 
     if (!webhookResponse.ok) {
-      const responseText = await webhookResponse.text();
-      console.error(
-        `Webhook daemon failed with status ${webhookResponse.status}: ${responseText}`,
+      logger.error(
+        `Webhook daemon failed with status ${webhookResponse.status}`,
       );
       return NextResponse.json(
-        { error: `Failed to trigger analysis: ${responseText}` },
+        { error: "Failed to trigger analysis" },
         { status: 500 },
       );
     }
@@ -73,9 +84,9 @@ export async function POST(request: NextRequest) {
       size: file.size,
     });
   } catch (error: any) {
-    console.error("Upload route error:", error);
+    logger.error(`Upload route error: ${error.message || error}`);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
