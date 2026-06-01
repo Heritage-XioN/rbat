@@ -109,7 +109,6 @@ mod tests {
 
     #[test]
     fn test_get_binary_metadata_unknown() {
-        let _buffer = vec![0x41, 0x42, 0x43, 0x44];
         let obj = Object::Unknown(0x44434241);
         let result = get_binary_metadata(&obj);
         assert!(result.is_err());

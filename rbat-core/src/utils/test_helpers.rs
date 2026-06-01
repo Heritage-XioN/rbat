@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 pub mod test_helpers {
     use object::write::{Object, Symbol, SymbolSection};
     use object::{

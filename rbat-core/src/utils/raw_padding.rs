@@ -52,9 +52,7 @@ mod tests {
     #[test]
     fn test_scan_raw_padding_nulls() {
         let mut bytes = vec![0x90; 100];
-        for idx in 40..70 {
-            bytes[idx] = 0x00;
-        }
+        bytes[40..70].fill(0x00);
 
         let results = scan_raw_padding(&bytes, 0x00, 30, 0x1000);
         assert_eq!(results.len(), 30);
@@ -65,9 +63,7 @@ mod tests {
     #[test]
     fn test_scan_raw_padding_int3() {
         let mut bytes = vec![0x90; 100];
-        for idx in 20..55 {
-            bytes[idx] = 0xCC;
-        }
+        bytes[20..55].fill(0xCC);
 
         let results = scan_raw_padding(&bytes, 0xCC, 30, 0x1000);
         assert_eq!(results.len(), 35);
