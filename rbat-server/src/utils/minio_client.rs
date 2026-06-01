@@ -98,15 +98,14 @@ pub async fn setup_minio_client() -> Result<S3Client> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::Lazy;
-    use std::sync::Mutex;
+    use tokio::sync::Mutex;
 
-    // Use a global mutex to prevent race conditions during env changes in parallel tests
-    static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    // Use global mutex to prevent race conditions during env changes in parallel tests
+    static ENV_MUTEX: Mutex<()> = Mutex::const_new(());
 
     #[tokio::test]
     async fn test_setup_minio_client_prod_missing_vars() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
 
         // Backup existing env vars
         let backup_run_mode = std::env::var("RUN_MODE").ok();
