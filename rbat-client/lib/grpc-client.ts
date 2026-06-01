@@ -1,6 +1,6 @@
+import path from "node:path";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
-import path from "path";
 import type { ProtoGrpcType } from "./proto/transfer";
 
 const PROTO_PATH = path.join(process.cwd(), "../proto/transfer.proto");

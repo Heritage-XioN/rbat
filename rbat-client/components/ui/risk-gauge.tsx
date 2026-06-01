@@ -21,6 +21,7 @@ export function RiskGauge({ score = 0, label, className }: RiskGaugeProps) {
         viewBox="0 0 180 180"
         className="drop-shadow-[0_0_15px_rgba(192,132,252,0.2)]"
       >
+        <title>Risk Score Gauge</title>
         {/* Background track */}
         <circle
           cx="90"

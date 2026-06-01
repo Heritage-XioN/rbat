@@ -11,7 +11,7 @@ if (!fs.existsSync(STORE_DIR)) {
   // Ensure strict directory permissions (owner read/write/execute only)
   try {
     fs.chmodSync(STORE_DIR, 0o700);
-  } catch (err) {
+  } catch (_err) {
     // If chmod fails (e.g. on Windows), we still proceed
   }
 }

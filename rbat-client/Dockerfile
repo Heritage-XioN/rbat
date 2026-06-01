@@ -13,7 +13,7 @@ FROM node:${NODE_VERSION} AS dependencies
 WORKDIR /app
 
 # Copy package-related files first to leverage Docker's caching mechanism
-COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./
+COPY rbat-client/package.json rbat-client/yarn.lock* rbat-client/package-lock.json* rbat-client/pnpm-lock.yaml* rbat-client/.npmrc* ./
 
 # Install project dependencies with frozen lockfile for reproducible builds
 ENV PNPM_CONFIG_DANGEROUSLY_ALLOW_ALL_BUILDS=true
@@ -42,8 +42,9 @@ WORKDIR /app
 # Copy project dependencies from dependencies stage
 COPY --from=dependencies /app/node_modules ./node_modules
 
-# Copy application source code
-COPY . .
+# Copy application source code and protobuf definition
+COPY rbat-client .
+COPY proto ../proto
 
 ENV NODE_ENV=production
 
@@ -53,6 +54,8 @@ ENV NODE_ENV=production
 # ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build Next.js application
+RUN touch .env
+
 RUN --mount=type=cache,target=/app/.next/cache \
   if [ -f package-lock.json ]; then \
     npm run build; \
@@ -82,6 +85,9 @@ ENV HOSTNAME="0.0.0.0"
 # Learn more here: https://nextjs.org/telemetry
 # Uncomment the following line in case you want to disable telemetry during the run time.
 # ENV NEXT_TELEMETRY_DISABLED=1
+
+# Copy the proto directory so it is available at runtime
+COPY --from=builder /proto ../proto
 
 # Copy production assets
 COPY --from=builder --chown=node:node /app/public ./public

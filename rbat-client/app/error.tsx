@@ -10,7 +10,7 @@ interface ErrorProps {
   reset: () => void;
 }
 
-export default function Error({ error, reset }: ErrorProps) {
+export default function ClientErrorPage({ error, reset }: ErrorProps) {
   useEffect(() => {
     // Log the error for developer analysis
     console.error("Critical Client Exception:", error);

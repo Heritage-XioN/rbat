@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
 
     try {
       wh.verify(rawBody, headers);
-    } catch (verifyError: any) {
+    } catch (_verifyError: any) {
       logger.warn("Webhook signature verification failed");
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }

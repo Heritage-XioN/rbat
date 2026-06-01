@@ -104,14 +104,14 @@ export function UploadZone() {
       return;
     }
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (e.dataTransfer.files?.[0]) {
       startUpload(e.dataTransfer.files[0]);
     }
   };
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files?.[0]) {
       startUpload(e.target.files[0]);
     }
   };
@@ -127,6 +127,7 @@ export function UploadZone() {
 
   return (
     <section className="mx-auto w-full max-w-7xl px-6 py-8">
+      {/* biome-ignore lint/a11y/useSemanticElements: Using div instead of button to allow nested hidden input for drag and drop */}
       <div
         onDragEnter={handleDrag}
         onDragOver={handleDrag}

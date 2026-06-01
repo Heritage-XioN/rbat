@@ -1,4 +1,4 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 
 const globalForEvents = global as typeof globalThis & {
   analysisEvents?: EventEmitter;

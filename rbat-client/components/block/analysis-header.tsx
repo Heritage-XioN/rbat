@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, RefreshCw } from "lucide-react";
+import { Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAnalysisStore } from "@/lib/store/analysis-store";
@@ -8,7 +8,7 @@ import { useAnalysisStore } from "@/lib/store/analysis-store";
 export function AnalysisHeader() {
   const { fileName, reset } = useAnalysisStore();
 
-  const handleReanalyze = () => {
+  const _handleReanalyze = () => {
     reset();
   };
 

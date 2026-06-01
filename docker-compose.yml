@@ -75,8 +75,8 @@ services:
   # ---------------------------------------------------------------------------
   rbat_client:
     build:
-      context: ./rbat-client
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: rbat-client/Dockerfile
     image: rbat-client:latest
     container_name: rbat-client
     environment:
