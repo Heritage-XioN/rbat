@@ -35,7 +35,16 @@ function cleanOldAnalysisFiles() {
   }
 }
 
+const SAFE_FILE_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
+
+export function validateFileId(fileId: string): boolean {
+  return SAFE_FILE_ID_REGEX.test(fileId);
+}
+
 export function saveAnalysis(fileId: string, data: any) {
+  if (!validateFileId(fileId)) {
+    throw new Error("Invalid fileId: path traversal detected");
+  }
   cleanOldAnalysisFiles(); // Clean up expired files first
 
   const filePath = path.join(STORE_DIR, `${fileId}.json`);
@@ -47,6 +56,9 @@ export function saveAnalysis(fileId: string, data: any) {
 }
 
 export function getAnalysis(fileId: string): any | null {
+  if (!validateFileId(fileId)) {
+    throw new Error("Invalid fileId: path traversal detected");
+  }
   const filePath = path.join(STORE_DIR, `${fileId}.json`);
   if (fs.existsSync(filePath)) {
     const content = fs.readFileSync(filePath, "utf-8");

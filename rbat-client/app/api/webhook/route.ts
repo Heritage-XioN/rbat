@@ -2,16 +2,16 @@ import { type NextRequest, NextResponse } from "next/server";
 import { Webhook } from "standardwebhooks";
 import { logger } from "@/lib/logger";
 import { redisPublisher } from "@/lib/redis";
-import { saveAnalysis } from "@/lib/store";
+import { saveAnalysis, validateFileId } from "@/lib/store";
 
 export async function POST(request: NextRequest) {
   try {
     const rawBody = await request.text();
     const webhookSecret = process.env.WEBHOOK_SECRET;
     if (!webhookSecret) {
-      if (process.env.NODE_ENV === "production") {
+      if (process.env.NODE_ENV !== "development") {
         throw new Error(
-          "Missing WEBHOOK_SECRET environment variable in production!",
+          `Missing WEBHOOK_SECRET environment variable in ${process.env.NODE_ENV || "production"}!`,
         );
       }
       logger.warn(
@@ -36,6 +36,12 @@ export async function POST(request: NextRequest) {
 
     const payload = JSON.parse(rawBody);
     logger.info(`Received verified webhook: ${payload.event_type}`);
+
+    const fileId = payload.data?.file_id;
+    if (fileId && !validateFileId(fileId)) {
+      logger.warn(`Invalid file_id received in webhook: ${fileId}`);
+      return NextResponse.json({ error: "Invalid file_id" }, { status: 400 });
+    }
 
     if (payload.event_type === "analysis.completed") {
       const fileId = payload.data?.file_id;

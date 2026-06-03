@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { analysisEvents } from "@/lib/events";
 import { initRedisPubSubBridge } from "@/lib/redis";
-import { getAnalysis } from "@/lib/store";
+import { getAnalysis, validateFileId } from "@/lib/store";
 
 export async function GET(request: NextRequest) {
   // Ensure Redis PubSub bridge is active
@@ -12,6 +12,10 @@ export async function GET(request: NextRequest) {
 
   if (!fileId) {
     return new Response("Missing fileId parameter", { status: 400 });
+  }
+
+  if (!validateFileId(fileId)) {
+    return new Response("Invalid fileId parameter", { status: 400 });
   }
 
   const stream = new ReadableStream({
