@@ -82,6 +82,8 @@ pub struct AppState {
     pub s3_client: S3Client,
     /// The shared webhook signing and verification structure.
     pub webhook: SharedWebhook,
+    /// The webhook secret key used for signing outgoing payloads.
+    pub webhook_secret: String,
 }
 
 impl FromRef<AppState> for SharedWebhook {
@@ -121,7 +123,11 @@ mod tests {
         let webhook_signer = Webhook::new("whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD").unwrap();
         let webhook = SharedWebhook::new(webhook_signer);
 
-        let state = AppState { s3_client, webhook };
+        let state = AppState {
+            s3_client,
+            webhook,
+            webhook_secret: "whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD".to_string(),
+        };
 
         // SharedWebhook should be extractable from AppState via FromRef
         let extracted = SharedWebhook::from_ref(&state);

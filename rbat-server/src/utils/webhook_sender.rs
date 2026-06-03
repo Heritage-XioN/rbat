@@ -2,7 +2,6 @@
 //!
 //! Spawns background tasks to sign and send event webhooks asynchronously to external target receivers.
 
-use std::env;
 use std::sync::OnceLock;
 
 use chrono::Utc;
@@ -22,7 +21,7 @@ static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 /// - signs the event payload using standard webhook headers (e.g. `webhook-signature`).
 /// - Executes the request inside a retry loop with exponential backoff (up to 5 retries, jittered).
 /// - Filters retry triggers: only retries on network failures or 5xx server errors, not on 4xx statuses.
-pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Value) {
+pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Value, secret: String) {
     let span =
         tracing::info_span!("dispatch_webhook", event_id = %event_id, target_url = %target_url);
     // Spawn the work to a background task so it doesn't block the caller thread
@@ -30,14 +29,6 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
         let client = HTTP_CLIENT.get_or_init(Client::new);
         let payload_str = payload.to_string();
         let timestamp = Utc::now().timestamp();
-        let secret = env::var("WEBHOOK_SECRET").unwrap_or_else(|_| {
-            let is_prod = env::var("RUN_MODE").unwrap_or_default() == "production";
-            if is_prod {
-                panic!("CRITICAL CONFIG ERROR: WEBHOOK_SECRET environment variable is missing in production background task!");
-            }
-            tracing::debug!("WEBHOOK_SECRET environment variable not set. Falling back to default development key.");
-            "whsec_C2FVsBQIhrscChlQIMV+b5sSYspob7oD".to_string()
-        });
 
         // Extract event_type for custom header setting
         let event_type = payload
@@ -95,6 +86,7 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
                         .body(body)
                         .send()
                         .await
+                        .and_then(|res| res.error_for_status())
                 }
             },
             |error: &reqwest::Error| {
@@ -112,19 +104,21 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
 
         match result {
             Ok(response) => {
-                if response.status().is_success() {
-                    tracing::info!(
-                        status = %response.status(),
-                        "Webhook successfully delivered"
-                    );
-                } else {
-                    tracing::debug!(
-                        status = %response.status(),
-                        "Webhook gave up; consumer returned client error status"
-                    );
-                }
+                tracing::info!(
+                    status = %response.status(),
+                    "Webhook successfully delivered"
+                );
             }
             Err(e) => {
+                if let Some(status) = e.status() {
+                    if status.is_client_error() {
+                        tracing::debug!(
+                            status = %status,
+                            "Webhook gave up; consumer returned client error status"
+                        );
+                        return;
+                    }
+                }
                 tracing::debug!(
                     error = ?e,
                     "Webhook delivery completely failed after maximum retries"

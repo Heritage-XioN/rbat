@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         .init();
 
     let secret = std::env::var("WEBHOOK_SECRET").unwrap_or_else(|_| {
-        let is_prod = std::env::var("RUN_MODE").unwrap_or_default() == "production";
+        let is_prod = std::env::var("RUN_MODE").unwrap_or_default().to_lowercase() == "production";
         if is_prod {
             panic!("CRITICAL CONFIG ERROR: WEBHOOK_SECRET environment variable is missing in production!");
         }
@@ -41,6 +41,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         s3_client: setup_minio_client().await?,
         webhook: SharedWebhook::new(Webhook::new(&secret)?),
+        webhook_secret: secret,
     };
 
     let http_router = Router::new()
