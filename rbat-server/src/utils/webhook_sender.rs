@@ -3,6 +3,7 @@
 //! Spawns background tasks to sign and send event webhooks asynchronously to external target receivers.
 
 use std::env;
+use std::sync::OnceLock;
 
 use chrono::Utc;
 use reqwest::Client;
@@ -11,6 +12,8 @@ use standardwebhooks::Webhook;
 use tokio_retry::RetryIf;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::Instrument;
+
+static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 
 /// Dispatches an event webhook payload to a target URL in a background task.
 ///
@@ -24,7 +27,7 @@ pub async fn dispatch_webhook(target_url: String, event_id: String, payload: Val
         tracing::info_span!("dispatch_webhook", event_id = %event_id, target_url = %target_url);
     // Spawn the work to a background task so it doesn't block the caller thread
     tokio::spawn(async move {
-        let client = Client::new();
+        let client = HTTP_CLIENT.get_or_init(Client::new);
         let payload_str = payload.to_string();
         let timestamp = Utc::now().timestamp();
         let secret = env::var("WEBHOOK_SECRET").unwrap_or_else(|_| {
