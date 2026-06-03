@@ -38,15 +38,22 @@ export function initRedisPubSubBridge() {
     const status = parts[1]; // complete | failed
     const fileId = parts[2];
 
+    logger.debug(`Redis PubSub parse: status=${status}, fileId=${fileId}`);
+
     if (fileId && (status === "complete" || status === "failed")) {
       try {
         const data = JSON.parse(message);
+        logger.debug(`Emitting local event: ${status}:${fileId}`);
         analysisEvents.emit(`${status}:${fileId}`, data);
       } catch (parseErr: any) {
         logger.error(
           `Failed to parse PubSub message on channel ${channel}: ${parseErr.message || parseErr}`,
         );
       }
+    } else {
+      logger.warn(
+        `Skipping event emission for invalid fileId or status. fileId=${fileId}, status=${status}`,
+      );
     }
   });
 }

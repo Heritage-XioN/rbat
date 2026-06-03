@@ -18,14 +18,22 @@ export async function GET(request: NextRequest) {
     start(controller) {
       const encoder = new TextEncoder();
 
-      // If the analysis is already complete and cached in our filesystem store, return it immediately.
+      // If the analysis is already complete or failed and cached in our filesystem store, return it immediately.
       const existingData = getAnalysis(fileId);
       if (existingData) {
-        controller.enqueue(
-          encoder.encode(
-            `event: complete\ndata: ${JSON.stringify(existingData)}\n\n`,
-          ),
-        );
+        if (existingData.error) {
+          controller.enqueue(
+            encoder.encode(
+              `event: failed\ndata: ${JSON.stringify(existingData)}\n\n`,
+            ),
+          );
+        } else {
+          controller.enqueue(
+            encoder.encode(
+              `event: complete\ndata: ${JSON.stringify(existingData)}\n\n`,
+            ),
+          );
+        }
         controller.close();
         return;
       }
@@ -38,11 +46,9 @@ export async function GET(request: NextRequest) {
         controller.close();
       };
 
-      const onFailure = (error: any) => {
+      const onFailure = (data: any) => {
         controller.enqueue(
-          encoder.encode(
-            `event: failed\ndata: ${JSON.stringify({ error })}\n\n`,
-          ),
+          encoder.encode(`event: failed\ndata: ${JSON.stringify(data)}\n\n`),
         );
         controller.close();
       };

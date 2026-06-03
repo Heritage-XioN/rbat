@@ -65,10 +65,29 @@ export function UploadZone() {
 
       eventSource.addEventListener("failed", (event) => {
         const payloadData = JSON.parse(event.data);
-        const errObj =
-          Object.values(payloadData.error)[0] || "Heuristic analysis failed";
-        const errStr = Object.values(errObj)[0];
-        setErrorMessage(errStr);
+        let errorMsg = "Heuristic analysis failed";
+        if (payloadData.error) {
+          if (typeof payloadData.error === "string") {
+            errorMsg = payloadData.error;
+          } else if (typeof payloadData.error === "object") {
+            const values = Object.values(payloadData.error);
+            if (values.length > 0) {
+              const firstValue = values[0];
+              if (typeof firstValue === "string") {
+                errorMsg = firstValue;
+              } else if (firstValue && typeof firstValue === "object") {
+                const innerValues = Object.values(firstValue);
+                if (
+                  innerValues.length > 0 &&
+                  typeof innerValues[0] === "string"
+                ) {
+                  errorMsg = innerValues[0];
+                }
+              }
+            }
+          }
+        }
+        setErrorMessage(errorMsg);
         setStatus("failed");
         eventSource.close();
       });

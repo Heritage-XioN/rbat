@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     if (payload.event_type === "analysis.failed") {
       const fileId = payload.data?.file_id;
       if (fileId) {
-        //saveAnalysis(fileId, payload.data);
+        saveAnalysis(fileId, payload.data);
         logger.error(`Error processing file with id: ${fileId}`);
 
         // Notify any active event streams of completion via Redis
