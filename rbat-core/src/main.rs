@@ -120,7 +120,10 @@ fn main() -> Result<()> {
             } else {
                 "Unknown panic reason"
             };
-            return Err(color_eyre::eyre::eyre!("Analysis thread panicked: {}", panic_msg));
+            return Err(color_eyre::eyre::eyre!(
+                "Analysis thread panicked: {}",
+                panic_msg
+            ));
         }
     }
 

@@ -89,7 +89,11 @@ pub async fn receive_webhook(
                 )
             })?;
 
-            analyze_stored_binary(state.s3_client.clone(), file_id.to_string(), state.webhook_secret.clone());
+            analyze_stored_binary(
+                state.s3_client.clone(),
+                file_id.to_string(),
+                state.webhook_secret.clone(),
+            );
         }
         _ => {
             tracing::warn!(event_type = %payload.event_type, "Received unknown event type");

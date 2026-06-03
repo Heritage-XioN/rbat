@@ -73,7 +73,10 @@ pub async fn setup_minio_client() -> Result<S3Client> {
     bucket.set_path_style();
 
     // Check if the bucket exists. If not, create it.
-    let exists = bucket.exists().await.map_err(|e| RbatServerError::S3client(e.to_string()))?;
+    let exists = bucket
+        .exists()
+        .await
+        .map_err(|e| RbatServerError::S3client(e.to_string()))?;
     if !exists {
         tracing::info!(
             bucket = bucket_name,
