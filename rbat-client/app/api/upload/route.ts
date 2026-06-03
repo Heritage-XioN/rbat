@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { Readable } from "node:stream";
 import { type NextRequest, NextResponse } from "next/server";
 import { Webhook } from "standardwebhooks";
-import { uploadBinary, uploadBinaryStream } from "@/lib/grpc-client";
+import { uploadBinaryStream } from "@/lib/grpc-client";
 import { logger } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
@@ -22,15 +22,24 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         );
       }
+
+      // Enforce early max size limit (50MB) to prevent memory exhaustion
+      if (file.size > 50 * 1024 * 1024) {
+        return NextResponse.json(
+          { error: "File size exceeds the 50MB limit" },
+          { status: 413 },
+        );
+      }
+
       fileName = file.name;
       size = file.size;
 
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      md5Hash = crypto.createHash("md5").update(buffer).digest("hex");
-
-      const uploadRes = await uploadBinary(file.name, buffer);
+      // Stream the File object directly to avoid buffering the full ArrayBuffer in memory
+      const fileStream = Readable.fromWeb(file.stream() as any);
+      const uploadRes = await uploadBinaryStream(fileName, fileStream);
       file_id = uploadRes.file_id;
+      md5Hash = uploadRes.md5Hash;
+      size = uploadRes.total_bytes_received;
     } else {
       const searchParams = request.nextUrl.searchParams;
       fileName = searchParams.get("filename") || "binary";
@@ -52,9 +61,9 @@ export async function POST(request: NextRequest) {
     // Dispatch analysis.start webhook to the Rust backend to kick off analysis
     const webhookSecret = process.env.WEBHOOK_SECRET;
     if (!webhookSecret) {
-      if (process.env.NODE_ENV === "production") {
+      if (process.env.NODE_ENV !== "development") {
         throw new Error(
-          "Missing WEBHOOK_SECRET environment variable in production!",
+          `Missing WEBHOOK_SECRET environment variable in ${process.env.NODE_ENV || "production"}!`,
         );
       }
       logger.warn(
