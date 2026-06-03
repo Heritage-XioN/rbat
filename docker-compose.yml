@@ -11,64 +11,51 @@ services:
   # ---------------------------------------------------------------------------
   # Reverse Proxy / Edge Router
   # ---------------------------------------------------------------------------
-#  traefik:
-#    image: traefik:v3.6
-#    container_name: rbat_edge_router
-#    command:
-#      # Provider ----------------------------------------------------------
-#      - "--providers.docker=true"
-#      - "--providers.docker.exposedByDefault=false"
-#      # Entrypoints -------------------------------------------------------
-#      - "--entrypoints.web.address=:80"
-#      - "--entrypoints.websecure.address=:443"
-#      # HTTP → HTTPS redirect
-#      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-#      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
-#      # TLS / Let's Encrypt -----------------------------------------------
-#      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
-#      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-#      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
-#      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-#      # Health / Observability --------------------------------------------
-#      - "--ping=true"
-#      - "--log.level=WARN"
-#      - "--accesslog=true"
-#    ports:
-#      - "80:80"
-#      - "443:443"
-#    volumes:
-#      - /var/run/docker.sock:/var/run/docker.sock:ro
-#      - letsencrypt:/letsencrypt
-#    networks:
-#      - proxy
-#    restart: unless-stopped
-#    security_opt:
-#      - no-new-privileges:true
-#    deploy:
-#      resources:
-#        limits:
-#          cpus: "0.50"
-#          memory: 256M
-#    healthcheck:
-#      test: ["CMD", "traefik", "healthcheck", "--ping"]
-#      interval: 30s
-#      timeout: 5s
-#      retries: 3
-#    labels:
-#      - "traefik.enable=true"
-#      # Secure Headers middleware configuration
-#      - "traefik.http.middlewares.secure-headers.headers.sslredirect=true"
-#      - "traefik.http.middlewares.secure-headers.headers.stsSeconds=31536000"
-#      - "traefik.http.middlewares.secure-headers.headers.stsIncludeSubdomains=true"
-#      - "traefik.http.middlewares.secure-headers.headers.stsPreload=true"
-#      - "traefik.http.middlewares.secure-headers.headers.framedeny=true"
-#      - "traefik.http.middlewares.secure-headers.headers.contenttypenosniff=true"
-#      - "traefik.http.middlewares.secure-headers.headers.browserxssfilter=true"
-#      - "traefik.http.middlewares.secure-headers.headers.referrerpolicy=same-origin"
-#      - "traefik.http.middlewares.secure-headers.headers.customresponseheaders.X-Robots-Tag=none,noarchive,nosnippet,notranslate,noimageindex"
-#      # Rate Limiting middleware configuration
-#      - "traefik.http.middlewares.rate-limit.ratelimit.average=100"
-#      - "traefik.http.middlewares.rate-limit.ratelimit.burst=50"
+  traefik:
+    image: traefik:v3.6
+    container_name: rbat_edge_router
+    command:
+      # Provider ----------------------------------------------------------
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      - "--providers.docker.network=rbat_proxy"
+      # Entrypoints -------------------------------------------------------
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # HTTP → HTTPS redirect
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      # TLS / Let's Encrypt -----------------------------------------------
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      # Health / Observability --------------------------------------------
+      - "--ping=true"
+      - "--log.level=WARN"
+      - "--accesslog=true"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    networks:
+      - proxy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 
   # ---------------------------------------------------------------------------
   # Next.js Client
@@ -83,14 +70,16 @@ services:
       NODE_ENV: production
       PORT: "3000"
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
-      GRPC_SERVER_URL: ${GRPC_SERVER_URL}
-      WEBHOOK_RECEIVER_URL: ${WEBHOOK_RECEIVER_URL}
+      GRPC_SERVER_URL: rbat-server:8080
+      WEBHOOK_RECEIVER_URL: http://rbat-server:8080/webhooks
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       REDIS_URL: redis://redis:6379
-    ports:
-      - "3000:3000"
+    # Ports are mapped internally and routed securely via Traefik
+    # ports:
+    #   - "3000:3000"
     networks:
       - proxy
+      - backend
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -105,13 +94,26 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-#    labels:
-#      - "traefik.enable=true"
-#      - "traefik.http.routers.rbat_client.rule=Host(`${DOMAIN}`)"
-#      - "traefik.http.routers.rbat_client.entrypoints=websecure"
-#      - "traefik.http.routers.rbat_client.tls.certresolver=letsencrypt"
-#      - "traefik.http.routers.rbat_client.middlewares=secure-headers,rate-limit"
-#      - "traefik.http.services.rbat_client.loadbalancer.server.port=3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rbat_client.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.rbat_client.entrypoints=websecure"
+      - "traefik.http.routers.rbat_client.tls.certresolver=letsencrypt"
+      # Middlewares definition
+      - "traefik.http.middlewares.client-secure-headers.headers.sslredirect=true"
+      - "traefik.http.middlewares.client-secure-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.client-secure-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.client-secure-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.client-secure-headers.headers.framedeny=true"
+      - "traefik.http.middlewares.client-secure-headers.headers.contenttypenosniff=true"
+      - "traefik.http.middlewares.client-secure-headers.headers.browserxssfilter=true"
+      - "traefik.http.middlewares.client-secure-headers.headers.referrerpolicy=same-origin"
+      - "traefik.http.middlewares.client-secure-headers.headers.customresponseheaders.X-Robots-Tag=none,noarchive,nosnippet,notranslate,noimageindex"
+      - "traefik.http.middlewares.client-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.client-ratelimit.ratelimit.burst=50"
+      # Apply middlewares
+      - "traefik.http.routers.rbat_client.middlewares=client-secure-headers,client-ratelimit"
+      - "traefik.http.services.rbat_client.loadbalancer.server.port=3000"
 
   # ---------------------------------------------------------------------------
   # Storage Bucket (Minio)
@@ -125,11 +127,11 @@ services:
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    # Ports are not exposed to the public internet for security.
+    # ports:
+    #   - "127.0.0.1:9000:9000"
+    #   - "127.0.0.1:9001:9001"
     networks:
-      - proxy
       - backend
     restart: unless-stopped
     security_opt:
@@ -161,14 +163,16 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_ENDPOINT: http://minio:9000
-      WEBHOOK_TARGET_URL: ${WEBHOOK_TARGET_URL}
+      WEBHOOK_TARGET_URL: http://rbat-client:3000/api/webhook
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      RUN_MODE: production
     networks:
       - proxy
       - backend
     restart: unless-stopped
-    ports:
-      - "8080:8080"
+    # Ports are mapped internally and routed securely via Traefik
+    # ports:
+    #   - "8080:8080"
     security_opt:
       - no-new-privileges:true
     deploy:
@@ -182,13 +186,26 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-#    labels:
-#      - "traefik.enable=true"
-#      - "traefik.http.routers.rbat_server.rule=Host(`api.${DOMAIN}`)"
-#      - "traefik.http.routers.rbat_server.entrypoints=websecure"
-#      - "traefik.http.routers.rbat_server.tls.certresolver=letsencrypt"
-#      - "traefik.http.routers.rbat_server.middlewares=secure-headers,rate-limit"
-#      - "traefik.http.services.rbat_server.loadbalancer.server.port=8080"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rbat_server.rule=Host(`api.${DOMAIN}`)"
+      - "traefik.http.routers.rbat_server.entrypoints=websecure"
+      - "traefik.http.routers.rbat_server.tls.certresolver=letsencrypt"
+      # Middlewares definition
+      - "traefik.http.middlewares.server-secure-headers.headers.sslredirect=true"
+      - "traefik.http.middlewares.server-secure-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.server-secure-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.server-secure-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.server-secure-headers.headers.framedeny=true"
+      - "traefik.http.middlewares.server-secure-headers.headers.contenttypenosniff=true"
+      - "traefik.http.middlewares.server-secure-headers.headers.browserxssfilter=true"
+      - "traefik.http.middlewares.server-secure-headers.headers.referrerpolicy=same-origin"
+      - "traefik.http.middlewares.server-secure-headers.headers.customresponseheaders.X-Robots-Tag=none,noarchive,nosnippet,notranslate,noimageindex"
+      - "traefik.http.middlewares.server-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.server-ratelimit.ratelimit.burst=50"
+      # Apply middlewares
+      - "traefik.http.routers.rbat_server.middlewares=server-secure-headers,server-ratelimit"
+      - "traefik.http.services.rbat_server.loadbalancer.server.port=8080"
 
   # ---------------------------------------------------------------------------
   # Redis Event Broker
@@ -196,10 +213,10 @@ services:
   redis:
     image: redis:7-alpine
     container_name: rbat_redis
-    ports:
-      - "6379:6379"
+    # Ports are not exposed to the public internet for security.
+    # ports:
+    #   - "127.0.0.1:6379:6379"
     networks:
-      - proxy
       - backend
     restart: unless-stopped
     deploy:
@@ -228,4 +245,4 @@ networks:
 # =============================================================================
 volumes:
   minio_data:
-#  letsencrypt:
+  letsencrypt:
