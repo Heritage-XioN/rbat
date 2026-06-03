@@ -1,8 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { Webhook } from "standardwebhooks";
-import { analysisEvents } from "@/lib/events";
 import { logger } from "@/lib/logger";
 import { saveAnalysis } from "@/lib/store";
+import { redisPublisher } from "@/lib/redis";
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,8 +43,11 @@ export async function POST(request: NextRequest) {
         saveAnalysis(fileId, payload.data);
         logger.info(`Successfully stored analysis results for file: ${fileId}`);
 
-        // Notify any active event streams of completion
-        analysisEvents.emit(`complete:${fileId}`, payload.data);
+        // Notify any active event streams of completion via Redis
+        await redisPublisher.publish(
+          `analysis:complete:${fileId}`,
+          JSON.stringify(payload.data),
+        );
       }
     }
 
@@ -54,8 +57,11 @@ export async function POST(request: NextRequest) {
         //saveAnalysis(fileId, payload.data);
         logger.error(`Error processing file with id: ${fileId}`);
 
-        // Notify any active event streams of completion
-        analysisEvents.emit(`failed:${fileId}`, payload.data);
+        // Notify any active event streams of completion via Redis
+        await redisPublisher.publish(
+          `analysis:failed:${fileId}`,
+          JSON.stringify(payload.data),
+        );
       }
     }
 

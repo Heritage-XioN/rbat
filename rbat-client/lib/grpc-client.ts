@@ -1,4 +1,6 @@
+import crypto from "node:crypto";
 import path from "node:path";
+import { Readable } from "node:stream";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import type { ProtoGrpcType } from "./proto/transfer";
@@ -66,5 +68,55 @@ export function uploadBinary(
     };
 
     sendNextChunk();
+  });
+}
+
+export function uploadBinaryStream(
+  filename: string,
+  stream: Readable,
+): Promise<{ file_id: string; total_bytes_received: number; md5Hash: string }> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("md5");
+    let totalBytes = 0;
+
+    const call = client.UploadBinary((err: any, response: any) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve({
+          file_id: response.file_id,
+          total_bytes_received: Number(response.total_bytes_received) || totalBytes,
+          md5Hash: hash.digest("hex"),
+        });
+      }
+    });
+
+    stream.on("data", (chunk: Buffer) => {
+      // Feed hashing engine
+      hash.update(chunk);
+      totalBytes += chunk.length;
+
+      const req = {
+        filename,
+        chunk_data: chunk,
+      };
+
+      const canWrite = call.write(req);
+      if (!canWrite) {
+        stream.pause();
+        call.once("drain", () => {
+          stream.resume();
+        });
+      }
+    });
+
+    stream.on("end", () => {
+      call.end();
+    });
+
+    stream.on("error", (err) => {
+      call.destroy(err);
+      reject(err);
+    });
   });
 }

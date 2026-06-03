@@ -1,28 +1,49 @@
 import crypto from "node:crypto";
+import { Readable } from "node:stream";
 import { type NextRequest, NextResponse } from "next/server";
 import { Webhook } from "standardwebhooks";
-import { uploadBinary } from "@/lib/grpc-client";
+import { uploadBinary, uploadBinaryStream } from "@/lib/grpc-client";
 import { logger } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    const contentType = request.headers.get("content-type") || "";
+    let file_id = "";
+    let fileName = "binary";
+    let md5Hash = "";
+    let size = 0;
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const file = formData.get("file") as File | null;
+      if (!file) {
+        return NextResponse.json({ error: "No file provided" }, { status: 400 });
+      }
+      fileName = file.name;
+      size = file.size;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      md5Hash = crypto.createHash("md5").update(buffer).digest("hex");
+
+      const uploadRes = await uploadBinary(file.name, buffer);
+      file_id = uploadRes.file_id;
+    } else {
+      const searchParams = request.nextUrl.searchParams;
+      fileName = searchParams.get("filename") || "binary";
+      const bodyStream = request.body;
+      if (!bodyStream) {
+        return NextResponse.json({ error: "No body stream provided" }, { status: 400 });
+      }
+
+      const nodeStream = Readable.fromWeb(bodyStream as any);
+      const uploadRes = await uploadBinaryStream(fileName, nodeStream);
+      file_id = uploadRes.file_id;
+      md5Hash = uploadRes.md5Hash;
+      size = uploadRes.total_bytes_received;
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // Compute MD5 hash
-    const md5Hash = crypto.createHash("md5").update(buffer).digest("hex");
-
-    // 1. Stream the upload to the gRPC daemon
-    const uploadRes = await uploadBinary(file.name, buffer);
-    const { file_id } = uploadRes;
-
-    // 2. Dispatch analysis.start webhook to the Rust backend to kick off analysis
+    // Dispatch analysis.start webhook to the Rust backend to kick off analysis
     const webhookSecret = process.env.WEBHOOK_SECRET;
     if (!webhookSecret) {
       if (process.env.NODE_ENV === "production") {
@@ -79,9 +100,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       fileId: file_id,
-      fileName: file.name,
+      fileName,
       md5Hash,
-      size: file.size,
+      size,
     });
   } catch (error: any) {
     logger.error(`Upload route error: ${error.message || error}`);

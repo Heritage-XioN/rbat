@@ -13,17 +13,17 @@ export function AiInsight() {
     api: "/api/ai/insight",
   });
 
-  const hasCalled = useRef(false);
+  const lastCalledFileId = useRef<string | null>(null);
 
   useEffect(() => {
     if (analysisData) {
-      // Prevents duplicate stream calls in React StrictMode development builds
-      if (!hasCalled.current) {
-        hasCalled.current = true;
+      // Prevents duplicate stream calls in React StrictMode development builds for the same file
+      if (lastCalledFileId.current !== analysisData.file_id) {
+        lastCalledFileId.current = analysisData.file_id;
         complete(JSON.stringify(analysisData));
       }
     } else {
-      hasCalled.current = false;
+      lastCalledFileId.current = null;
     }
   }, [analysisData, complete]);
 

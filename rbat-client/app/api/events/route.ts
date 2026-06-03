@@ -1,8 +1,12 @@
 import type { NextRequest } from "next/server";
 import { analysisEvents } from "@/lib/events";
 import { getAnalysis } from "@/lib/store";
+import { initRedisPubSubBridge } from "@/lib/redis";
 
 export async function GET(request: NextRequest) {
+  // Ensure Redis PubSub bridge is active
+  initRedisPubSubBridge();
+
   const { searchParams } = new URL(request.url);
   const fileId = searchParams.get("fileId");
 

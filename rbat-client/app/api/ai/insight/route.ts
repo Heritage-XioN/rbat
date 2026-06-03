@@ -21,7 +21,7 @@ export async function POST(request: Request) {
       data = JSON.parse(promptStr);
     } catch (parseError: any) {
       logger.warn(
-        `AI Insight JSON parse error: (parseError.message || parseError)`,
+        `AI Insight JSON parse error: ${parseError.message || parseError}`,
       );
       return new Response(
         JSON.stringify({
@@ -38,8 +38,9 @@ export async function POST(request: Request) {
 
     if (!analysis_result || !risk_assesment) {
       logger.warn(
-        `AI Insight validation failed. Missing analysis_result or risk_assesment. Keys in data:
-          Object.keys(data).join(", ")`,
+        `AI Insight validation failed. Missing analysis_result or risk_assesment. Keys in data: ${Object.keys(
+          data,
+        ).join(", ")}`,
       );
       return new Response(
         JSON.stringify({

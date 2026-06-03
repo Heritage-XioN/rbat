@@ -32,13 +32,13 @@ export function UploadZone() {
     setFileName(file.name);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      // Upload to API route
-      const uploadRes = await fetch("/api/upload", {
+      // Upload as raw stream to avoid in-memory buffering.
+      const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/octet-stream",
+        },
+        body: file,
       });
 
       if (!uploadRes.ok) {
@@ -140,6 +140,7 @@ export function UploadZone() {
         }
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
             if (
               status === "idle" ||
               status === "completed" ||
