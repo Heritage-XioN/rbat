@@ -89,15 +89,7 @@ pub async fn receive_webhook(
                 )
             })?;
 
-            analyze_stored_binary(&state.s3_client, file_id)
-                .await
-                .map_err(|e| {
-                    tracing::error!(file_id = %file_id, error = ?e, "Failed to analyze stored binary");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Analysis failed: {}", e),
-                    )
-                })?;
+            analyze_stored_binary(state.s3_client.clone(), file_id.to_string(), state.webhook_secret.clone());
         }
         _ => {
             tracing::warn!(event_type = %payload.event_type, "Received unknown event type");
