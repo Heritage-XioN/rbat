@@ -103,11 +103,24 @@ fn main() -> Result<()> {
     }
 
     // checks for error once analysis is fully complete
-    match analysis_thread.join().unwrap() {
-        Ok(_) => spinner.finish_with_message("Analysis complete! 🚀\n"),
-        Err(e) => {
-            spinner.finish_with_message("Analysis failed! ❌\n");
-            return Err(color_eyre::eyre::eyre!(e));
+    match analysis_thread.join() {
+        Ok(analysis_result_inner) => match analysis_result_inner {
+            Ok(_) => spinner.finish_with_message("Analysis complete! 🚀\n"),
+            Err(e) => {
+                spinner.finish_with_message("Analysis failed! ❌\n");
+                return Err(color_eyre::eyre::eyre!(e));
+            }
+        },
+        Err(join_panic) => {
+            spinner.finish_with_message("Analysis thread panicked! ❌\n");
+            let panic_msg = if let Some(s) = join_panic.downcast_ref::<&str>() {
+                *s
+            } else if let Some(s) = join_panic.downcast_ref::<String>() {
+                s.as_str()
+            } else {
+                "Unknown panic reason"
+            };
+            return Err(color_eyre::eyre::eyre!("Analysis thread panicked: {}", panic_msg));
         }
     }
 
