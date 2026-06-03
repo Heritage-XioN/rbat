@@ -1,36 +1,20 @@
-[package]
-name = "rbat"
-version = "0.1.1"
-edition = "2024"
-authors = ["Heritage-XioN"]
-description = "A terminal-native binary analysis tool for security researchers and reverse engineers."
-license = "MIT"
-repository = "https://github.com/Heritage-XioN/rbat"
-readme = "README.md"
-keywords = ["binary-analysis", "security", "reverse-engineering", "tui", "disassembly"]
-categories = ["command-line-utilities", "parsing", "security"]
+[workspace]
+members = ["rbat-core", "rbat-server"]
+resolver = "2"
 
-[dependencies]
-capstone = "0.14.0"
-clap = { version =  "4.6.1", features = ["derive", "usage"]}
-goblin = "0.10.5"
-color-eyre = "0.6.3"
-crossterm = "0.29.0"
-ratatui = "0.30.0"
-rust-embed = "8.11.0"
+[workspace.dependencies]
+tokio = { version = "1.52.3", features = ["full"] }
+rayon = "1.12.0"
+tui-banner = "0.2.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"
-yara = { version = "0.31.0", features = ["vendored"] }
-csv = "1.4.0"
+indicatif = "0.18.4"
 chrono = "0.4.44"
-fullbleed = "0.6.11"
-lightningcss = "=1.0.0-alpha.70"
-askama = "0.16.0"
-
-[dev-dependencies]
-object = { version = "0.39.1", features = ["write"] }
-tempfile = "3.10"
+color-eyre = "0.6.3"
+tracing = "0.1"
+tracing-indicatif = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [profile.release]
 opt-level = 3       

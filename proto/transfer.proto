@@ -1,0 +1,16 @@
+syntax = "proto3";
+package transfer;
+
+service Analysis {
+  rpc UploadBinary(stream UploadRequest) returns (UploadResponse);
+}
+
+message UploadRequest {
+  string filename = 1;
+  bytes chunk_data = 2;
+}
+
+message UploadResponse {
+  string file_id = 1;
+  uint64 total_bytes_received = 2;
+}

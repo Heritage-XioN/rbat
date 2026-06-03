@@ -1,0 +1,36 @@
+[package]
+name = "rbat-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.9"
+prost = "0.14.3"
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
+tokio-stream = "0.1.18"
+tokio = { workspace = true }
+tokio-retry = "0.3.1"
+reqwest = "0.13.3"
+standardwebhooks = "1.0.1"
+rust-s3 = { version = "0.34.0", default-features = false, features = ["tokio-rustls-tls"] }
+color-eyre = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+axum-standardwebhooks = "1.0.0"
+uuid = { version = "1.23.1", features = ["v4"] }
+rbat = { path = "../rbat-core"}
+axum-macros = "0.4" 
+dotenvy = "0.15.7"
+chrono = { workspace = true }
+# sea-orm = {version = "1.1.20", features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros" ]}
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rayon = { workspace = true }
+
+
+
+[build-dependencies]
+tonic-build = "0.14.6"
+tonic-prost-build = "0.14.6"

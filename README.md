@@ -1,158 +1,46 @@
-# RBAT: Rust Binary Analysis Tool
+```bash
+        ██████╗ ██████╗  █████╗ ████████╗
+        ██╔══██╗██╔══██╗██╔══██╗╚══██╔══╝
+        ██████╔╝██████╔╝███████║   ██║   
+        ██╔══██╗██╔══██╗██╔══██║   ██║   
+        ██║  ██║██████╔╝██║  ██║   ██║   
+        ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝   ╚═╝   
+```
 
-[![Crates.io Version](https://img.shields.io/crates/v/rbat?style=for-the-badge&logo=rust&color=orange&label=version)](https://crates.io/crates/rbat)
+[![Crates.io Version](https://img.shields.io/crates/v/rbat?style=for-the-badge&logo=rust&color=orange&label=core%20version)](https://crates.io/crates/rbat)
 [![Crates.io Downloads](https://img.shields.io/crates/d/rbat?style=for-the-badge&color=blue&label=downloads)](https://crates.io/crates/rbat)
+[![Rust CI Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci-rust.yml?style=for-the-badge&label=rust%20ci)](https://github.com/Heritage-XioN/rbat/actions)
+[![Client CI Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci-client.yml?style=for-the-badge&label=client%20ci)](https://github.com/Heritage-XioN/rbat/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci.yml?style=for-the-badge&label=build)](https://github.com/Heritage-XioN/rbat/actions)
+[![Rust MSRV](https://img.shields.io/badge/rustc-1.75+-orange.svg?style=for-the-badge&logo=rust)](https://blog.rust-lang.org/2023/12/28/Rust-1.75.0.html)
+[![Node Version](https://img.shields.io/badge/node-%3E%3D20.0.0-green.svg?style=for-the-badge&logo=node.js)](https://nodejs.org)
 
-**RBAT** is a high-performance, terminal-native binary analysis tool designed for security researchers, malware analysts, and reverse engineers. It provides a comprehensive suite of static analysis tools to identify potential threats, analyze binary structures, and evaluate risk levels across multiple executable formats.
 
----
+RBAT (Rust Binary Analysis Tool) is a modern, high-performance static analysis and security auditing framework for compiled binaries.
 
-## 🚀 Features
+## Workspace Structure
 
-- **Multi-Format Support**: Native parsing for **ELF**, **PE**, and **Mach-O** binaries using `goblin`.
-- **Dynamic Risk Scoring**: Heuristic-based risk assessment that calculates a threat level (0-100) based on entropy, suspicious imports, and behavior patterns.
-- **Rich TUI Dashboard**: An interactive terminal interface built with `ratatui` for navigating findings, metadata, and security recommendations.
-- **Entropy Heatmaps**: Visualizes section-level entropy to detect packed code, encrypted payloads, or hidden data.
-- **YARA Integration**: Built-in scanning for packer signatures and suspicious patterns using customized, embedded YARA rules.
-- **Multi-Format Reporting**: Export analysis results to professional **PDF** reports (with heatmaps), SOC-ready **CSV** logs, or **JSON** for automated pipelines.
+The project is organized as a Cargo workspace consisting of three primary components:
 
-## 🎓 Educational Value
-
-RBAT is designed not just as a tool, but as a reference for learning binary internals:
-- **Binary Internals**: Learn how headers, section tables, and symbol tables differ between ELF, PE, and Mach-O.
-- **Static Analysis Techniques**: Understand how to identify "code caves," analyze import function associations, and detect API hooking signatures.
-- **Information Theory**: Explore how Shannon Entropy is applied in security to differentiate between compressed, encrypted, and plaintext data.
-- **Heuristic Modeling**: See how multiple low-confidence indicators can be combined into a high-confidence risk score.
-
----
-
-## 📋 Prerequisites
-
-- **Rust**: Version 1.75 or higher is recommended.
-- **C Libraries**: 
-  - `capstone` (for disassembly)
-  - `libyara` (for pattern matching)
-  - *Note: On most systems, these are handled automatically by Cargo or bundled via "vendored" features.*
-
----
-
-## 🛠️ Installation
-
-### From Crates.io (Recommended)
-```bash
-cargo install rbat
-```
-
-### From Source
-```bash
-# Clone the repository
-git clone https://github.com/Heritage-XioN/rbat.git
-cd rbat
-
-# Build the project
-cargo build --release
-
-# Run tests to verify setup
-cargo test
-```
-
----
-
-## 📖 Usage
-
-### Interactive Mode
-Analyze a binary directly in the interactive **TUI**:
-```bash
-rbat <path_to_binary> --tui
-```
-
-### PDF Reporting
-Generate a professional **PDF report**:
-```bash
-rbat <path_to_binary> --pdf --out-dir ./reports
-```
-*Output Example (report.pdf):* A multi-page document featuring a high-level summary, detailed security findings, and an entropy heatmap visualization.
-
-### SOC/SIEM Integration
-Export results to **CSV** or **JSON** for ingestion into automated pipelines:
-```bash
-rbat <path_to_binary> --csv --json --out-dir ./logs
-```
-
-**JSON Output Example:**
-```json
-{
-  "target": { "name": "malware.exe", "path": "/bin/malware.exe" },
-  "risk_assessment": {
-    "score": 85,
-    "severity": "Malicious",
-    "findings": [
-      { "indicator": "Suspicious Section Names", "confidence": "High", "weight": 10 }
-    ]
-  }
-}
-```
-
-**CSV Output Example:**
-```csv
-Timestamp,Filename,Risk_Score,Severity,Indicator_Type,Confidence,Description
-2023-10-27 14:02:49,firmware.elf,85,Malicious,API Hooking,High,Suspicious function: system() @ 0x0801a2c
-```
-
----
-
-## ⚙️ Configuration
-
-RBAT is designed to be a "zero-config" standalone tool:
-- **Embedded Assets**: All YARA rules, blacklists, and CSS templates are embedded into the binary at compile-time using `rust-embed`.
-- **CLI Flags**: Behavior is controlled entirely through command-line arguments (run `rbat --help` for details).
-
----
-
-## 🏗️ Architecture
-
-RBAT follows a modular pipeline architecture:
-1. **Parser Layer**: Uses `goblin` to abstract away the differences between binary formats and extract raw bytes, entry points, and symbol data.
-2. **Analysis Engine**: Orchestrates the analysis flow, feeding executable bytes to the **Disassembler (Capstone)** and the file buffer to the **YARA Scanner**.
-3. **Scoring Engine**: Consumes all findings (entropy, suspicious APIs, packer matches) and applies a weighted heuristic to produce a `RiskAssessment`.
-4. **Presentation Layer**: 
-    - **TUI**: Provides a stateful, interactive dashboard.
-    - **Reporters**: Uses `askama` templates and `fullbleed` to generate design-compliant documents.
-
----
-
-## 📂 Project Structure
+* **[rbat-core](rbat-core/README.md)**: The core static analysis engine. Written in Rust, it performs binary parsing (ELF, PE, Mach-O), entropy calculation, YARA rule matching, disassembling, and scoring. It also exposes the command-line interface (CLI) to run local audits.
+* **[rbat-server](rbat-server/README.md)**: A high-performance gRPC server daemon wrapping the core engine to enable remote static analysis auditing services.
+* **[rbat-client](rbat-client/README.md)**: A modern Next.js web application frontend dashboard providing interactive visualizations of binary analysis findings, entropy maps, and reports.
 
 ```text
 rbat/
-├── assets/             # Embedded YARA rules and suspicious pattern blacklists
-├── src/
-│   ├── main.rs         # Entry point and CLI orchestration
-│   ├── rbat/           # Core library components
-│   │   ├── parser.rs   # Binary format parsing (ELF/PE/Mach-O)
-│   │   ├── tui.rs      # Ratatui-based interactive dashboard
-│   │   └── ...
-│   └── utils/          # Analysis and reporting utilities
-│       ├── analyzer.rs # Analysis pipeline orchestration
-│       ├── scoring.rs  # Risk assessment heuristic engine
-│       ├── pdf.rs      # Askama/Fullbleed PDF reporting
-│       └── ...
-├── templates/          # HTML/CSS templates for generated reports
-└── tests/              # Integration tests and binary generation helpers
+├── proto/               # gRPC Service Definition
+├── rbat-core/           # Core Rust static analysis engine & CLI
+├── rbat-server/         # gRPC server wrapper around the core engine
+└── rbat-client/         # Next.js web application dashboard
 ```
 
----
+## Contributing & Community
 
-## 🛡️ Security Considerations
+We welcome contributions of all forms. Please check the following resources to get started:
 
-- **Static Only**: RBAT performs static analysis. It does **not** execute the target binary, making it safe to use on unknown or potentially malicious files.
-- **Local Privacy**: All analysis is performed locally on your machine. No data is sent to external servers or cloud services.
-- **Heuristic Limits**: Risk scoring is based on common malware patterns. A high score indicates a need for manual review, while a low score does not guarantee the file is harmless.
+* **[Contributing Guidelines](CONTRIBUTING.md)**: Build instructions, PR workflow, and code style.
+* **[Code of Conduct](CODE_OF_CONDUCT.md)**: Community standards and pledge of behavior.
 
----
+## License
 
-## ⚖️ License
-
-This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+This project is licensed under the [MIT License](LICENSE).

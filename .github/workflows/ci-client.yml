@@ -1,0 +1,54 @@
+name: Client CI
+
+on:
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'rbat-client/**'
+      - 'proto/**'
+      - '.github/workflows/ci-client.yml'
+  push:
+    branches: [ master ]
+    paths:
+      - 'rbat-client/**'
+      - 'proto/**'
+      - '.github/workflows/ci-client.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Lint & Build (Client)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PNPM
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'rbat-client/pnpm-lock.yaml'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: rbat-client
+        
+      - name: Lint
+        run: pnpm lint
+        working-directory: rbat-client
+        
+      - name: Build
+        run: pnpm build
+        working-directory: rbat-client
