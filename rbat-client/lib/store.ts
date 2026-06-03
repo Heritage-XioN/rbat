@@ -16,7 +16,28 @@ if (!fs.existsSync(STORE_DIR)) {
   }
 }
 
+function cleanOldAnalysisFiles() {
+  try {
+    const now = Date.now();
+    const maxAge = 10 * 60 * 1000; // 10 minutes max age
+    const files = fs.readdirSync(STORE_DIR);
+    for (const file of files) {
+      if (file.endsWith(".json")) {
+        const filePath = path.join(STORE_DIR, file);
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtimeMs > maxAge) {
+          fs.unlinkSync(filePath);
+        }
+      }
+    }
+  } catch (_err) {
+    // Fail silently to prevent interrupting core workflows
+  }
+}
+
 export function saveAnalysis(fileId: string, data: any) {
+  cleanOldAnalysisFiles(); // Clean up expired files first
+
   const filePath = path.join(STORE_DIR, `${fileId}.json`);
   // Ensure owner read/write only permissions on creation
   fs.writeFileSync(filePath, JSON.stringify(data), {

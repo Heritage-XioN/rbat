@@ -86,6 +86,7 @@ services:
       GRPC_SERVER_URL: ${GRPC_SERVER_URL}
       WEBHOOK_RECEIVER_URL: ${WEBHOOK_RECEIVER_URL}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      REDIS_URL: redis://redis:6379
     ports:
       - "3000:3000"
     networks:
@@ -188,6 +189,29 @@ services:
 #      - "traefik.http.routers.rbat_server.tls.certresolver=letsencrypt"
 #      - "traefik.http.routers.rbat_server.middlewares=secure-headers,rate-limit"
 #      - "traefik.http.services.rbat_server.loadbalancer.server.port=8080"
+
+  # ---------------------------------------------------------------------------
+  # Redis Event Broker
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: rbat_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - proxy
+      - backend
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 # =============================================================================
 # Networks
