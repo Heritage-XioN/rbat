@@ -42,7 +42,7 @@ export function EntropyHeatmap({ sections, className }: EntropyHeatmapProps) {
 
       {displaySections.length > 0 ? (
         <>
-          <div className="grid grid-cols-3 gap-1">
+          <div className="grid grid-cols-3 gap-1 max-h-32 overflow-y-auto scrollbar-none">
             {displaySections.map((section) => (
               <div
                 key={section.name}
