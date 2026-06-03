@@ -85,7 +85,8 @@ export function uploadBinaryStream(
       } else {
         resolve({
           file_id: response.file_id,
-          total_bytes_received: Number(response.total_bytes_received) || totalBytes,
+          total_bytes_received:
+            Number(response.total_bytes_received) || totalBytes,
           md5Hash: hash.digest("hex"),
         });
       }

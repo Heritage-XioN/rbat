@@ -33,13 +33,16 @@ export function UploadZone() {
 
     try {
       // Upload as raw stream to avoid in-memory buffering.
-      const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/octet-stream",
+      const uploadRes = await fetch(
+        `/api/upload?filename=${encodeURIComponent(file.name)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+          },
+          body: file,
         },
-        body: file,
-      });
+      );
 
       if (!uploadRes.ok) {
         const errData = await uploadRes.json();

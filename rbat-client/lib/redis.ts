@@ -43,7 +43,9 @@ export function initRedisPubSubBridge() {
         const data = JSON.parse(message);
         analysisEvents.emit(`${status}:${fileId}`, data);
       } catch (parseErr: any) {
-        logger.error(`Failed to parse PubSub message on channel ${channel}: ${parseErr.message || parseErr}`);
+        logger.error(
+          `Failed to parse PubSub message on channel ${channel}: ${parseErr.message || parseErr}`,
+        );
       }
     }
   });

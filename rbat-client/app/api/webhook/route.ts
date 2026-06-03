@@ -1,8 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { Webhook } from "standardwebhooks";
 import { logger } from "@/lib/logger";
-import { saveAnalysis } from "@/lib/store";
 import { redisPublisher } from "@/lib/redis";
+import { saveAnalysis } from "@/lib/store";
 
 export async function POST(request: NextRequest) {
   try {

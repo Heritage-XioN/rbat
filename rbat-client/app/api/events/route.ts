@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { analysisEvents } from "@/lib/events";
-import { getAnalysis } from "@/lib/store";
 import { initRedisPubSubBridge } from "@/lib/redis";
+import { getAnalysis } from "@/lib/store";
 
 export async function GET(request: NextRequest) {
   // Ensure Redis PubSub bridge is active

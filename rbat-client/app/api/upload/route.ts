@@ -17,7 +17,10 @@ export async function POST(request: NextRequest) {
       const formData = await request.formData();
       const file = formData.get("file") as File | null;
       if (!file) {
-        return NextResponse.json({ error: "No file provided" }, { status: 400 });
+        return NextResponse.json(
+          { error: "No file provided" },
+          { status: 400 },
+        );
       }
       fileName = file.name;
       size = file.size;
@@ -33,7 +36,10 @@ export async function POST(request: NextRequest) {
       fileName = searchParams.get("filename") || "binary";
       const bodyStream = request.body;
       if (!bodyStream) {
-        return NextResponse.json({ error: "No body stream provided" }, { status: 400 });
+        return NextResponse.json(
+          { error: "No body stream provided" },
+          { status: 400 },
+        );
       }
 
       const nodeStream = Readable.fromWeb(bodyStream as any);
