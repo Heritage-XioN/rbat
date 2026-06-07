@@ -32,12 +32,12 @@ export function AnalysisHeader() {
             ANALYZE
           </Badge>
         </div>
-
-        {/* Action buttons */}
+  
         <div className="flex items-center gap-3">
           <Button
             id="export-report-btn"
             variant="outline"
+            disabled
             className="gap-2 border-rbat-border bg-rbat-card text-rbat-text hover:bg-rbat-card/80"
           >
             <Download className="size-4" />

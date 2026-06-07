@@ -32,6 +32,14 @@ export const metadata: Metadata = {
     "code cave detection",
   ],
   authors: [{ name: "RBAT Core Team" }],
+  icons: {
+    icon: [
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/site.webmanifest",
   openGraph: {
     title: "RBAT — Binary Analysis Toolkit & Reverse Engineering Dashboard",
     description:
@@ -39,12 +47,21 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     siteName: "RBAT Toolkit",
+    images: [
+      {
+        url: "/android-chrome-512x512.png",
+        width: 512,
+        height: 512,
+        alt: "RBAT Logo",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "RBAT — Binary Analysis Toolkit & Reverse Engineering Dashboard",
     description:
       "Perform high-performance static analysis and security auditing on compiled binaries.",
+    images: ["/android-chrome-512x512.png"],
   },
   robots: {
     index: true,
@@ -70,26 +87,6 @@ export default function RootLayout({
         inter.variable,
       )}
     >
-      <head>
-        <link
-          rel="apple-touch-icon"
-          sizes="180x180"
-          href="/apple-touch-icon.png"
-        />
-        <link
-          rel="icon"
-          type="image/png"
-          sizes="32x32"
-          href="/favicon-32x32.png"
-        />
-        <link
-          rel="icon"
-          type="image/png"
-          sizes="16x16"
-          href="/favicon-16x16.png"
-        />
-        <link rel="manifest" href="/site.webmanifest" />
-      </head>
       <body className="min-h-full flex flex-col bg-rbat-bg">{children}</body>
     </html>
   );
