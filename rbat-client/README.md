@@ -1,7 +1,7 @@
 # rbat-client
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci.yml?style=for-the-badge&label=build)](https://github.com/Heritage-XioN/rbat/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci-client.yml?style=for-the-badge&label=build)](https://github.com/Heritage-XioN/rbat/actions)
 [![Next.js Version](https://img.shields.io/badge/Next.js-15.0+-black.svg?style=for-the-badge&logo=nextdotjs)](https://nextjs.org/)
 
 **rbat-client** is the Next.js-based terminal-native web interface for the Rust Binary Analysis Tool (RBAT). It allows users to drag-and-drop binaries for inspection, forwards uploads to the gRPC backend daemon, and displays real-time analysis logs, section-level entropy heatmaps, and security vulnerability scores in a dashboard.
