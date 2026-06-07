@@ -32,7 +32,7 @@ export function AnalysisHeader() {
             ANALYZE
           </Badge>
         </div>
-  
+
         <div className="flex items-center gap-3">
           <Button
             id="export-report-btn"
