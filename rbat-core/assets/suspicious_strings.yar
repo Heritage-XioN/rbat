@@ -13,15 +13,12 @@ rule C2_Framework_Indicators {
 
     strings:
         /* Cobalt Strike patterns */
-        $cobalt_beacon = "beacon" ascii wide nocase
         $cobalt_artifact = "artifact.exe" ascii wide nocase
         $cobalt_powershell = "Invoke-Mimikatz" ascii wide nocase
         $cobalt_pscmd = "powershell -enc" ascii wide nocase
-        $cobalt_jitter = "jitter" ascii wide nocase
 
         /* Havoc C2 patterns */
         $havoc_dll = "Havoc" ascii wide nocase
-        $havoc_demon = "Demon" ascii wide nocase
 
         /* Brute Ratel patterns */
         $brute_ratel = "BruteRAT" ascii wide nocase
@@ -42,12 +39,6 @@ rule C2_Framework_Indicators {
         /* Vidar patterns */
         $vidar = "Vidar" ascii wide nocase
 
-        /* Generic RAT patterns - often used across frameworks */
-        $rat_cmd = "cmd /c" ascii wide nocase
-        $rat_shell = "cmd shell" ascii wide nocase
-        $rat_pwsh = "powershell" ascii wide nocase
-        $rat_bash = "/bin/sh" ascii wide nocase
-
     condition:
         any of them
 }
@@ -59,9 +50,6 @@ rule Network_Indicators {
         version = "0.2.1"
 
     strings:
-        /* HTTP/HTTPS URLs - made more specific to reduce noise */
-        $url_http = /https?:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,6}(\/[a-zA-Z0-9\-\._~:\/\?#\[\]@!\$&'\(\)\*\+,;=%]*)?/ nocase
-
         /* IP addresses in URLs */
         $url_ip = /https?:\/\/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/ nocase
 
@@ -74,7 +62,7 @@ rule Network_Indicators {
         $c2_port_6666 = ":6666" ascii
 
     condition:
-        $url_ip or $tor_domain or any of ($c2_port_*) or #url_http > 2
+        $url_ip or $tor_domain or any of ($c2_port_*)
 }
 
 rule Windows_Suspicious_APIs {
@@ -84,29 +72,7 @@ rule Windows_Suspicious_APIs {
         version = "0.2.0"
 
     strings:
-        /* Process creation and execution */
-        $api_winexec = "WinExec" ascii wide
-        $api_shell = "ShellExecuteA" ascii wide
-        $api_shellw = "ShellExecuteW" ascii wide
-        $api_createproc = "CreateProcessA" ascii wide
-        $api_createprow = "CreateProcessW" ascii wide
-
-        /* Memory manipulation */
-        $api_virtalloc = "VirtualAlloc" ascii wide
-        $api_virtallocn = "VirtualAllocEx" ascii wide
-        $api_virtprot = "VirtualProtect" ascii wide
-        $api_virtprotp = "VirtualProtectEx" ascii wide
-        $api_writeproc = "WriteProcessMemory" ascii wide
-        $api_readproc = "ReadProcessMemory" ascii wide
-
-        /* DLL loading */
-        $api_loadlib = "LoadLibraryA" ascii wide
-        $api_loadlibw = "LoadLibraryW" ascii wide
-        $api_getproc = "GetProcAddress" ascii wide
-        $api_lstr = "lstrcpyA" ascii wide
-
-        /* Registry manipulation */
-        $api_regopen = "RegOpenKeyA" ascii wide
+        /* Registry manipulation for persistence / malware */
         $api_regset = "RegSetValueA" ascii wide
         $api_regcreate = "RegCreateKeyA" ascii wide
 
@@ -115,23 +81,13 @@ rule Windows_Suspicious_APIs {
         $api_svcw = "CreateServiceW" ascii wide
 
         /* Network operations */
-        $api_inetopen = "InternetOpenA" ascii wide
-        $api_ineturl = "InternetOpenUrlA" ascii wide
-        $api_httpopen = "HttpOpenRequestA" ascii wide
-        $api_httpsend = "HttpSendRequestA" ascii wide
         $api_urlget = "URLDownloadToFileA" ascii wide
-        $api_wsasock = "WSASocketA" ascii wide
 
-        /* Cryptography */
+        /* Cryptography / Hashing */
         $api_crypt = "CryptHashMessageBlob" ascii wide
-
-        /* Process injection APIs */
-        $api_rtlcreate = "RtlCreateUserThread" ascii wide
-        $api_ntcreate = "NtCreateThreadEx" ascii wide
 
         /* Anti-analysis */
         $api_checkvm = "CheckRemoteDebuggerPresent" ascii wide
-        $api_isdebug = "IsDebuggerPresent" ascii wide
 
     condition:
         any of them
@@ -148,26 +104,12 @@ rule ELF_Suspicious_APIs {
         $elf_ptrace = "ptrace" ascii
         $elf_ptrace_plt = "ptrace@plt" ascii
 
-        /* Memory mapping - often used in legitimate binaries but suspicious in some contexts */
-        $elf_mprotect = "mprotect" ascii
-        $elf_mprotect_plt = "mprotect@plt" ascii
-
         /* Process execution */
         $elf_execve = "execve" ascii
         $elf_execve_plt = "execve@plt" ascii
 
-        /* Shell commands */
-        $elf_system = "system" ascii
-        $elf_popen = "popen" ascii
-
-        /* Network - socket creation is common but noteworthy */
-        $elf_socket = "socket" ascii
-        $elf_connect = "connect" ascii
-
     condition:
-        (any of ($elf_ptrace*) and (any of ($elf_execve*) or any of ($elf_system*) or any of ($elf_mprotect*) or $elf_popen)) or
-        (any of ($elf_socket*) and any of ($elf_connect*)) or
-        (#elf_system > 1)
+        any of them
 }
 
 rule MachO_Suspicious_APIs {
@@ -178,25 +120,14 @@ rule MachO_Suspicious_APIs {
 
     strings:
         /* Dynamic library loading */
-        $mac_dlopen = "dlopen" ascii
-        $mac_dlsym = "dlsym" ascii
         $mac_nsload = "NSLinkModule" ascii
 
         /* Process manipulation */
         $mac_taskforp = "task_for_pid" ascii
         $mac_taskalloc = "task_alloc" ascii
-        $mac_vmalloc = "vm_allocate" ascii
-        $mac_vmprot = "vm_protect" ascii
 
         /* Inter-process communication */
         $mac_machport = "mach_port_allocate" ascii
-        $mac_msgget = "msgget" ascii
-        $mac_msgsnd = "msgsnd" ascii
-
-        /* Persistence */
-        $mac_lauchd = "launchd" ascii
-        $mac_laucho = "LaunchDaemon" ascii
-        $mac_loginitem = "AddLoginItem" ascii
 
         /* Hidden execution */
         $mac_hidden = "setuidroot" ascii
@@ -226,20 +157,12 @@ rule File_Paths_Malicious {
         $path_unix_tmp = "/tmp/" ascii
         $path_unix_vartmp = "/var/tmp/" ascii
         $path_unix_devshm = "/dev/shm/" ascii
-        $path_unix_home = "/home/" ascii
-        $path_unix_root = "/root/" ascii
 
         /* Hidden files/directories (Unix) */
-        $path_hidden_dot = "/." ascii
         $path_ssh = "/.ssh/" ascii
         $path_bashrc = "/.bashrc" ascii
         $path_profile = "/.profile" ascii
         $path_xauth = "/.Xauthority" ascii
-
-        /* Config directories */
-        $path_config = "/.config/" ascii
-        $path_local = "/.local/" ascii
-        $path_cache = "/.cache/" ascii
 
     condition:
         any of them
@@ -260,16 +183,6 @@ rule Credential_Patterns {
         /* Username patterns */
         $cred_user = /user[name]?\s*[=:]\s*[a-zA-Z0-9@#\$\%\^\&\*\-\_]+/ nocase
         $cred_username = /username\s*[=:]\s*[a-zA-Z0-9@#\$\%\^\&\*\-\_]+/ nocase
-
-        /* API keys/tokens */
-        $cred_apikey = /api[_-]?key\s*[=:]\s*[a-zA-Z0-9]+/ nocase
-        $cred_token = /token\s*[=:]\s*[a-zA-Z0-9\-\._]+/ nocase
-        $cred_bearer = "Bearer" ascii wide
-
-        /* SSH keys */
-        $cred_ssh_priv = "-----BEGIN" ascii
-        $cred_ssh_rsa = "RSA PRIVATE KEY" ascii wide
-        $cred_ssh_openssh = "OPENSSH PRIVATE KEY" ascii wide
 
         /* Database credentials */
         $cred_db_user = /(db|database)[_-]?(user|username)\s*[=:]/ nocase
@@ -306,20 +219,7 @@ rule Obfuscation_Patterns {
         $b64_strict = /[A-Za-z0-9+\/]+=*$/ nocase
 
         /* XOR-related strings */
-        $xor_key = "xor" ascii wide nocase
         $xor_encrypt = "XOREncrypt" ascii wide
-
-        /* Encoding commands */
-        $enc_base64 = "-enc" ascii wide
-        $enc_b64 = "Base64" ascii wide nocase
-
-        /* Payload markers */
-        $payload_shell = "shellcode" ascii wide nocase
-        $payload_stub = "stub" ascii wide nocase
-
-        /* Custom encryption indicators */
-        $encrypt_func = "decrypt" ascii wide nocase
-        $encrypt_key = "encryption" ascii wide nocase
 
     condition:
         any of them
@@ -352,10 +252,6 @@ rule Anti_Analysis_Techniques {
         /* VM detection files */
         $vm_files = /\/sys\/class\/dmi\/id\// ascii
         $vm_proc = "/proc/xen/" ascii
-
-        /* Timing checks */
-        $timing_rdtsc = "rdtsc" ascii
-        $timing_cpuid = "cpuid" ascii
 
     condition:
         any of them

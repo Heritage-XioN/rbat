@@ -235,7 +235,7 @@ mod tests {
         let section_ranges =
             crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
 
-        let text_bytes = vec![0x90; 30];
+        let text_bytes = vec![0x90; 128];
 
         let ctx = AnalysisContext {
             buffer: &buffer,

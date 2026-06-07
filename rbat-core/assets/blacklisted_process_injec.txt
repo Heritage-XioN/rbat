@@ -1,12 +1,7 @@
 ptrace
-mmap
-mprotect
 process_vm_read
 process_vm_write
-prctl
-VirtualAlloc
 VirtualAllocEx
-VirtualProtect
 VirtualProtectEx
 WriteProcessMemory
 CreateRemoteThread

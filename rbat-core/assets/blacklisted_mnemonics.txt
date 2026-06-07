@@ -1,10 +1,7 @@
 rdtsc
-cpuid
-int3
 int1
 rdpmc
 sidt
 sldt
 sgdt
-str
 smsw

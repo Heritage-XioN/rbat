@@ -34,6 +34,15 @@ rbat/
 └── rbat-client/         # Next.js web application dashboard
 ```
 
+## Roadmap
+
+To advance **RBAT** toward an industry-standard binary static analysis platform, the following capabilities are planned for future releases:
+
+1. **API Hashing Resolver:** Implement detection and parsing for common API hashing algorithms (e.g., CRC32, ROR13) and PEB walking patterns (like `fs:[0x30]` or `gs:[0x60]` on Windows/x86) to uncover dynamically resolved APIs.
+2. **Control Flow Graph (CFG) Reconstruction:** Walk disassembled instructions to trace basic blocks, identify loops/jumps, and detect obfuscation techniques like control flow flattening.
+3. **Static Emulation / Auto-Unpacking:** Integrate a lightweight emulation engine (such as Unicorn/Qiling) to run packed entry loops inside a safe sandbox to capture unpacked memory states automatically.
+4. **MITRE ATT&CK Framework Mapping:** Link heuristic findings, blacklisted APIs, and YARA match rules to standardized MITRE ATT&CK technique IDs (e.g., *T1055 - Process Injection*) to generate standardized security reports.
+
 ## Contributing & Community
 
 We welcome contributions of all forms. Please check the following resources to get started:

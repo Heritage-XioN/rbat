@@ -21,9 +21,9 @@ type BlacklistedMnemonics = HashMap<String, Vec<u64>>;
 /// Disassembles the executable section of a binary and scans for code caves and evasion mnemonics.
 ///
 /// Code caves are identified as:
-/// - Sequences of 30 or more consecutive `nop` instructions (returned as `"nop_addr"`).
-/// - Runs of 30 or more consecutive `0x00` padding bytes (returned as `"null_addr"`).
-/// - Runs of 30 or more consecutive `0xCC` trap/INT3 bytes (returned as `"int3_addr"`).
+/// - Sequences of 128 or more consecutive `nop` instructions (returned as `"nop_addr"`).
+/// - Runs of 128 or more consecutive `0x00` padding bytes (returned as `"null_addr"`).
+/// - Runs of 128 or more consecutive `0xCC` trap/INT3 bytes (returned as `"int3_addr"`).
 ///
 /// Also flags anti-VM or anti-debugging instructions present in the `blacklisted_mnemonics.txt` asset.
 ///
@@ -61,7 +61,7 @@ pub fn disassemble_section(
             nop_addr.push(i.address());
             counter += 1;
         } else {
-            if counter >= 30 {
+            if counter >= 128 {
                 let mut existing = code_cave.remove("nop_addr").unwrap_or_default();
                 existing.extend(&nop_addr);
                 code_cave.insert("nop_addr".to_owned(), existing);
@@ -80,20 +80,24 @@ pub fn disassemble_section(
     }
 
     // Capture a NOP sled at the end of instructions
-    if counter >= 30 {
+    if counter >= 128 {
         let mut existing = code_cave.remove("nop_addr").unwrap_or_default();
         existing.extend(&nop_addr);
         code_cave.insert("nop_addr".to_owned(), existing);
     }
 
-    // Scan raw bytes for consecutive 0x00 runs
-    let null_caves = scan_raw_padding(bytes, 0x00, 30, *entry_addr);
+    // Scan raw bytes for consecutive 0x00 runs, ignoring trailing alignment padding
+    let mut null_scan_len = bytes.len();
+    while null_scan_len > 0 && bytes[null_scan_len - 1] == 0x00 {
+        null_scan_len -= 1;
+    }
+    let null_caves = scan_raw_padding(&bytes[..null_scan_len], 0x00, 128, *entry_addr);
     if !null_caves.is_empty() {
         code_cave.insert("null_addr".to_owned(), null_caves);
     }
 
     // Scan raw bytes for consecutive 0xCC runs
-    let int3_caves = scan_raw_padding(bytes, 0xCC, 30, *entry_addr);
+    let int3_caves = scan_raw_padding(bytes, 0xCC, 128, *entry_addr);
     if !int3_caves.is_empty() {
         code_cave.insert("int3_addr".to_owned(), int3_caves);
     }
@@ -149,7 +153,7 @@ mod tests {
 
     #[test]
     fn test_disassemble_section_no_early_breakout() {
-        let mut bytes = vec![0x90; 30];
+        let mut bytes = vec![0x90; 128];
         bytes.push(0x0F);
         bytes.push(0x31);
 
@@ -157,9 +161,9 @@ mod tests {
             disassemble_section(&bytes, &0x1000, &BinaryOS::Linux, &BinaryArch::X64).unwrap();
 
         assert!(code_cave.contains_key("nop_addr"));
-        assert_eq!(code_cave.get("nop_addr").unwrap().len(), 30);
+        assert_eq!(code_cave.get("nop_addr").unwrap().len(), 128);
 
         assert!(blacklisted.contains_key("rdtsc"));
-        assert_eq!(blacklisted.get("rdtsc"), Some(&vec![0x101E]));
+        assert_eq!(blacklisted.get("rdtsc"), Some(&vec![0x1080]));
     }
 }

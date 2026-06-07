@@ -21,12 +21,6 @@ rule Windows_Hooking_APIs {
         $api_setwinevent = "SetWinEventHook" ascii wide
         $api_unhookwinevent = "UnhookWinEventHook" ascii wide
 
-        /* Memory manipulation for hooking */
-        $api_virtprot = "VirtualProtect" ascii wide
-        $api_virtprotex = "VirtualProtectEx" ascii wide
-        $api_writeproc = "WriteProcessMemory" ascii wide
-        $api_flushinstr = "FlushInstructionCache" ascii wide
-
     condition:
         any of them
 }
@@ -40,13 +34,6 @@ rule Linux_Hooking_APIs {
     strings:
         /* Process control */
         $api_ptrace = "ptrace" ascii
-        
-        /* Memory protection */
-        $api_mprotect = "mprotect" ascii
-        
-        /* Dynamic loading hooks */
-        $api_dlopen = "dlopen" ascii
-        $api_dlsym = "dlsym" ascii
         
         /* Environment variables often used for hooking */
         $env_preload = "LD_PRELOAD" ascii
@@ -63,10 +50,7 @@ rule MacOS_Hooking_APIs {
         severity = "Medium"
 
     strings:
-        /* Mach VM operations */
-        $api_vmprot = "vm_protect" ascii
         $api_vmwrite = "vm_write" ascii
-        $api_machvmprot = "mach_vm_protect" ascii
         $api_machvmwrite = "mach_vm_write" ascii
         
         /* Task and Thread manipulation */
