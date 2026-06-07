@@ -1,6 +1,6 @@
 [package]
 name = "rbat-server"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 authors = ["Heritage-XioN"]
 description = "Distributed static binary analysis server wrapping the rbat static analysis engine."
@@ -11,7 +11,7 @@ keywords = ["binary-analysis", "security", "reverse-engineering", "grpc", "serve
 categories = ["network-programming", "development-tools", "security"]
 
 [dependencies]
-rbat = { version = "1.0.0", path = "../rbat-core" }
+rbat = { version = "1.0.1", path = "../rbat-core" }
 axum = "0.8.9"
 prost = "0.14.3"
 tonic = "0.14.6"
