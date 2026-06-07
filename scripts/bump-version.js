@@ -37,6 +37,15 @@ function bumpCargoToml(filePath, pkgName) {
   const updatedSection = match[0].replace(`version = "${oldVersion}"`, `version = "${newVersion}"`);
   content = content.replace(match[0], updatedSection);
   
+  if (filePath === 'rbat-server/Cargo.toml') {
+    const depPattern = /\brbat\b\s*=\s*\{[\s\S]*?path\s*=\s*"[^"]+"[\s\S]*?\}/;
+    if (depPattern.test(content)) {
+      content = content.replace(depPattern, `rbat = { version = "${newVersion}", path = "../rbat-core" }`);
+    } else {
+      console.warn("Warning: Could not find rbat dependency in rbat-server/Cargo.toml to bump its version requirement");
+    }
+  }
+
   fs.writeFileSync(absolutePath, content, 'utf8');
   console.log(`Updated ${pkgName} (${filePath}) version from ${oldVersion} to ${newVersion}`);
 }

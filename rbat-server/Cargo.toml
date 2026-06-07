@@ -2,8 +2,16 @@
 name = "rbat-server"
 version = "1.0.0"
 edition = "2024"
+authors = ["Heritage-XioN"]
+description = "Distributed static binary analysis server wrapping the rbat static analysis engine."
+license = "MIT"
+repository = "https://github.com/Heritage-XioN/rbat"
+readme = "README.md"
+keywords = ["binary-analysis", "security", "reverse-engineering", "grpc", "server"]
+categories = ["network-programming", "development-tools", "security"]
 
 [dependencies]
+rbat = { version = "1.0.0", path = "../rbat-core" }
 axum = "0.8.9"
 prost = "0.14.3"
 tonic = "0.14.6"
@@ -20,7 +28,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 axum-standardwebhooks = "1.0.0"
 uuid = { version = "1.23.1", features = ["v4"] }
-rbat = { path = "../rbat-core"}
 axum-macros = "0.4" 
 dotenvy = "0.15.7"
 chrono = { workspace = true }
