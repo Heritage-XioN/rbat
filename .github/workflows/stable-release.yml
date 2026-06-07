@@ -63,7 +63,7 @@ jobs:
       - name: Run SemVer Checks
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
-          crate: rbat
+          package: rbat
           # checks the public API of rbat-core against crates.io baseline
 
       - name: Run E2E Integration Tests

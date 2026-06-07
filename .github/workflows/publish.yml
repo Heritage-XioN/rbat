@@ -54,7 +54,7 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: 'rbat-client/pnpm-lock.yaml'
 
-      # Step 1: Publish project-c (rbat-core, crate name: rbat) to Crates.io
+      # Step 1: Publish rbat to Crates.io
       - name: Publish rbat-core to Crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -74,7 +74,7 @@ jobs:
           echo "Waiting 25 seconds for the index to update before publishing dependent server..."
           sleep 25
 
-      # Step 3: Prepare and Publish project-b (rbat-server) to Crates.io
+      # Step 3: Prepare and Publish rbat-server to Crates.io
       - name: Update rbat-server dependency and Publish to Crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
