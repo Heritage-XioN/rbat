@@ -175,10 +175,10 @@ echo "This is a dummy test binary file used to verify client-server integration.
 RESPONSE=$(curl -s -F "file=@/tmp/dummy_binary.bin" http://localhost:3000/api/upload)
 echo "Upload response: $RESPONSE"
 
-FILE_ID=$(echo "$RESPONSE" | grep -o '"file_id":"[^"]*' | grep -o '[^"]*$' || true)
+FILE_ID=$(echo "$RESPONSE" | grep -o '"fileId":"[^"]*' | grep -o '[^"]*$' || true)
 
 if [ -z "$FILE_ID" ]; then
-  echo -e "${RED}❌ Failed to extract file_id from upload response.${NC}"
+  echo -e "${RED}❌ Failed to extract fileId from upload response.${NC}"
   exit 1
 fi
 echo -e "${GREEN}✓ File successfully uploaded and registered! File ID: $FILE_ID${NC}"
