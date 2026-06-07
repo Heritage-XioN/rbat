@@ -1,30 +1,120 @@
-name: Publish
+name: Publish Monorepo Packages
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'stable-*'
   workflow_dispatch:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   publish:
-    name: Publish to Crates.io
+    name: Publish Packages & Deploy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Extract Version from Tag
+        id: get_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/stable-* ]]; then
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#stable-}"
+          else
+            VERSION="0.0.0-manual"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Extracted Version: $VERSION"
+
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler
-      - name: Install Rust
+
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-      - name: Verify Tests Pass
-        run: cargo test --verbose
-      - name: Publish
+
+      - name: Setup Node.js & PNPM
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'rbat-client/pnpm-lock.yaml'
+
+      # Step 1: Publish project-c (rbat-core, crate name: rbat) to Crates.io
+      - name: Publish rbat-core to Crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p rbat
+        run: |
+          echo "Publishing rbat (project-c) to crates.io..."
+          # If registry token is not provided (e.g. testing), run dry-run to verify package packaging
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "CARGO_REGISTRY_TOKEN is not set. Running dry-run..."
+            cargo publish -p rbat --dry-run
+          else
+            cargo publish -p rbat
+          fi
+
+      # Step 2: Wait for Crates.io index synchronization
+      - name: Delay for Crates.io Registry Sync
+        run: |
+          echo "Waiting 25 seconds for the index to update before publishing dependent server..."
+          sleep 25
+
+      # Step 3: Prepare and Publish project-b (rbat-server) to Crates.io
+      - name: Update rbat-server dependency and Publish to Crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          echo "Rewriting path dependency in rbat-server/Cargo.toml..."
+          ./scripts/prepare-server-publish.js
+          
+          echo "Publishing rbat-server to crates.io..."
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "CARGO_REGISTRY_TOKEN is not set. Running dry-run..."
+            cargo publish -p rbat-server --dry-run
+          else
+            cargo publish -p rbat-server
+          fi
+
+      # Step 4: Run Deployment Hook & Build/Push Docker Images
+      - name: Run Deployment Hook & Build/Push Docker Images
+        env:
+          DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY || 'ghcr.io' }}
+          DOCKER_NAMESPACE: ${{ secrets.DOCKER_NAMESPACE || github.repository_owner }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME || github.actor }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD || secrets.GITHUB_TOKEN }}
+        run: |
+          # Convert namespace to lowercase (required for Docker registry tagging)
+          export DOCKER_NAMESPACE=$(echo "$DOCKER_NAMESPACE" | tr '[:upper:]' '[:lower:]')
+          ./scripts/deploy.sh ${{ env.VERSION }}
+
+      # Step 5: Automatically create GitHub Release Draft Page
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/stable-* ]]; then
+            echo "Creating GitHub Release draft for ${{ github.ref_name }}..."
+            gh release create "${{ github.ref_name }}" \
+              --title "Stable Release v${{ env.VERSION }}" \
+              --generate-notes \
+              --draft
+          else
+            echo "Workflow was not triggered by a release tag. Skipping GitHub Release creation..."
+          fi
+
+

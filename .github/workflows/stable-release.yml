@@ -1,0 +1,91 @@
+name: Stable Release Gate & Tagging
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Target release version (e.g., 1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-tag:
+    name: Validate Code & Push Tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          # Use RELEASE_PAT if available to trigger downstream workflows on tag push
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler jsonpx || {
+            sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler
+          }
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node.js & PNPM
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'rbat-client/pnpm-lock.yaml'
+
+      - name: Run Workspace Rust Unit Tests
+        run: cargo test --workspace --all-targets --verbose
+
+      - name: Run Client Build Check
+        run: |
+          pnpm --dir rbat-client install --frozen-lockfile
+          pnpm --dir rbat-client build
+
+      - name: Run SemVer Checks
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          crate: rbat
+          # checks the public API of rbat-core against crates.io baseline
+
+      - name: Run E2E Integration Tests
+        run: ./scripts/run-integration-tests.sh
+        env:
+          CI: "true"
+
+      - name: Configure Git Author
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump Project Versions
+        run: ./scripts/bump-version.js ${{ github.event.inputs.version }}
+
+      - name: Commit and Push Tag
+        run: |
+          git add rbat-core/Cargo.toml rbat-server/Cargo.toml rbat-client/package.json
+          git commit -m "chore(release): bump version to ${{ github.event.inputs.version }} [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}
+          
+          TAG_NAME="stable-${{ github.event.inputs.version }}"
+          echo "Creating and pushing tag: $TAG_NAME"
+          git tag -a "$TAG_NAME" -m "Stable Release v${{ github.event.inputs.version }}"
+          git push origin "$TAG_NAME"

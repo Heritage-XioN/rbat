@@ -23,7 +23,8 @@ To ensure a productive and welcoming community, please read and follow our [Code
    * Run `cargo clippy` to check for common lints and errors.
 6. **Run Tests**: Ensure all tests pass with `cargo test`.
 7. **Commit Changes**: Use clear, concise commit messages.
-8. **Push & Open PR**: Push to your fork and submit a PR to the `main` branch.
+8. **Run Pre-Release Validation**: Run `./scripts/validate-release.sh` locally to ensure all integration and unit tests pass.
+9. **Push & Open PR**: Push to your fork and submit a PR to the `master` branch.
 
 ## Development Setup
 
@@ -40,6 +41,7 @@ The workspace is structured as a cargo workspace containing:
 - Check compilation: `cargo check`
 - Run tests: `cargo test`
 - Build release targets: `cargo build --release`
+- Run full pre-release validation: `./scripts/validate-release.sh`
 
 ## Code Style
 
