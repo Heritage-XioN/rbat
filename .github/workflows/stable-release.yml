@@ -60,6 +60,14 @@ jobs:
           pnpm --dir rbat-client install --frozen-lockfile
           pnpm --dir rbat-client build
 
+      - name: Patch lightningcss for fullbleed (crates.io baseline build fix)
+        run: |
+          mkdir -p /tmp/lightningcss-src
+          curl -L -s https://static.crates.io/crates/lightningcss/lightningcss-1.0.0-alpha.70.crate | tar -xz -C /tmp/lightningcss-src --strip-components=1
+          mkdir -p .cargo
+          echo '[patch.crates-io]' > .cargo/config.toml
+          echo 'lightningcss = { path = "/tmp/lightningcss-src" }' >> .cargo/config.toml
+
       - name: Run SemVer Checks
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:

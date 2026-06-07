@@ -13,6 +13,26 @@ echo -e "${BLUE}=====================================================${NC}"
 echo -e "${BLUE}            RBAT Pre-Release Validation              ${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 
+# Define cleanup function for cargo config
+cleanup_config() {
+  echo -e "\n${YELLOW}🧹 Cleaning up temporary cargo configuration...${NC}"
+  rm -f .cargo/config.toml 2>/dev/null || true
+  rmdir .cargo 2>/dev/null || true
+}
+# Register cleanup to run on exit, interrupt, or termination
+trap cleanup_config EXIT
+
+# Setup temporary cargo patch config to fix crates.io baseline compile error in cargo-semver-checks
+echo -e "\n${YELLOW}📦 Setting up temporary lightningcss patch...${NC}"
+mkdir -p /tmp/lightningcss-src
+if [ ! -f "/tmp/lightningcss-src/Cargo.toml" ]; then
+  echo "Downloading lightningcss source crate from crates.io..."
+  curl -L -s https://static.crates.io/crates/lightningcss/lightningcss-1.0.0-alpha.70.crate | tar -xz -C /tmp/lightningcss-src --strip-components=1
+fi
+mkdir -p .cargo
+echo '[patch.crates-io]' > .cargo/config.toml
+echo 'lightningcss = { path = "/tmp/lightningcss-src" }' >> .cargo/config.toml
+
 # 1. Verify workspace compilation and unit tests
 echo -e "\n${YELLOW}🧪 1. Running Workspace Unit Tests...${NC}"
 cargo test --workspace --all-targets --verbose
