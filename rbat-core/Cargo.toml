@@ -24,8 +24,9 @@ thiserror = { workspace = true }
 yara = { version = "0.31.0", features = ["vendored"] }
 csv = "1.4.0"
 chrono = { workspace = true }
-fullbleed = "0.6.11"
 askama = "0.16.0"
+fullbleed = "0.6.11"
+lightningcss = "=1.0.0-alpha.70"
 rayon = { workspace = true }
 indicatif = { workspace = true }
 tui-banner = { workspace = true }

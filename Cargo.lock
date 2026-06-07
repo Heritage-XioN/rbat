@@ -3631,6 +3631,7 @@ dependencies = [
  "fullbleed",
  "goblin",
  "indicatif",
+ "lightningcss",
  "object 0.39.1",
  "ratatui",
  "rayon",
