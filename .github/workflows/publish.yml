@@ -10,6 +10,9 @@ permissions:
   contents: read
   packages: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   publish:
     name: Publish Packages & Deploy
@@ -54,25 +57,25 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: 'rbat-client/pnpm-lock.yaml'
 
-      # Step 1: Publish rbat to Crates.io
-      - name: Publish rbat-core to Crates.io
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          echo "Publishing rbat (project-c) to crates.io..."
-          # If registry token is not provided (e.g. testing), run dry-run to verify package packaging
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "CARGO_REGISTRY_TOKEN is not set. Running dry-run..."
-            cargo publish -p rbat --dry-run
-          else
-            cargo publish -p rbat
-          fi
-
-      # Step 2: Wait for Crates.io index synchronization
-      - name: Delay for Crates.io Registry Sync
-        run: |
-          echo "Waiting 25 seconds for the index to update before publishing dependent server..."
-          sleep 25
+#       # Step 1: Publish rbat to Crates.io
+#       - name: Publish rbat-core to Crates.io
+#         env:
+#           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+#         run: |
+#           echo "Publishing rbat (project-c) to crates.io..."
+#           # If registry token is not provided (e.g. testing), run dry-run to verify package packaging
+#           if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+#             echo "CARGO_REGISTRY_TOKEN is not set. Running dry-run..."
+#             cargo publish -p rbat --dry-run
+#           else
+#             cargo publish -p rbat
+#           fi
+# 
+#       # Step 2: Wait for Crates.io index synchronization
+#       - name: Delay for Crates.io Registry Sync
+#         run: |
+#           echo "Waiting 25 seconds for the index to update before publishing dependent server..."
+#           sleep 25
 
       # Step 3: Publish rbat-server to Crates.io
       - name: Publish rbat-server to Crates.io

@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y protobuf-compiler clang libclang-dev &&
 
 # Copy workspace configuration and source directories
 COPY Cargo.toml Cargo.lock ./
-COPY proto ./proto
 COPY rbat-server ./rbat-server
 COPY rbat-core ./rbat-core
 

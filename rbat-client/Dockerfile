@@ -44,7 +44,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 
 # Copy application source code and protobuf definition
 COPY rbat-client .
-COPY proto ../proto
+COPY rbat-server/proto ../rbat-server/proto
 
 ENV NODE_ENV=production
 
@@ -87,7 +87,7 @@ ENV HOSTNAME="0.0.0.0"
 # ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copy the proto directory so it is available at runtime
-COPY --from=builder /proto ../proto
+COPY --from=builder /rbat-server/proto ../rbat-server/proto
 
 # Copy production assets
 COPY --from=builder --chown=node:node /app/public ./public

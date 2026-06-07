@@ -5,17 +5,20 @@ on:
     branches: [ master ]
     paths:
       - 'rbat-client/**'
-      - 'proto/**'
+      - 'rbat-server/proto/**'
       - '.github/workflows/ci-client.yml'
   push:
     branches: [ master ]
     paths:
       - 'rbat-client/**'
-      - 'proto/**'
+      - 'rbat-server/proto/**'
       - '.github/workflows/ci-client.yml'
 
 permissions:
   contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

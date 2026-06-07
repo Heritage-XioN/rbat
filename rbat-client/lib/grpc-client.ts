@@ -5,7 +5,10 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import type { ProtoGrpcType } from "./proto/transfer";
 
-const PROTO_PATH = path.join(process.cwd(), "../proto/transfer.proto");
+const PROTO_PATH = path.join(
+  process.cwd(),
+  "../rbat-server/proto/transfer.proto",
+);
 
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   keepCase: true,
