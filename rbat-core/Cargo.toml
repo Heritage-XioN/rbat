@@ -1,6 +1,6 @@
 [package]
 name = "rbat"
-version = "0.2.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["Heritage-XioN"]
 description = "A terminal-native binary analysis tool for security researchers and reverse engineers."
