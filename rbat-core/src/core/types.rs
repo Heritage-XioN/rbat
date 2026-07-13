@@ -182,3 +182,49 @@ pub struct SectionRange {
     /// Name of the binary section (e.g. `".text"`, `"__TEXT"`).
     pub name: String,
 }
+
+/// A single instruction with simplified, owned properties for serializability.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstructionInfo {
+    /// The virtual memory address of the instruction.
+    pub address: u64,
+    /// The instruction mnemonic (e.g. `"mov"`, `"jmp"`).
+    pub mnemonic: String,
+    /// The instruction operands string (e.g. `"rax, rcx"`).
+    pub op_str: String,
+}
+
+/// Represents a basic block: a straight-line sequence of execution with a single entry and exit.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BasicBlock {
+    /// The start virtual memory address of the block.
+    pub start_address: u64,
+    /// The end virtual memory address of the block.
+    pub end_address: u64,
+    /// The set of instructions belonging to this block.
+    pub instructions: Vec<InstructionInfo>,
+}
+
+/// Types of control flow edges connecting basic blocks.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum EdgeType {
+    /// Sequential execution continuation.
+    FallThrough,
+    /// Taken branch of a conditional jump.
+    ConditionalTrue,
+    /// Not-taken branch of a conditional jump.
+    ConditionalFalse,
+    /// Unconditional jump target.
+    Unconditional,
+    /// Subroutine call target.
+    Call,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstructionClass {
+    Normal,
+    ConditionalJump,
+    UnconditionalJump,
+    Call,
+    Return,
+}

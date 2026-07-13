@@ -4,6 +4,7 @@
 //! error definitions, plugins, traits, and types forming the static analysis library.
 
 pub mod analyzer;
+pub mod cfg;
 pub mod cli;
 mod disassembler;
 pub mod error;
@@ -16,12 +17,13 @@ pub mod types;
 pub mod yarahandler;
 
 pub use crate::core::{
+    cfg::ControlFlowGraph,
     disassembler::{BinaryArch, BinaryOS, Factory},
     error::RbatError,
     heuristics::{disassemble_section, packer_sig_check, string_check},
     types::{
-        AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BinaryMetadata, Confidence,
-        Finding, MapValue, RiskAssessment, SectionRange, YaraMatches,
+        AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryMetadata,
+        Confidence, EdgeType, Finding, MapValue, RiskAssessment, SectionRange, YaraMatches,
     },
 };
 

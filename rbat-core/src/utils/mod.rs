@@ -3,6 +3,7 @@
 //! This module groups all helper utilities (such as formats, scoring calculations, SVG visualizations,
 //! text asset parsers, and test fixture generators) supporting the library.
 
+pub mod cfg;
 pub mod csv;
 pub mod entropy;
 pub mod get_metadata;
