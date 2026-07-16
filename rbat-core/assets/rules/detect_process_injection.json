@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "name": "Privilege Escalation: Process Injection",
+    "description": "Detects suspicious API calls related to remote memory allocation, writing process memory, or remote execution.",
+    "mitre_attack": "T1055",
+    "severity": "Critical",
+    "category": "privilege_escalation",
+    "weight": 35
+  },
+  "condition": {
+    "or": [
+      { "feature": { "api": "VirtualAllocEx" } },
+      { "feature": { "api": "WriteProcessMemory" } },
+      { "feature": { "api": "CreateRemoteThread" } },
+      { "feature": { "api": "NtCreateThreadEx" } }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "name": "Evasion: Code Caves Detected",
+    "description": "Large blocks of executable null bytes or NOP sleds detected, indicating potential payload injection sites.",
+    "mitre_attack": "T1027.009",
+    "severity": "High",
+    "category": "defense_evasion",
+    "weight": 25
+  },
+  "condition": {
+    "feature": "code_cave"
+  }
+}

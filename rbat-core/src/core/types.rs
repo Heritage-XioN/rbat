@@ -228,3 +228,43 @@ pub enum InstructionClass {
     Call,
     Return,
 }
+
+/// Metadata describing a security rule and its mapped threat techniques.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuleMeta {
+    /// The unique rule identifier name.
+    pub name: String,
+    /// Detailed behavior explanation.
+    pub description: String,
+    /// Mapped MITRE ATT&CK technique ID (e.g. `"T1055"`).
+    pub mitre_attack: String,
+    /// Quantitative threat severity rating (e.g. `"Low"`, `"Medium"`, `"High"`, `"Critical"`).
+    pub severity: String,
+    /// MITRE ATT&CK tactic category (e.g. `"defense_evasion"`, `"privilege_escalation"`).
+    pub category: String,
+    /// The individual weight contribution of this rule when matched (0-100).
+    pub weight: u32,
+}
+
+/// A leaf feature assertion matching code, string, or structural anomalies.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureCondition {
+    /// Matches if an imported API function contains this pattern.
+    Api(String),
+    /// Matches if an extracted string contains this pattern.
+    String(String),
+    /// Matches if a blacklisted assembly mnemonic is found.
+    Mnemonic(String),
+    /// Matches if a specific binary section's entropy is equal to or greater than `min`.
+    Entropy {
+        /// The target binary section name (e.g. `".text"`).
+        section: String,
+        /// The minimum Shannon entropy boundary (0.0 to 8.0).
+        min: f64,
+    },
+    /// Matches if any code caves were detected.
+    CodeCave,
+    /// Matches if any packer signatures were detected.
+    PackerSig,
+}

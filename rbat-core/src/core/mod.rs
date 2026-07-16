@@ -8,9 +8,11 @@ pub mod cfg;
 pub mod cli;
 mod disassembler;
 pub mod error;
+pub mod features;
 pub mod heuristics;
 pub mod parser;
 pub mod plugins;
+pub mod rule;
 pub mod traits;
 pub mod tui;
 pub mod types;
@@ -20,10 +22,13 @@ pub use crate::core::{
     cfg::ControlFlowGraph,
     disassembler::{BinaryArch, BinaryOS, Factory},
     error::RbatError,
+    features::FeatureSet,
     heuristics::{disassemble_section, packer_sig_check, string_check},
+    rule::{Rule, RuleCondition},
     types::{
         AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryMetadata,
-        Confidence, EdgeType, Finding, MapValue, RiskAssessment, SectionRange, YaraMatches,
+        Confidence, EdgeType, FeatureCondition, Finding, MapValue, RiskAssessment, RuleMeta,
+        SectionRange, YaraMatches,
     },
 };
 

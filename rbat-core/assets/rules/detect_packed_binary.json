@@ -1,0 +1,16 @@
+{
+  "meta": {
+    "name": "Evasion: Obfuscation / Packed Executable",
+    "description": "Detects signs of crypters, packers, or high-entropy executable sections indicative of compressed/encrypted code.",
+    "mitre_attack": "T1027",
+    "severity": "Medium",
+    "category": "defense_evasion",
+    "weight": 25
+  },
+  "condition": {
+    "or": [
+      { "feature": "packer_sig" },
+      { "feature": { "entropy": { "section": ".text", "min": 7.2 } } }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "name": "Evasion: Anti-Debugging or Anti-VM Instructions",
+    "description": "Detects presence of CPU instructions often used for virtual machine detection or debugger checks.",
+    "mitre_attack": "T1622",
+    "severity": "High",
+    "category": "defense_evasion",
+    "weight": 30
+  },
+  "condition": {
+    "or": [
+      { "feature": { "mnemonic": "rdtsc" } },
+      { "feature": { "mnemonic": "cpuid" } },
+      { "feature": { "api": "IsDebuggerPresent" } }
+    ]
+  }
+}

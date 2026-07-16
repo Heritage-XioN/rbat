@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "name": "Evasion: High Section Entropy",
+    "description": "Executable section entropy exceeds 7.5, highly indicative of packed, encrypted, or compressed code.",
+    "mitre_attack": "T1027.002",
+    "severity": "Critical",
+    "category": "defense_evasion",
+    "weight": 30
+  },
+  "condition": {
+    "feature": { "entropy": { "section": ".text", "min": 7.5 } }
+  }
+}
