@@ -144,18 +144,13 @@ pub fn analyze_batch(buffer: &[u8]) -> Result<(AnalysisResult, RiskAssessment)> 
         }
     }
 
-    let score = calculate_risk(
-        &analysis_result.section_entropy,
-        analysis_result
-            .string_values
-            .values()
-            .map(|v| v.len())
-            .sum(),
-        analysis_result.api_hooking.len(),
-        analysis_result.process_injection.len(),
-        !analysis_result.code_cave.is_empty(),
-        !analysis_result.packer_signatures.is_empty(),
-    );
+    // Evaluate declarative semantic rules
+    let features = crate::core::features::FeatureSet::from_analysis_result(&analysis_result);
+    let rules = crate::core::Rule::load_embedded();
+    let matched_rules = crate::core::Rule::evaluate(&features, &rules);
+
+    let score = calculate_risk(&matched_rules);
+
     Ok((analysis_result, score))
 }
 

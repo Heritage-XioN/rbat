@@ -128,18 +128,10 @@ fn main() -> Result<()> {
     }
 
     // computes risk assessment
-    let risk_assessment = calculate_risk(
-        &analysis_result.section_entropy,
-        analysis_result
-            .string_values
-            .values()
-            .map(|v| v.len())
-            .sum(),
-        analysis_result.api_hooking.len(),
-        analysis_result.process_injection.len(),
-        !analysis_result.code_cave.is_empty(),
-        !analysis_result.packer_signatures.is_empty(),
-    );
+    let features = rbat::core::features::FeatureSet::from_analysis_result(&analysis_result);
+    let rules = rbat::core::Rule::load_embedded();
+    let matched_rules = rbat::core::Rule::evaluate(&features, &rules);
+    let risk_assessment = calculate_risk(&matched_rules);
 
     // output directory
     let base_dir = cli.out_dir.unwrap_or_else(|| std::path::PathBuf::from("."));
