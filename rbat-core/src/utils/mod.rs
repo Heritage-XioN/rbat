@@ -7,7 +7,6 @@ pub mod cfg;
 pub mod csv;
 pub mod entropy;
 pub mod get_metadata;
-pub mod get_txt;
 pub mod json;
 pub mod pdf;
 pub mod raw_padding;

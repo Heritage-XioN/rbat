@@ -1,7 +1,0 @@
-rdtsc
-int1
-rdpmc
-sidt
-sldt
-sgdt
-smsw

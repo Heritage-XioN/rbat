@@ -19,7 +19,6 @@
 //! # }
 //! ```
 
-use crate::utils::get_txt::get_txt_from_file;
 use crate::{core::SectionRange, utils::entropy::calculate_entropy};
 use goblin::Object;
 use std::collections::{HashMap, HashSet};
@@ -355,7 +354,25 @@ impl<'bin> Parser<'bin> {
     /// Scans for suspicious functions related to process injection, memory manipulation,
     /// or dynamic code loading across ELF, PE, and Mach-O binaries.
     pub fn check_process_injec(&self) -> Result<HashSet<String>> {
-        let blacklist = get_txt_from_file("blacklisted_process_injec.txt")?;
+        let blacklist = &[
+            "ptrace",
+            "process_vm_read",
+            "process_vm_write",
+            "VirtualAllocEx",
+            "VirtualProtectEx",
+            "WriteProcessMemory",
+            "CreateRemoteThread",
+            "NtCreateThreadEx",
+            "QueueUserAPC",
+            "RtlCreateUserThread",
+            "task_for_pid",
+            "pid_for_task",
+            "mach_vm_allocate",
+            "mach_vm_write",
+            "mach_vm_protect",
+            "thread_create_running",
+            "pthread_create_from_mach_thread",
+        ];
         let mut sus_func: HashSet<String> = HashSet::new();
 
         match &self.binary_object {
@@ -364,7 +381,7 @@ impl<'bin> Parser<'bin> {
                 for dy in &elf.dynsyms {
                     if dy.st_shndx == 0
                         && let Some(name) = elf.dynstrtab.get_at(dy.st_name)
-                        && blacklist.contains(&name.to_string())
+                        && blacklist.contains(&name)
                     {
                         sus_func.insert(name.to_owned());
                     }
@@ -376,7 +393,7 @@ impl<'bin> Parser<'bin> {
                     let import_name = import.name.to_string();
                     if blacklist
                         .iter()
-                        .any(|item: &String| item.eq_ignore_ascii_case(&import_name))
+                        .any(|item: &&str| item.eq_ignore_ascii_case(&import_name))
                     {
                         sus_func.insert(import_name);
                     }
@@ -388,7 +405,7 @@ impl<'bin> Parser<'bin> {
                     let normalized = name.trim_start_matches('_');
                     blacklist
                         .iter()
-                        .any(|item: &String| item.eq_ignore_ascii_case(normalized))
+                        .any(|item: &&str| item.eq_ignore_ascii_case(normalized))
                 };
 
                 let mut collect_from_macho = |macho: &goblin::mach::MachO<'_>| -> Result<()> {
@@ -435,7 +452,23 @@ impl<'bin> Parser<'bin> {
         section_ranges: &[SectionRange],
     ) -> Result<HashMap<String, u64>> {
         let mut api_hooking_func: HashMap<String, u64> = HashMap::new();
-        let blacklist = get_txt_from_file("api_hooking_apis.txt")?;
+        let blacklist = &[
+            "SetWindowsHookEx",
+            "UnhookWindowsHookEx",
+            "CallNextHookEx",
+            "SetWinEventHook",
+            "UnhookWinEventHook",
+            "DetourTransactionBegin",
+            "DetourUpdateThread",
+            "DetourAttach",
+            "MH_Initialize",
+            "MH_CreateHook",
+            "frida_agent_main",
+            "EasyHook",
+            "hook_function",
+            "unhook_function",
+            "trampoline",
+        ];
 
         match &self.binary_object {
             Object::Elf(elf) => {
@@ -486,7 +519,7 @@ impl<'bin> Parser<'bin> {
         }
 
         // Supplement with YARA scan for patterns and strings
-        let yara = YaraHandler::new("api_hooking.yar".to_owned());
+        let yara = YaraHandler::new("yara/api_hooking.yar".to_owned());
         if let Ok(rules) = yara.compile_yara_rule()
             && let Ok(matches) = yara.scan_mem(&rules, self.buffer, section_ranges)
         {

@@ -1,6 +1,6 @@
 //! # YARA Rules Compilation and Memory Scanning
 //!
-//! This module coordinates compiling rules from embedded assets (e.g. `api_hooking.yar`)
+//! This module coordinates compiling rules from embedded assets (e.g. `yara/api_hooking.yar`)
 //! and scanning raw byte buffers to extract signature matches with section offsets.
 
 use super::{Asset, RbatError, Result, YaraMatches};
@@ -14,7 +14,7 @@ use yara::{Compiler, Rules};
 /// ```rust
 /// use rbat::core::yarahandler::YaraHandler;
 ///
-/// let handler = YaraHandler::new("api_hooking.yar".to_owned());
+/// let handler = YaraHandler::new("yara/api_hooking.yar".to_owned());
 /// let rules = handler.compile_yara_rule().unwrap();
 /// let matches = handler.scan_mem(&rules, &[0x00; 100], &[]).unwrap();
 /// ```
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn test_compile_yara_rule_valid() {
         // Use an existing rule file from assets
-        let handler = YaraHandler::new("api_hooking.yar".to_string());
+        let handler = YaraHandler::new("yara/api_hooking.yar".to_string());
         let result = handler.compile_yara_rule();
         assert!(result.is_ok());
     }

@@ -8,7 +8,6 @@ use std::sync::OnceLock;
 
 use crate::core::SectionRange;
 use crate::core::{BinaryArch, BinaryOS, Factory, Result, YaraMatches, yarahandler::YaraHandler};
-use crate::utils::get_txt::get_txt_from_file;
 use crate::utils::raw_padding::scan_raw_padding;
 
 static SUSPICIOUS_STRINGS_RULES: OnceLock<yara::Rules> = OnceLock::new();
@@ -43,8 +42,10 @@ pub fn disassemble_section(
     let blacklist = if let Some(bl) = BLACKLISTED_MNEMONICS.get() {
         bl
     } else {
-        let list = get_txt_from_file("blacklisted_mnemonics.txt")?;
-        let set: HashSet<String> = list.into_iter().collect();
+        let set: HashSet<String> = ["rdtsc", "int1", "rdpmc", "sidt", "sldt", "sgdt", "smsw"]
+            .iter()
+            .map(|&s| s.to_string())
+            .collect();
         let _ = BLACKLISTED_MNEMONICS.set(set);
         BLACKLISTED_MNEMONICS.get().unwrap()
     };
@@ -116,12 +117,12 @@ pub fn string_check(
     let rules = if let Some(rules) = SUSPICIOUS_STRINGS_RULES.get() {
         rules
     } else {
-        let handler = YaraHandler::new("suspicious_strings.yar".to_owned());
+        let handler = YaraHandler::new("yara/suspicious_strings.yar".to_owned());
         let rules = handler.compile_yara_rule()?;
         let _ = SUSPICIOUS_STRINGS_RULES.set(rules);
         SUSPICIOUS_STRINGS_RULES.get().unwrap()
     };
-    let handler = YaraHandler::new("suspicious_strings.yar".to_owned());
+    let handler = YaraHandler::new("yara/suspicious_strings.yar".to_owned());
     let results = handler.scan_mem(rules, buffer, section_ranges)?;
     Ok(results)
 }
@@ -137,12 +138,12 @@ pub fn packer_sig_check(
     let rules = if let Some(rules) = PACKER_SIGNATURES_RULES.get() {
         rules
     } else {
-        let handler = YaraHandler::new("packer_signatures.yar".to_owned());
+        let handler = YaraHandler::new("yara/packer_signatures.yar".to_owned());
         let rules = handler.compile_yara_rule()?;
         let _ = PACKER_SIGNATURES_RULES.set(rules);
         PACKER_SIGNATURES_RULES.get().unwrap()
     };
-    let handler = YaraHandler::new("packer_signatures.yar".to_owned());
+    let handler = YaraHandler::new("yara/packer_signatures.yar".to_owned());
     let results = handler.scan_mem(rules, buffer, section_ranges)?;
     Ok(results)
 }
