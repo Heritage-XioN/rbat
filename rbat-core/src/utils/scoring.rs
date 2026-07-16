@@ -1,153 +1,87 @@
-//! # Security Scoring Engine
+//! # Category-Based Security Scoring Engine
 //!
-//! This module implements the classification system that evaluates multiple static binary analysis
-//! indicators (such as entropy, packer matching, process injection APIs, code caves) to produce
-//! a numeric risk score (0 to 100) and actionable advice recommendations.
+//! This module implements a weighted category scoring system that evaluates matched
+//! rule findings grouped by MITRE ATT&CK tactics. Each category has a maximum
+//! contribution cap, preventing double-counting within the same tactic.
 //!
 //! # Example
 //! ```rust
-//! use std::collections::HashMap;
 //! use rbat::utils::scoring::calculate_risk;
+//! use rbat::core::RuleMeta;
 //!
-//! let mut entropy = HashMap::new();
-//! entropy.insert(".text".to_string(), 7.8);
-//! let assessment = calculate_risk(&entropy, 0, 0, 0, false, false);
+//! let matches = vec![
+//!     RuleMeta {
+//!         name: "Test".to_string(),
+//!         description: "Test rule".to_string(),
+//!         mitre_attack: "T1055".to_string(),
+//!         severity: "High".to_string(),
+//!         category: "privilege_escalation".to_string(),
+//!         weight: 35,
+//!     },
+//! ];
+//! let assessment = calculate_risk(&matches);
 //! println!("Risk: {} ({})", assessment.score, assessment.severity);
 //! ```
 
+use crate::core::RuleMeta;
 use crate::core::{Confidence, Finding, RiskAssessment};
-use std::{cmp, collections::HashMap};
+use std::cmp;
+use std::collections::HashMap;
 
-/// Calculates a final risk score (0-100) based on multiple security heuristics.
+/// Maximum contribution cap per MITRE ATT&CK tactic category.
+fn category_cap(category: &str) -> u32 {
+    match category {
+        "execution" => 25,
+        "persistence" => 20,
+        "privilege_escalation" => 30,
+        "defense_evasion" => 35,
+        "discovery" => 15,
+        "collection" => 15,
+        "command_and_control" => 25,
+        "impact" => 20,
+        _ => 20,
+    }
+}
+
+/// Calculates a final risk score (0-100) using weighted category scoring.
 ///
-/// The scoring system weights different findings based on their severity and confidence:
-/// - **Entropy**: Critical weight (40+) for high entropy (.text sections >= 7.5).
-/// - **Network Indicators**: High weight (25) for multiple C2-like strings.
-/// - **Process Injection**: Cumulative weight for suspicious API imports.
-/// - **Evasion**: High weight (35) for detected code caves (NOP sleds).
-/// - **Packers**: Critical weight (45) for known packer signature matches.
-pub fn calculate_risk(
-    section_entropy: &HashMap<String, f64>,
-    network_indicators: usize,
-    suspicious_apis: usize,
-    process_injection: usize,
-    has_code_caves: bool,
-    has_packer_signatures: bool,
-) -> RiskAssessment {
-    let mut score: u32 = 0;
+/// Each matched rule contributes its weight to its declared MITRE ATT&CK tactic
+/// category. Category contributions are individually capped to prevent
+/// double-counting within the same tactic. The final score is the sum of
+/// all capped category contributions.
+pub fn calculate_risk(matched_rules: &[RuleMeta]) -> RiskAssessment {
+    let mut category_scores: HashMap<String, u32> = HashMap::new();
     let mut findings: Vec<Finding> = Vec::new();
 
-    // Heuristic 1: Section Entropy (Focus on .text / executable sections)
-    let text_entropy = section_entropy
-        .get(".text")
-        .or_else(|| section_entropy.get("__text"))
-        .or_else(|| section_entropy.get("CODE"))
-        .cloned()
-        .unwrap_or_else(|| {
-            // Fallback: max entropy of all sections
-            section_entropy.values().cloned().fold(0.0, f64::max)
+    for rule in matched_rules {
+        let confidence = match rule.severity.to_lowercase().as_str() {
+            "low" => Confidence::Low,
+            "medium" => Confidence::Medium,
+            "high" => Confidence::High,
+            "critical" => Confidence::Critical,
+            _ => Confidence::Medium,
+        };
+
+        findings.push(Finding {
+            indicator: rule.name.clone(),
+            description: format!("{} (MITRE ATT&CK: {})", rule.description, rule.mitre_attack),
+            confidence,
+            weight: rule.weight,
         });
 
-    if text_entropy >= 7.5 {
-        score += 40;
-        findings.push(Finding {
-            indicator: "High Section Entropy".to_string(),
-            description: format!(
-                "Executable section entropy is {:.2}. Highly indicative of packed or encrypted code.",
-                text_entropy
-            ),
-            confidence: Confidence::Critical,
-            weight: 40,
-        });
-    } else if text_entropy >= 6.8 {
-        score += 15;
-        findings.push(Finding {
-            indicator: "Elevated Section Entropy".to_string(),
-            description: format!(
-                "Executable section entropy is {:.2}, suggesting compressed data or minor obfuscation.",
-                text_entropy
-            ),
-            confidence: Confidence::Medium,
-            weight: 15,
-        });
+        let entry = category_scores.entry(rule.category.clone()).or_insert(0);
+        *entry += rule.weight;
     }
 
-    // Heuristic 2: Network Indicators (Requires multiple or high-confidence matches)
-    if network_indicators > 0 {
-        let weight = if network_indicators > 3 { 25 } else { 10 };
-        score += weight;
-        findings.push(Finding {
-            indicator: "Network Indicators".to_string(),
-            description: format!(
-                "Detected {} network-related strings (URLs, IPs, C2 patterns).",
-                network_indicators
-            ),
-            confidence: if network_indicators > 3 {
-                Confidence::High
-            } else {
-                Confidence::Low
-            },
-            weight,
-        });
+    // Apply per-category caps and sum
+    let mut total_score: u32 = 0;
+    for (category, raw_score) in &category_scores {
+        let cap = category_cap(category);
+        total_score += cmp::min(*raw_score, cap);
     }
 
-    // Heuristic 3: Process Injection & Suspicious APIs
-    if process_injection > 0 {
-        let weight = cmp::min(40, (process_injection * 15) as u32);
-        score += weight;
-        findings.push(Finding {
-            indicator: "Process Injection APIs".to_string(),
-            description: format!(
-                "Binary imports {} APIs often used for process injection or memory manipulation.",
-                process_injection
-            ),
-            confidence: Confidence::High,
-            weight,
-        });
-    }
+    let final_score = cmp::min(100, total_score);
 
-    if suspicious_apis > 0 {
-        let weight = cmp::min(20, (suspicious_apis * 5) as u32);
-        score += weight;
-        findings.push(Finding {
-            indicator: "Suspicious API Hooks".to_string(),
-            description: format!(
-                "Detected {} suspicious exported functions or API hooking patterns.",
-                suspicious_apis
-            ),
-            confidence: Confidence::Medium,
-            weight,
-        });
-    }
-
-    // Heuristic 4: Evasion Techniques
-    if has_code_caves {
-        score += 35;
-        findings.push(Finding {
-            indicator: "Code Caves".to_string(),
-            description:
-                "Large blocks of executable null bytes detected. Potential payload injection site."
-                    .to_string(),
-            confidence: Confidence::High,
-            weight: 35,
-        });
-    }
-
-    // Heuristic 5: Known Packer Signatures (Critical Confidence)
-    if has_packer_signatures {
-        score += 45;
-        findings.push(Finding {
-            indicator: "Known Packer".to_string(),
-            description: "Binary matches signatures of known packers (UPX, ASPack, PECompact, Themida, etc.).".to_string(),
-            confidence: Confidence::Critical,
-            weight: 45,
-        });
-    }
-
-    // the score is capped at 100
-    let final_score = cmp::min(100, score);
-
-    // Determine Severity and Recommendations based on final score
     let severity = match final_score {
         0..=25 => "Safe".to_string(),
         26..=60 => "Suspicious".to_string(),
@@ -195,40 +129,82 @@ mod tests {
 
     #[test]
     fn test_calculate_risk_safe() {
-        let entropy = HashMap::new();
-        let assessment = calculate_risk(&entropy, 0, 0, 0, false, false);
+        let matches: Vec<RuleMeta> = vec![];
+        let assessment = calculate_risk(&matches);
         assert_eq!(assessment.score, 0);
         assert_eq!(assessment.severity, "Safe");
         assert!(assessment.findings.is_empty());
     }
 
     #[test]
-    fn test_calculate_risk_malicious_packer() {
-        let mut entropy = HashMap::new();
-        entropy.insert(".text".to_string(), 8.0);
-        let assessment = calculate_risk(&entropy, 0, 0, 0, false, true);
-        // 40 (entropy) + 45 (packer) = 85
-        assert_eq!(assessment.score, 85);
-        assert_eq!(assessment.severity, "Malicious");
+    fn test_calculate_risk_single_category() {
+        let matches = vec![RuleMeta {
+            name: "Test Rule".to_string(),
+            description: "Test".to_string(),
+            mitre_attack: "T1055".to_string(),
+            severity: "Critical".to_string(),
+            category: "privilege_escalation".to_string(),
+            weight: 35,
+        }];
+        let assessment = calculate_risk(&matches);
+        // Cap for privilege_escalation is 30, so 35 gets capped to 30
+        assert_eq!(assessment.score, 30);
+        assert_eq!(assessment.severity, "Suspicious");
+        assert_eq!(assessment.findings.len(), 1);
+    }
+
+    #[test]
+    fn test_calculate_risk_multiple_categories() {
+        let matches = vec![
+            RuleMeta {
+                name: "Evasion Rule".to_string(),
+                description: "Test".to_string(),
+                mitre_attack: "T1027".to_string(),
+                severity: "High".to_string(),
+                category: "defense_evasion".to_string(),
+                weight: 30,
+            },
+            RuleMeta {
+                name: "Injection Rule".to_string(),
+                description: "Test".to_string(),
+                mitre_attack: "T1055".to_string(),
+                severity: "Critical".to_string(),
+                category: "privilege_escalation".to_string(),
+                weight: 35,
+            },
+        ];
+        let assessment = calculate_risk(&matches);
+        // defense_evasion: min(30, 35) = 30
+        // privilege_escalation: min(35, 30) = 30
+        // total = 60
+        assert_eq!(assessment.score, 60);
+        assert_eq!(assessment.severity, "Suspicious");
+    }
+
+    #[test]
+    fn test_calculate_risk_same_category_capped() {
+        let matches = vec![
+            RuleMeta {
+                name: "Rule A".to_string(),
+                description: "Test".to_string(),
+                mitre_attack: "T1027".to_string(),
+                severity: "High".to_string(),
+                category: "defense_evasion".to_string(),
+                weight: 25,
+            },
+            RuleMeta {
+                name: "Rule B".to_string(),
+                description: "Test".to_string(),
+                mitre_attack: "T1622".to_string(),
+                severity: "High".to_string(),
+                category: "defense_evasion".to_string(),
+                weight: 30,
+            },
+        ];
+        let assessment = calculate_risk(&matches);
+        // defense_evasion: min(25 + 30, 35) = 35
+        assert_eq!(assessment.score, 35);
+        assert_eq!(assessment.severity, "Suspicious");
         assert_eq!(assessment.findings.len(), 2);
-    }
-
-    #[test]
-    fn test_calculate_risk_suspicious() {
-        let mut entropy = HashMap::new();
-        entropy.insert(".text".to_string(), 6.9);
-        let assessment = calculate_risk(&entropy, 1, 0, 0, false, false);
-        assert_eq!(assessment.score, 25);
-        assert_eq!(assessment.severity, "Safe");
-    }
-
-    #[test]
-    fn test_calculate_risk_capped() {
-        let mut entropy = HashMap::new();
-        entropy.insert(".text".to_string(), 8.0);
-        let assessment = calculate_risk(&entropy, 10, 10, 10, true, true);
-        // 40 + 25 + 20 + 40 + 35 + 45 = 205 -> capped at 100
-        assert_eq!(assessment.score, 100);
-        assert_eq!(assessment.severity, "Malicious");
     }
 }
