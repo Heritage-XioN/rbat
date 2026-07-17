@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicBool;
 
 use super::{AnalysisProgress, AnalysisResult, MapValue, Result, RiskAssessment, parser::Parser};
 use crate::{
-    core::{AnalysisContext, traits::HeuristicPlugin},
+    core::{AnalysisContext, traits::HeuristicPlugin, types::InstructionInfo},
     utils::{scoring::calculate_risk, stream_error_helper::capture_error_and_cancel},
 };
 
@@ -55,6 +55,18 @@ where
         binary_data.get("text_bytes"),
         binary_data.get("entry_addr"),
     ) {
+        let factory = crate::core::disassembler::Factory::disasm(*os, *arch);
+        let cs = factory.disassemble()?;
+        let cs_insns = cs.disasm_all(text_bytes, *entry_addr)?;
+        let instructions: Vec<InstructionInfo> = cs_insns
+            .iter()
+            .map(|insn| InstructionInfo {
+                address: insn.address(),
+                mnemonic: insn.mnemonic().unwrap_or("").to_string(),
+                op_str: insn.op_str().unwrap_or("").to_string(),
+            })
+            .collect();
+
         let ctx = AnalysisContext {
             buffer,
             binary_object: &binary_object,
@@ -63,6 +75,7 @@ where
             arch: *arch,
             text_bytes,
             entry_addr: *entry_addr,
+            instructions: &instructions,
         };
 
         let plugins: Vec<Box<dyn HeuristicPlugin>> = vec![
@@ -73,6 +86,7 @@ where
             Box::new(crate::core::plugins::ApiHookingPlugin),
             Box::new(crate::core::plugins::ProcessInjectionPlugin),
             Box::new(crate::core::plugins::MetadataPlugin),
+            Box::new(crate::core::plugins::CfgPlugin),
         ];
 
         rayon::scope(|s| {
@@ -141,6 +155,7 @@ pub fn analyze_batch(buffer: &[u8]) -> Result<(AnalysisResult, RiskAssessment)> 
                 analysis_result.process_injection = process_injection
             }
             AnalysisProgress::BinaryMetadata(metadata) => analysis_result.metadata = metadata,
+            AnalysisProgress::CFG(cfg) => analysis_result.cfg = Some(cfg),
         }
     }
 

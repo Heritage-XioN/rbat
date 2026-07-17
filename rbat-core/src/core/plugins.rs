@@ -29,6 +29,7 @@
 //!     arch: BinaryArch::X64,
 //!     text_bytes: &buffer,
 //!     entry_addr: 0x1000,
+//!     instructions: &[],
 //! };
 //!
 //! let progress = MetadataPlugin.run(&ctx)?;
@@ -59,7 +60,7 @@ impl HeuristicPlugin for DisassemblyPlugin {
 
     fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
         let (code_cave, blacklisted_mnemonics) =
-            disassemble_section(ctx.text_bytes, &ctx.entry_addr, &ctx.os, &ctx.arch)?;
+            disassemble_section(ctx.instructions, ctx.text_bytes, ctx.entry_addr)?;
         Ok(AnalysisProgress::Disassembly((
             code_cave,
             blacklisted_mnemonics,
@@ -155,6 +156,20 @@ impl HeuristicPlugin for MetadataPlugin {
     }
 }
 
+/// A plugin that reconstructs the Control Flow Graph (CFG) from the disassembled binary section.
+pub struct CfgPlugin;
+
+impl HeuristicPlugin for CfgPlugin {
+    fn name(&self) -> &'static str {
+        "cfg"
+    }
+
+    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+        let cfg = crate::core::cfg::ControlFlowGraph::new(ctx.instructions, &ctx.arch);
+        Ok(AnalysisProgress::CFG(cfg))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,6 +198,7 @@ mod tests {
             arch: BinaryArch::X64,
             text_bytes: &[],
             entry_addr: 0x1000,
+            instructions: &[],
         };
 
         let result = MetadataPlugin.run(&ctx).unwrap();
@@ -213,6 +229,7 @@ mod tests {
             arch: BinaryArch::X64,
             text_bytes: &[],
             entry_addr: 0x1000,
+            instructions: &[],
         };
 
         let result = EntropyPlugin.run(&ctx).unwrap();
@@ -236,6 +253,14 @@ mod tests {
             crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
 
         let text_bytes = vec![0x90; 128];
+        let instructions = vec![
+            crate::core::InstructionInfo {
+                address: 0x1000,
+                mnemonic: "nop".to_string(),
+                op_str: "".to_string(),
+            };
+            128
+        ];
 
         let ctx = AnalysisContext {
             buffer: &buffer,
@@ -245,6 +270,7 @@ mod tests {
             arch: BinaryArch::X64,
             text_bytes: &text_bytes,
             entry_addr: 0x1000,
+            instructions: &instructions,
         };
 
         let result = DisassemblyPlugin.run(&ctx).unwrap();

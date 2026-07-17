@@ -3,7 +3,6 @@
 //! This module analyzes linear disassembler output to reconstruct basic blocks and
 //! model directed control flow transitions using graph topologies.
 
-use capstone::Insn;
 use petgraph::graph::DiGraph;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -27,29 +26,29 @@ pub struct ControlFlowGraph {
 
 impl ControlFlowGraph {
     /// Analyzes an instruction list to partition basic blocks and map execution transitions.
-    pub fn new(instructions: &[Insn], arch: &BinaryArch) -> Self {
+    pub fn new(instructions: &[InstructionInfo], arch: &BinaryArch) -> Self {
         let mut leaders = HashSet::new();
         if !instructions.is_empty() {
-            leaders.insert(instructions[0].address());
+            leaders.insert(instructions[0].address);
         }
 
         for (idx, insn) in instructions.iter().enumerate() {
-            let mnemonic = insn.mnemonic().unwrap_or("");
+            let mnemonic = insn.mnemonic.as_str();
             let class = classify_instruction(mnemonic, arch);
 
             match class {
                 InstructionClass::ConditionalJump
                 | InstructionClass::UnconditionalJump
                 | InstructionClass::Call => {
-                    if let Some(target) = parse_target_address(insn.op_str().unwrap_or("")) {
+                    if let Some(target) = parse_target_address(insn.op_str.as_str()) {
                         leaders.insert(target);
                     }
                     if idx + 1 < instructions.len() {
-                        leaders.insert(instructions[idx + 1].address());
+                        leaders.insert(instructions[idx + 1].address);
                     }
                 }
                 InstructionClass::Return if idx + 1 < instructions.len() => {
-                    leaders.insert(instructions[idx + 1].address());
+                    leaders.insert(instructions[idx + 1].address);
                 }
                 _ => {}
             }
@@ -57,7 +56,7 @@ impl ControlFlowGraph {
 
         let mut addr_to_idx = HashMap::new();
         for (idx, insn) in instructions.iter().enumerate() {
-            addr_to_idx.insert(insn.address(), idx);
+            addr_to_idx.insert(insn.address, idx);
         }
 
         let mut sorted_leaders: Vec<u64> = leaders.into_iter().collect();
@@ -88,18 +87,11 @@ impl ControlFlowGraph {
             }
 
             let block_insns = &instructions[start_idx..end_idx];
-            let inst_infos: Vec<InstructionInfo> = block_insns
-                .iter()
-                .map(|insn| InstructionInfo {
-                    address: insn.address(),
-                    mnemonic: insn.mnemonic().unwrap_or("").to_string(),
-                    op_str: insn.op_str().unwrap_or("").to_string(),
-                })
-                .collect();
+            let inst_infos = block_insns.to_vec();
 
             let basic_block = BasicBlock {
                 start_address: start_addr,
-                end_address: block_insns.last().unwrap().address(),
+                end_address: block_insns.last().unwrap().address,
                 instructions: inst_infos,
             };
 

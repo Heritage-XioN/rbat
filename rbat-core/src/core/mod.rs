@@ -27,8 +27,8 @@ pub use crate::core::{
     rule::{Rule, RuleCondition},
     types::{
         AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryMetadata,
-        Confidence, EdgeType, FeatureCondition, Finding, MapValue, RiskAssessment, RuleMeta,
-        SectionRange, YaraMatches,
+        Confidence, EdgeType, FeatureCondition, Finding, InstructionInfo, MapValue, RiskAssessment,
+        RuleMeta, SectionRange, YaraMatches,
     },
 };
 

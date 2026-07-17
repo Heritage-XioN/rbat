@@ -7,7 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use crate::core::SectionRange;
-use crate::core::{BinaryArch, BinaryOS, Factory, Result, YaraMatches, yarahandler::YaraHandler};
+use crate::core::{InstructionInfo, Result, YaraMatches, yarahandler::YaraHandler};
+
 use crate::utils::raw_padding::scan_raw_padding;
 
 static SUSPICIOUS_STRINGS_RULES: OnceLock<yara::Rules> = OnceLock::new();
@@ -29,10 +30,9 @@ type BlacklistedMnemonics = HashMap<String, Vec<u64>>;
 /// # Errors
 /// Returns `RbatError::DisassemblerError` if Capstone initialization or disassembly fails.
 pub fn disassemble_section(
+    instructions: &[InstructionInfo],
     bytes: &[u8],
-    entry_addr: &u64,
-    os: &BinaryOS,
-    arch: &BinaryArch,
+    entry_addr: u64,
 ) -> Result<(CodeCave, BlacklistedMnemonics)> {
     let mut code_cave: CodeCave = HashMap::new();
     let mut nop_addr: Vec<u64> = vec![];
@@ -50,16 +50,12 @@ pub fn disassemble_section(
         BLACKLISTED_MNEMONICS.get().unwrap()
     };
 
-    let factory = Factory::disasm(*os, *arch);
-    let cs = factory.disassemble()?;
-    let instructions = cs.disasm_all(bytes, *entry_addr)?;
-
-    for i in instructions.as_ref() {
-        let mnemonic = i.mnemonic().unwrap_or("");
+    for i in instructions {
+        let mnemonic = i.mnemonic.as_str();
 
         // Accumulate NOP sleds
         if mnemonic == "nop" {
-            nop_addr.push(i.address());
+            nop_addr.push(i.address);
             counter += 1;
         } else {
             if counter >= 128 {
@@ -71,16 +67,14 @@ pub fn disassemble_section(
             nop_addr.clear();
         }
 
-        // Checks for anti-VM / anti-debugging mnemonics
-        if !mnemonic.is_empty() && blacklist.contains(mnemonic) {
-            blacklisted_mnemonics
+        if blacklist.contains(mnemonic) {
+            let entry = blacklisted_mnemonics
                 .entry(mnemonic.to_string())
-                .or_default()
-                .push(i.address());
+                .or_default();
+            entry.push(i.address);
         }
     }
 
-    // Capture a NOP sled at the end of instructions
     if counter >= 128 {
         let mut existing = code_cave.remove("nop_addr").unwrap_or_default();
         existing.extend(&nop_addr);
@@ -92,13 +86,13 @@ pub fn disassemble_section(
     while null_scan_len > 0 && bytes[null_scan_len - 1] == 0x00 {
         null_scan_len -= 1;
     }
-    let null_caves = scan_raw_padding(&bytes[..null_scan_len], 0x00, 128, *entry_addr);
+    let null_caves = scan_raw_padding(&bytes[..null_scan_len], 0x00, 128, entry_addr);
     if !null_caves.is_empty() {
         code_cave.insert("null_addr".to_owned(), null_caves);
     }
 
     // Scan raw bytes for consecutive 0xCC runs
-    let int3_caves = scan_raw_padding(bytes, 0xCC, 128, *entry_addr);
+    let int3_caves = scan_raw_padding(bytes, 0xCC, 128, entry_addr);
     if !int3_caves.is_empty() {
         code_cave.insert("int3_addr".to_owned(), int3_caves);
     }
@@ -154,12 +148,21 @@ mod tests {
 
     #[test]
     fn test_disassemble_section_no_early_breakout() {
-        let mut bytes = vec![0x90; 128];
-        bytes.push(0x0F);
-        bytes.push(0x31);
+        let mut instructions = Vec::new();
+        for addr in 0x1000..0x1080 {
+            instructions.push(InstructionInfo {
+                address: addr as u64,
+                mnemonic: "nop".to_string(),
+                op_str: "".to_string(),
+            });
+        }
+        instructions.push(InstructionInfo {
+            address: 0x1080,
+            mnemonic: "rdtsc".to_string(),
+            op_str: "".to_string(),
+        });
 
-        let (code_cave, blacklisted) =
-            disassemble_section(&bytes, &0x1000, &BinaryOS::Linux, &BinaryArch::X64).unwrap();
+        let (code_cave, blacklisted) = disassemble_section(&instructions, &[], 0x1000).unwrap();
 
         assert!(code_cave.contains_key("nop_addr"));
         assert_eq!(code_cave.get("nop_addr").unwrap().len(), 128);
