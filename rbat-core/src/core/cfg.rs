@@ -216,3 +216,278 @@ impl ControlFlowGraph {
         graph
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{BinaryArch, EdgeType, types::InstructionInfo};
+
+    /// Helper to build an `InstructionInfo` with minimal boilerplate.
+    fn insn(address: u64, mnemonic: &str, op_str: &str) -> InstructionInfo {
+        InstructionInfo {
+            address,
+            mnemonic: mnemonic.to_string(),
+            op_str: op_str.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_empty_instructions() {
+        let cfg = ControlFlowGraph::new(&[], &BinaryArch::X64);
+        assert!(cfg.blocks.is_empty());
+        assert!(cfg.edges.is_empty());
+    }
+
+    #[test]
+    fn test_single_basic_block_no_branches() {
+        // A straight-line sequence with no control-flow changes forms one block.
+        let instructions = vec![
+            insn(0x1000, "push", "rbp"),
+            insn(0x1001, "mov", "rbp, rsp"),
+            insn(0x1004, "nop", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        assert_eq!(cfg.blocks.len(), 1);
+        assert!(cfg.edges.is_empty());
+
+        let block = &cfg.blocks[&0x1000];
+        assert_eq!(block.start_address, 0x1000);
+        assert_eq!(block.end_address, 0x1004);
+        assert_eq!(block.instructions.len(), 3);
+    }
+
+    #[test]
+    fn test_conditional_jump_splits_block() {
+        // A conditional jump at 0x1002 targeting 0x2000 should:
+        //  - Split into two blocks at 0x1000 and 0x1003.
+        //  - Emit a ConditionalTrue edge to 0x2000 (if block exists) and
+        //    a ConditionalFalse fallthrough edge to 0x1003.
+        let instructions = vec![
+            insn(0x1000, "cmp", "eax, 0"),
+            insn(0x1002, "je", "0x1004"),
+            insn(0x1003, "nop", ""),
+            insn(0x1004, "mov", "eax, 1"),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        // Three leaders: 0x1000 (entry), 0x1003 (fallthrough after je), 0x1004 (target of je)
+        assert_eq!(cfg.blocks.len(), 3);
+        assert!(cfg.blocks.contains_key(&0x1000));
+        assert!(cfg.blocks.contains_key(&0x1003));
+        assert!(cfg.blocks.contains_key(&0x1004));
+
+        // Block 0x1000 should contain [cmp, je]
+        assert_eq!(cfg.blocks[&0x1000].instructions.len(), 2);
+
+        // Block 0x1003 should contain [nop]
+        assert_eq!(cfg.blocks[&0x1003].instructions.len(), 1);
+
+        // Block 0x1004 should contain [mov]
+        assert_eq!(cfg.blocks[&0x1004].instructions.len(), 1);
+
+        // Should have a ConditionalTrue edge from 0x1000 -> 0x1004
+        assert!(cfg
+            .edges
+            .contains(&(0x1000, 0x1004, EdgeType::ConditionalTrue)));
+
+        // Should have a ConditionalFalse edge from 0x1000 -> 0x1003
+        assert!(cfg
+            .edges
+            .contains(&(0x1000, 0x1003, EdgeType::ConditionalFalse)));
+    }
+
+    #[test]
+    fn test_unconditional_jump() {
+        let instructions = vec![
+            insn(0x1000, "mov", "eax, 0"),
+            insn(0x1002, "jmp", "0x1004"),
+            insn(0x1003, "nop", ""),
+            insn(0x1004, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        // Should have an Unconditional edge from 0x1000 to the target block
+        assert!(cfg
+            .edges
+            .contains(&(0x1000, 0x1004, EdgeType::Unconditional)));
+
+        // Unconditional jumps should NOT produce a fallthrough edge
+        let has_fallthrough = cfg
+            .edges
+            .iter()
+            .any(|(src, _, et)| *src == 0x1000 && *et == EdgeType::FallThrough);
+        assert!(!has_fallthrough);
+    }
+
+    #[test]
+    fn test_call_instruction() {
+        let instructions = vec![
+            insn(0x1000, "mov", "rdi, 0"),
+            insn(0x1003, "call", "0x2000"),
+            insn(0x1008, "nop", ""),
+            insn(0x2000, "push", "rbp"),
+            insn(0x2001, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        // Call edge from 0x1000-block to 0x2000-block
+        assert!(cfg.edges.contains(&(0x1000, 0x2000, EdgeType::Call)));
+
+        // Fallthrough edge from 0x1000-block to 0x1008-block (return site)
+        assert!(cfg
+            .edges
+            .contains(&(0x1000, 0x1008, EdgeType::FallThrough)));
+    }
+
+    #[test]
+    fn test_return_terminates_block() {
+        let instructions = vec![
+            insn(0x1000, "mov", "eax, 0"),
+            insn(0x1002, "ret", ""),
+            insn(0x1003, "nop", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        // ret terminates the block — no outgoing edges from block 0x1000
+        let block_0x1000_edges: Vec<_> = cfg
+            .edges
+            .iter()
+            .filter(|(src, _, _)| *src == 0x1000)
+            .collect();
+        assert!(block_0x1000_edges.is_empty());
+    }
+
+    #[test]
+    fn test_fallthrough_between_normal_blocks() {
+        // When a leader is introduced by a branch target elsewhere, normal instructions
+        // at the boundary should produce a FallThrough edge.
+        let instructions = vec![
+            insn(0x1000, "nop", ""),
+            insn(0x1001, "jmp", "0x1003"),
+            insn(0x1002, "nop", ""),
+            insn(0x1003, "nop", ""),
+            insn(0x1004, "nop", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        // Block starting at 0x1002 ends with "nop" (Normal) and should fallthrough to 0x1003
+        assert!(cfg
+            .edges
+            .contains(&(0x1002, 0x1003, EdgeType::FallThrough)));
+    }
+
+    #[test]
+    fn test_jump_to_nonexistent_target() {
+        // If a jump targets an address not present in the instruction stream,
+        // no edge should be emitted for that target.
+        let instructions = vec![
+            insn(0x1000, "jmp", "0x9999"),
+            insn(0x1002, "nop", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        let edges_to_9999: Vec<_> = cfg
+            .edges
+            .iter()
+            .filter(|(_, dst, _)| *dst == 0x9999)
+            .collect();
+        assert!(edges_to_9999.is_empty());
+    }
+
+    #[test]
+    fn test_to_dot_output() {
+        let instructions = vec![
+            insn(0x1000, "nop", ""),
+            insn(0x1001, "jmp", "0x1000"),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let dot = cfg.to_dot();
+
+        assert!(dot.starts_with("digraph CFG {"));
+        assert!(dot.contains("node_0x1000"));
+        assert!(dot.contains("Unconditional"));
+        assert!(dot.ends_with("}\n"));
+    }
+
+    #[test]
+    fn test_to_petgraph_roundtrip() {
+        let instructions = vec![
+            insn(0x1000, "cmp", "eax, 0"),
+            insn(0x1002, "je", "0x1004"),
+            insn(0x1003, "nop", ""),
+            insn(0x1004, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let graph = cfg.to_petgraph();
+
+        // The petgraph should have the same number of nodes as blocks
+        assert_eq!(graph.node_count(), cfg.blocks.len());
+
+        // The petgraph should have the same number of edges
+        assert_eq!(graph.edge_count(), cfg.edges.len());
+    }
+
+    #[test]
+    fn test_arm64_conditional_branch() {
+        let instructions = vec![
+            insn(0x400, "cmp", "w0, #0"),
+            insn(0x404, "b.eq", "0x40c"),
+            insn(0x408, "mov", "w0, #1"),
+            insn(0x40c, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::Arm64);
+
+        assert!(cfg
+            .edges
+            .contains(&(0x400, 0x40c, EdgeType::ConditionalTrue)));
+        assert!(cfg
+            .edges
+            .contains(&(0x400, 0x408, EdgeType::ConditionalFalse)));
+    }
+
+    #[test]
+    fn test_single_instruction() {
+        let instructions = vec![insn(0x1000, "ret", "")];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        assert_eq!(cfg.blocks.len(), 1);
+        assert!(cfg.edges.is_empty());
+
+        let block = &cfg.blocks[&0x1000];
+        assert_eq!(block.start_address, 0x1000);
+        assert_eq!(block.end_address, 0x1000);
+        assert_eq!(block.instructions.len(), 1);
+    }
+
+    #[test]
+    fn test_multiple_conditional_jumps() {
+        // Tests a chain of conditional jumps producing multiple blocks and edges.
+        let instructions = vec![
+            insn(0x1000, "cmp", "eax, 0"),
+            insn(0x1002, "je", "0x1008"),
+            insn(0x1004, "cmp", "eax, 1"),
+            insn(0x1006, "je", "0x100a"),
+            insn(0x1008, "nop", ""),
+            insn(0x100a, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        // First je targets 0x1008
+        assert!(cfg
+            .edges
+            .contains(&(0x1000, 0x1008, EdgeType::ConditionalTrue)));
+        // First je falls through to 0x1004
+        assert!(cfg
+            .edges
+            .contains(&(0x1000, 0x1004, EdgeType::ConditionalFalse)));
+        // Second je targets 0x100a
+        assert!(cfg
+            .edges
+            .contains(&(0x1004, 0x100a, EdgeType::ConditionalTrue)));
+        // Second je falls through to 0x1008
+        assert!(cfg
+            .edges
+            .contains(&(0x1004, 0x1008, EdgeType::ConditionalFalse)));
+    }
+}
