@@ -4,6 +4,7 @@
 //! used throughout the binary analysis pipeline, reporting, and scoring engines.
 
 use super::{BinaryArch, BinaryOS};
+use crate::core::cfg::ControlFlowGraph;
 use goblin::Object;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,8 @@ pub enum AnalysisProgress {
     ProcessInjection(HashSet<String>),
     /// Extracted binary format metadata.
     BinaryMetadata(BinaryMetadata),
+    /// Reconstructed Control Flow Graph.
+    CFG(ControlFlowGraph),
 }
 
 /// Built-in binary assets embedded directly into the library compilation.
@@ -65,6 +68,8 @@ pub struct AnalysisResult {
     pub string_values: HashMap<String, Vec<YaraMatches>>,
     /// Packer or crypter signature matches.
     pub packer_signatures: HashMap<String, Vec<YaraMatches>>,
+    /// Reconstructed Control Flow Graph.
+    pub cfg: Option<ControlFlowGraph>,
 }
 
 /// Auxiliary key-value mapping wrapper for binary properties.
@@ -153,6 +158,7 @@ pub struct BinaryMetadata {
 ///     arch: BinaryArch::X64,
 ///     text_bytes: &buffer,
 ///     entry_addr: 0x1000,
+///     instructions: &[],
 /// };
 /// ```
 pub struct AnalysisContext<'a> {
@@ -170,6 +176,8 @@ pub struct AnalysisContext<'a> {
     pub text_bytes: &'a [u8],
     /// Raw binary entry point.
     pub entry_addr: u64,
+    /// Pre-disassembled instructions made available to all plugins.
+    pub instructions: &'a [InstructionInfo],
 }
 
 /// Cached mapping representing a binary section's file offset boundaries.
