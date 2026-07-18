@@ -74,6 +74,26 @@ impl Rule {
             .collect()
     }
 
+    /// Loads custom JSON rules from a directory on the local filesystem.
+    #[allow(clippy::collapsible_if)]
+    pub fn load_from_directory(dir: &std::path::Path) -> Vec<Self> {
+        let mut rules = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+                    if let Ok(rule) = std::fs::read(&path).and_then(|data| {
+                        serde_json::from_slice::<Rule>(&data)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    }) {
+                        rules.push(rule);
+                    }
+                }
+            }
+        }
+        rules
+    }
+
     /// Evaluates a set of rules against the feature set and returns matching rule metadata.
     pub fn evaluate(features: &FeatureSet, rules: &[Self]) -> Vec<RuleMeta> {
         rules
