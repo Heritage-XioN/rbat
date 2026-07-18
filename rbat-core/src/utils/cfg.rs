@@ -195,10 +195,7 @@ mod tests {
             classify_instruction("push", &arch),
             InstructionClass::Normal
         );
-        assert_eq!(
-            classify_instruction("nop", &arch),
-            InstructionClass::Normal
-        );
+        assert_eq!(classify_instruction("nop", &arch), InstructionClass::Normal);
     }
 
     #[test]
@@ -237,10 +234,7 @@ mod tests {
         assert_eq!(classify_instruction("ret", &arch), InstructionClass::Return);
         assert_eq!(classify_instruction("br", &arch), InstructionClass::Return);
         assert_eq!(classify_instruction("bx", &arch), InstructionClass::Return);
-        assert_eq!(
-            classify_instruction("mov", &arch),
-            InstructionClass::Normal
-        );
+        assert_eq!(classify_instruction("mov", &arch), InstructionClass::Normal);
     }
 
     #[test]

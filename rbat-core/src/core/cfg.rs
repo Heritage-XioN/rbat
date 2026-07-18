@@ -287,14 +287,16 @@ mod tests {
         assert_eq!(cfg.blocks[&0x1004].instructions.len(), 1);
 
         // Should have a ConditionalTrue edge from 0x1000 -> 0x1004
-        assert!(cfg
-            .edges
-            .contains(&(0x1000, 0x1004, EdgeType::ConditionalTrue)));
+        assert!(
+            cfg.edges
+                .contains(&(0x1000, 0x1004, EdgeType::ConditionalTrue))
+        );
 
         // Should have a ConditionalFalse edge from 0x1000 -> 0x1003
-        assert!(cfg
-            .edges
-            .contains(&(0x1000, 0x1003, EdgeType::ConditionalFalse)));
+        assert!(
+            cfg.edges
+                .contains(&(0x1000, 0x1003, EdgeType::ConditionalFalse))
+        );
     }
 
     #[test]
@@ -308,9 +310,10 @@ mod tests {
         let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
 
         // Should have an Unconditional edge from 0x1000 to the target block
-        assert!(cfg
-            .edges
-            .contains(&(0x1000, 0x1004, EdgeType::Unconditional)));
+        assert!(
+            cfg.edges
+                .contains(&(0x1000, 0x1004, EdgeType::Unconditional))
+        );
 
         // Unconditional jumps should NOT produce a fallthrough edge
         let has_fallthrough = cfg
@@ -335,9 +338,7 @@ mod tests {
         assert!(cfg.edges.contains(&(0x1000, 0x2000, EdgeType::Call)));
 
         // Fallthrough edge from 0x1000-block to 0x1008-block (return site)
-        assert!(cfg
-            .edges
-            .contains(&(0x1000, 0x1008, EdgeType::FallThrough)));
+        assert!(cfg.edges.contains(&(0x1000, 0x1008, EdgeType::FallThrough)));
     }
 
     #[test]
@@ -372,19 +373,14 @@ mod tests {
         let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
 
         // Block starting at 0x1002 ends with "nop" (Normal) and should fallthrough to 0x1003
-        assert!(cfg
-            .edges
-            .contains(&(0x1002, 0x1003, EdgeType::FallThrough)));
+        assert!(cfg.edges.contains(&(0x1002, 0x1003, EdgeType::FallThrough)));
     }
 
     #[test]
     fn test_jump_to_nonexistent_target() {
         // If a jump targets an address not present in the instruction stream,
         // no edge should be emitted for that target.
-        let instructions = vec![
-            insn(0x1000, "jmp", "0x9999"),
-            insn(0x1002, "nop", ""),
-        ];
+        let instructions = vec![insn(0x1000, "jmp", "0x9999"), insn(0x1002, "nop", "")];
         let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
 
         let edges_to_9999: Vec<_> = cfg
@@ -397,10 +393,7 @@ mod tests {
 
     #[test]
     fn test_to_dot_output() {
-        let instructions = vec![
-            insn(0x1000, "nop", ""),
-            insn(0x1001, "jmp", "0x1000"),
-        ];
+        let instructions = vec![insn(0x1000, "nop", ""), insn(0x1001, "jmp", "0x1000")];
         let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
         let dot = cfg.to_dot();
 
@@ -438,12 +431,14 @@ mod tests {
         ];
         let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::Arm64);
 
-        assert!(cfg
-            .edges
-            .contains(&(0x400, 0x40c, EdgeType::ConditionalTrue)));
-        assert!(cfg
-            .edges
-            .contains(&(0x400, 0x408, EdgeType::ConditionalFalse)));
+        assert!(
+            cfg.edges
+                .contains(&(0x400, 0x40c, EdgeType::ConditionalTrue))
+        );
+        assert!(
+            cfg.edges
+                .contains(&(0x400, 0x408, EdgeType::ConditionalFalse))
+        );
     }
 
     #[test]
@@ -474,20 +469,24 @@ mod tests {
         let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
 
         // First je targets 0x1008
-        assert!(cfg
-            .edges
-            .contains(&(0x1000, 0x1008, EdgeType::ConditionalTrue)));
+        assert!(
+            cfg.edges
+                .contains(&(0x1000, 0x1008, EdgeType::ConditionalTrue))
+        );
         // First je falls through to 0x1004
-        assert!(cfg
-            .edges
-            .contains(&(0x1000, 0x1004, EdgeType::ConditionalFalse)));
+        assert!(
+            cfg.edges
+                .contains(&(0x1000, 0x1004, EdgeType::ConditionalFalse))
+        );
         // Second je targets 0x100a
-        assert!(cfg
-            .edges
-            .contains(&(0x1004, 0x100a, EdgeType::ConditionalTrue)));
+        assert!(
+            cfg.edges
+                .contains(&(0x1004, 0x100a, EdgeType::ConditionalTrue))
+        );
         // Second je falls through to 0x1008
-        assert!(cfg
-            .edges
-            .contains(&(0x1004, 0x1008, EdgeType::ConditionalFalse)));
+        assert!(
+            cfg.edges
+                .contains(&(0x1004, 0x1008, EdgeType::ConditionalFalse))
+        );
     }
 }

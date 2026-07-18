@@ -18,7 +18,7 @@ use ratatui::{
 };
 use std::io;
 
-// ── RBAT Design System Palette ─────────────────────────────────────────────
+// ── RBAT Design System Palette ───
 // Matched to the Next.js client CSS variables for visual consistency.
 #[allow(dead_code)]
 mod palette {
