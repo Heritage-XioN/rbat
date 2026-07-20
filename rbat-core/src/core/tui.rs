@@ -25,27 +25,27 @@ mod palette {
     use ratatui::style::Color;
 
     // Surfaces & borders
-    pub const BG: Color = Color::Rgb(10, 12, 26);           // --rbat-bg        #0a0c1a
-    pub const CARD: Color = Color::Rgb(17, 19, 39);          // --rbat-card       #111327
-    pub const SURFACE: Color = Color::Rgb(26, 29, 53);       // --secondary       #1a1d35
-    pub const BORDER: Color = Color::Rgb(30, 32, 64);        // --rbat-border     #1e2040
+    pub const BG: Color = Color::Rgb(10, 12, 26); // --rbat-bg        #0a0c1a
+    pub const CARD: Color = Color::Rgb(17, 19, 39); // --rbat-card       #111327
+    pub const SURFACE: Color = Color::Rgb(26, 29, 53); // --secondary       #1a1d35
+    pub const BORDER: Color = Color::Rgb(30, 32, 64); // --rbat-border     #1e2040
 
     // Text hierarchy
-    pub const TEXT: Color = Color::Rgb(240, 240, 245);       // --rbat-text       #f0f0f5
+    pub const TEXT: Color = Color::Rgb(240, 240, 245); // --rbat-text       #f0f0f5
     pub const TEXT_SECONDARY: Color = Color::Rgb(156, 163, 175); // --rbat-text-secondary #9ca3af
-    pub const MUTED: Color = Color::Rgb(107, 114, 128);      // --rbat-muted      #6b7280
+    pub const MUTED: Color = Color::Rgb(107, 114, 128); // --rbat-muted      #6b7280
 
     // Accent (purple gradient)
-    pub const ACCENT: Color = Color::Rgb(192, 132, 252);     // --rbat-accent     #c084fc
-    pub const ACCENT_DIM: Color = Color::Rgb(168, 85, 247);  // chart-2 / purple-500 #a855f7
-    pub const PINK: Color = Color::Rgb(244, 114, 182);       // gradient endpoint #f472b6
+    pub const ACCENT: Color = Color::Rgb(192, 132, 252); // --rbat-accent     #c084fc
+    pub const ACCENT_DIM: Color = Color::Rgb(168, 85, 247); // chart-2 / purple-500 #a855f7
+    pub const PINK: Color = Color::Rgb(244, 114, 182); // gradient endpoint #f472b6
 
     // Status / severity
-    pub const DANGER: Color = Color::Rgb(239, 68, 68);       // --rbat-high       #ef4444
+    pub const DANGER: Color = Color::Rgb(239, 68, 68); // --rbat-high       #ef4444
     pub const DANGER_LIGHT: Color = Color::Rgb(248, 113, 113); // red-400          #f87171
-    pub const WARNING: Color = Color::Rgb(245, 158, 11);     // --rbat-medium     #f59e0b
+    pub const WARNING: Color = Color::Rgb(245, 158, 11); // --rbat-medium     #f59e0b
     pub const WARNING_LIGHT: Color = Color::Rgb(251, 191, 36); // amber-400       #fbbf24
-    pub const SUCCESS: Color = Color::Rgb(34, 197, 94);      // --rbat-low        #22c55e
+    pub const SUCCESS: Color = Color::Rgb(34, 197, 94); // --rbat-low        #22c55e
     pub const SUCCESS_LIGHT: Color = Color::Rgb(74, 222, 128); // green-400       #4ade80
 }
 
@@ -593,7 +593,9 @@ impl App {
             items.push(ListItem::new(Line::from(vec![
                 Span::styled(
                     "INJECT: ",
-                    Style::default().fg(palette::DANGER).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(palette::DANGER)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(func),
             ])));
@@ -750,7 +752,9 @@ impl App {
             .assessment
             .recommendations
             .iter()
-            .map(|r| ListItem::new(format!("• {}", r)).style(Style::default().fg(palette::SUCCESS_LIGHT)))
+            .map(|r| {
+                ListItem::new(format!("• {}", r)).style(Style::default().fg(palette::SUCCESS_LIGHT))
+            })
             .collect();
 
         let list = List::new(advice_items)
@@ -768,7 +772,11 @@ impl App {
     fn render_footer(&self, area: Rect, buf: &mut Buffer) {
         let text = " [Q] Quit | [TAB/Arrows] Nav Tabs | [Up/Down] Scroll Blocks | [W/S] Scroll Instr | [1-5] Jump Tab ";
         Paragraph::new(text)
-            .style(Style::default().bg(palette::SURFACE).fg(palette::TEXT_SECONDARY))
+            .style(
+                Style::default()
+                    .bg(palette::SURFACE)
+                    .fg(palette::TEXT_SECONDARY),
+            )
             .alignment(Alignment::Center)
             .render(area, buf);
     }
