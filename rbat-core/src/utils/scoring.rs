@@ -17,6 +17,9 @@
 //!         severity: "High".to_string(),
 //!         category: "privilege_escalation".to_string(),
 //!         weight: 35,
+//!         author: None,
+//!         references: None,
+//!         tags: None,
 //!     },
 //! ];
 //! let assessment = calculate_risk(&matches);
@@ -145,6 +148,9 @@ mod tests {
             severity: "Critical".to_string(),
             category: "privilege_escalation".to_string(),
             weight: 35,
+            author: None,
+            references: None,
+            tags: None,
         }];
         let assessment = calculate_risk(&matches);
         // Cap for privilege_escalation is 30, so 35 gets capped to 30
@@ -163,6 +169,9 @@ mod tests {
                 severity: "High".to_string(),
                 category: "defense_evasion".to_string(),
                 weight: 30,
+                author: None,
+                references: None,
+                tags: None,
             },
             RuleMeta {
                 name: "Injection Rule".to_string(),
@@ -171,6 +180,9 @@ mod tests {
                 severity: "Critical".to_string(),
                 category: "privilege_escalation".to_string(),
                 weight: 35,
+                author: None,
+                references: None,
+                tags: None,
             },
         ];
         let assessment = calculate_risk(&matches);
@@ -191,6 +203,9 @@ mod tests {
                 severity: "High".to_string(),
                 category: "defense_evasion".to_string(),
                 weight: 25,
+                author: None,
+                references: None,
+                tags: None,
             },
             RuleMeta {
                 name: "Rule B".to_string(),
@@ -199,6 +214,9 @@ mod tests {
                 severity: "High".to_string(),
                 category: "defense_evasion".to_string(),
                 weight: 30,
+                author: None,
+                references: None,
+                tags: None,
             },
         ];
         let assessment = calculate_risk(&matches);

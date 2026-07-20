@@ -9,7 +9,7 @@ use crate::core::{Asset, FeatureCondition, RuleMeta, features::FeatureSet};
 
 /// Boolean logic combinations of rule conditions.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
 pub enum RuleCondition {
     /// True if all subconditions are true.
     And(Vec<RuleCondition>),
@@ -52,6 +52,7 @@ impl RuleCondition {
 
 /// A structured threat indicator rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     /// The rule metadata.
     pub meta: RuleMeta,
@@ -134,6 +135,9 @@ mod tests {
                 severity: "".to_owned(),
                 category: String::new(),
                 weight: 0,
+                author: None,
+                references: None,
+                tags: None,
             },
             condition: RuleCondition::Feature(FeatureCondition::Api("VirtualAlloc".to_owned())),
         };
@@ -147,6 +151,9 @@ mod tests {
                 severity: "".to_owned(),
                 category: String::new(),
                 weight: 0,
+                author: None,
+                references: None,
+                tags: None,
             },
             condition: RuleCondition::Feature(FeatureCondition::Entropy {
                 section: ".text".to_owned(),

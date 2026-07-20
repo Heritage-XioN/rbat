@@ -239,6 +239,7 @@ pub enum InstructionClass {
 
 /// Metadata describing a security rule and its mapped threat techniques.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuleMeta {
     /// The unique rule identifier name.
     pub name: String,
@@ -252,11 +253,20 @@ pub struct RuleMeta {
     pub category: String,
     /// The individual weight contribution of this rule when matched (0-100).
     pub weight: u32,
+    /// Optional author or creator attribution of the rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Optional list of external reference URLs or research links.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<Vec<String>>,
+    /// Optional custom tagging labels for categorization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 /// A leaf feature assertion matching code, string, or structural anomalies.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum FeatureCondition {
     /// Matches if an imported API function contains this pattern.
     Api(String),
