@@ -34,17 +34,29 @@ pub fn generate_csv_report(
     let score = assessment.score.to_string();
     let severity = &assessment.severity;
 
-    // Flatten the assessment findings into individual rows
-    for finding in &assessment.findings {
+    // Flatten the assessment findings into individual rows, or write a clean summary row
+    if assessment.findings.is_empty() {
         wtr.write_record([
             &timestamp,
             &filename_str,
             &score,
             severity,
-            &finding.indicator,
-            &format!("{:?}", finding.confidence),
-            &finding.description,
+            "NO_FINDINGS",
+            "None",
+            "No security threats or anomalies detected.",
         ])?;
+    } else {
+        for finding in &assessment.findings {
+            wtr.write_record([
+                &timestamp,
+                &filename_str,
+                &score,
+                severity,
+                &finding.indicator,
+                &format!("{:?}", finding.confidence),
+                &finding.description,
+            ])?;
+        }
     }
 
     wtr.flush()?;

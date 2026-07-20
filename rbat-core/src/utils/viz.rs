@@ -15,12 +15,12 @@ pub fn generate_entropy_heatmap(data: &HashMap<String, f64>) -> String {
 
     if sections.is_empty() {
         return String::from(
-            "<p style='color: #666; text-align: center;'>No section data available</p>",
+            "<p style='color: #9ca3af; text-align: center;'>No section data available</p>",
         );
     }
 
     let mut html = String::from(
-        "<table style=\"width: 100%; border-collapse: separate; border-spacing: 10px; margin: 0 auto;\">",
+        "<table style=\"width: 100%; border-collapse: separate; border-spacing: 10px; margin: 0 auto; background: transparent; border: none;\">",
     );
 
     // Draw each section cell in rows of 6
@@ -36,18 +36,18 @@ pub fn generate_entropy_heatmap(data: &HashMap<String, f64>) -> String {
             };
 
             html.push_str(&format!(
-                "<td style=\"background-color: {} !important; width: 16%; padding: 15px 5px; border: 1px solid #dddddd; border-radius: 4px; text-align: center; vertical-align: middle;\">
-                    <div style=\"color: {} !important; font-weight: bold; font-size: 14px; margin-bottom: 5px;\">{:.2}</div>
-                    <div style=\"color: #333333; font-size: 9px; word-break: break-all; line-height: 1.1;\">{}</div>
+                "<td style=\"background-color: {} !important; width: 16%; padding: 12px 5px; border: 1px solid #cbd5e1; border-radius: 6px; text-align: center; vertical-align: middle;\">
+                    <div style=\"color: {} !important; font-weight: bold; font-size: 14px; margin-bottom: 4px;\">{:.2}</div>
+                    <div style=\"color: {} !important; font-size: 10px; word-break: break-all; line-height: 1.1; font-weight: 600;\">{}</div>
                 </td>",
-                color_hex, text_color, entropy, name
+                color_hex, text_color, entropy, text_color, name
             ));
         }
 
         // Fill remaining cells in the row if necessary
         if chunk.len() < 6 {
             for _ in 0..(6 - chunk.len()) {
-                html.push_str("<td style=\"width: 16%;\"></td>");
+                html.push_str("<td style=\"width: 16%; background: transparent; border: none;\"></td>");
             }
         }
         html.push_str("</tr>");
@@ -55,27 +55,27 @@ pub fn generate_entropy_heatmap(data: &HashMap<String, f64>) -> String {
     html.push_str("</table>");
 
     // Legend
-    html.push_str("<div style=\"margin-top: 30px; text-align: center;\">");
-    html.push_str("<table style=\"margin: 0 auto; border-collapse: collapse;\"><tr>");
+    html.push_str("<div style=\"margin-top: 24px; text-align: center;\">");
+    html.push_str("<table style=\"margin: 0 auto; border-collapse: collapse; background: transparent; border: none;\"><tr>");
 
     let num_stops = 20;
     for i in 0..num_stops {
         let normalized = i as f64 / num_stops as f64;
         let color_hex = entropy_to_hex(normalized);
         html.push_str(&format!(
-            "<td style=\"width: 15px; height: 12px; background-color: {} !important; padding: 0;\"></td>",
+            "<td style=\"width: 15px; height: 10px; background-color: {} !important; padding: 0; border: none;\"></td>",
             color_hex
         ));
     }
 
     html.push_str("</tr></table>");
 
-    html.push_str("<div style=\"width: 300px; margin: 5px auto 0; font-size: 10px; color: #666666; display: flex; justify-content: space-between;\">
-        <span>0.0 (Low)</span>
-        <span style=\"margin-left: 190px;\">8.0 (High)</span>
+    html.push_str("<div style=\"width: 300px; margin: 6px auto 0; font-size: 10px; color: #64748b; display: flex; justify-content: space-between;\">
+        <span>0.0 (Low Entropy)</span>
+        <span style=\"margin-left: 140px;\">8.0 (High Entropy)</span>
     </div>");
 
-    html.push_str("<div style=\"font-size: 10px; color: #999999; margin-top: 10px;\">Entropy Heatmap: Packed or encrypted data spikes toward 8.0</div>");
+    html.push_str("<div style=\"font-size: 10px; color: #94a3b8; margin-top: 8px;\">Entropy Heatmap: Packed or encrypted binary sections spike toward 8.0</div>");
     html.push_str("</div>");
 
     html
@@ -102,4 +102,26 @@ fn entropy_to_hex(normalized: f64) -> String {
         (255, (100.0 * (1.0 - t)) as u8, 0)
     };
     format!("#{:02x}{:02x}{:02x}", r, g, b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_entropy_heatmap_empty() {
+        let map = HashMap::new();
+        let html = generate_entropy_heatmap(&map);
+        assert!(html.contains("No section data available"));
+    }
+
+    #[test]
+    fn test_generate_entropy_heatmap_with_data() {
+        let mut map = HashMap::new();
+        map.insert(".text".to_string(), 6.5);
+        map.insert(".data".to_string(), 2.1);
+        let html = generate_entropy_heatmap(&map);
+        assert!(html.contains(".text"));
+        assert!(html.contains(".data"));
+    }
 }
