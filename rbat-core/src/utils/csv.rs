@@ -42,7 +42,7 @@ pub fn generate_csv_report(
             &score,
             severity,
             "NO_FINDINGS",
-            "None",
+            "N/A",
             "No security threats or anomalies detected.",
         ])?;
     } else {

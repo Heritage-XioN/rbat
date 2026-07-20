@@ -47,7 +47,9 @@ pub fn generate_entropy_heatmap(data: &HashMap<String, f64>) -> String {
         // Fill remaining cells in the row if necessary
         if chunk.len() < 6 {
             for _ in 0..(6 - chunk.len()) {
-                html.push_str("<td style=\"width: 16%; background: transparent; border: none;\"></td>");
+                html.push_str(
+                    "<td style=\"width: 16%; background: transparent; border: none;\"></td>",
+                );
             }
         }
         html.push_str("</tr>");
