@@ -5,7 +5,12 @@
     "mitre_attack": "T1027",
     "severity": "Medium",
     "category": "defense_evasion",
-    "weight": 25
+    "weight": 25,
+    "author": "RBAT Security Team",
+    "references": [
+      "https://attack.mitre.org/techniques/T1027/"
+    ],
+    "tags": ["packer", "obfuscation", "crypter"]
   },
   "condition": {
     "or": [

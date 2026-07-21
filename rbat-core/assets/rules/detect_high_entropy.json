@@ -5,7 +5,12 @@
     "mitre_attack": "T1027.002",
     "severity": "Critical",
     "category": "defense_evasion",
-    "weight": 30
+    "weight": 30,
+    "author": "RBAT Security Team",
+    "references": [
+      "https://attack.mitre.org/techniques/T1027/002/"
+    ],
+    "tags": ["entropy", "packer", "encryption"]
   },
   "condition": {
     "feature": { "entropy": { "section": ".text", "min": 7.5 } }

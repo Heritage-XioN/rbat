@@ -5,7 +5,12 @@
     "mitre_attack": "T1055",
     "severity": "Critical",
     "category": "privilege_escalation",
-    "weight": 35
+    "weight": 35,
+    "author": "RBAT Security Team",
+    "references": [
+      "https://attack.mitre.org/techniques/T1055/"
+    ],
+    "tags": ["process_injection", "injection", "memory"]
   },
   "condition": {
     "or": [

@@ -5,7 +5,12 @@
     "mitre_attack": "T1622",
     "severity": "High",
     "category": "defense_evasion",
-    "weight": 30
+    "weight": 30,
+    "author": "RBAT Security Team",
+    "references": [
+      "https://attack.mitre.org/techniques/T1622/"
+    ],
+    "tags": ["anti_debugging", "anti_vm", "evasion"]
   },
   "condition": {
     "or": [

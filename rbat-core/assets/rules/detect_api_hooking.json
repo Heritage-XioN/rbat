@@ -5,7 +5,12 @@
     "mitre_attack": "T1056",
     "severity": "High",
     "category": "persistence",
-    "weight": 25
+    "weight": 25,
+    "author": "RBAT Security Team",
+    "references": [
+      "https://attack.mitre.org/techniques/T1056/"
+    ],
+    "tags": ["api_hooking", "detours", "interception"]
   },
   "condition": {
     "or": [

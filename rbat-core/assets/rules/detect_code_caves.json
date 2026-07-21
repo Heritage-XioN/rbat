@@ -5,7 +5,12 @@
     "mitre_attack": "T1027.009",
     "severity": "High",
     "category": "defense_evasion",
-    "weight": 25
+    "weight": 25,
+    "author": "RBAT Security Team",
+    "references": [
+      "https://attack.mitre.org/techniques/T1027/009/"
+    ],
+    "tags": ["code_cave", "injection", "padding"]
   },
   "condition": {
     "feature": "code_cave"

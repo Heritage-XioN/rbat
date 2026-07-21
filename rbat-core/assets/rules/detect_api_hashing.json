@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "name": "api_hashing_peb_walking",
+    "description": "Flags PEB walking offsets (fs:[0x30], gs:[0x60]) and dynamic API resolution patterns (ROR13/CRC32) used to hide imports",
+    "mitre_attack": "T1027.007",
+    "severity": "High",
+    "category": "defense_evasion",
+    "weight": 85,
+    "author": "RBAT Security Team",
+    "references": [
+      "https://attack.mitre.org/techniques/T1027/007/"
+    ],
+    "tags": ["api_hashing", "peb_walking", "obfuscation"]
+  },
+  "condition": {
+    "or": [
+      {
+        "feature": {
+          "string": "fs:[0x30]"
+        }
+      },
+      {
+        "feature": {
+          "string": "gs:[0x60]"
+        }
+      },
+      {
+        "and": [
+          {
+            "feature": {
+              "api": "LoadLibrary"
+            }
+          },
+          {
+            "feature": {
+              "api": "GetProcAddress"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
