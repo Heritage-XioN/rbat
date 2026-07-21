@@ -2,3 +2,4 @@
 .env
 report.*
 rbat-server/src/bin/*
+COMPETITIVE_PARITY.md
