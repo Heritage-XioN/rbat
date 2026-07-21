@@ -7,15 +7,86 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  build-release-binaries:
+    name: Build Release Binary (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: rbat-linux-x86_64.tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact_name: rbat-macos-x86_64.tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: rbat-macos-arm64.tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: rbat-windows-x86_64.zip
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler
+
+      - name: Install System Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install capstone yara pkg-config protobuf
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Binary Target
+        run: cargo build --release -p rbat --target ${{ matrix.target }}
+
+      - name: Archive Artifacts (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p release_archive
+          cp target/${{ matrix.target }}/release/rbat release_archive/
+          cp README.md LICENSE release_archive/
+          tar -czf ${{ matrix.artifact_name }} -C release_archive .
+
+      - name: Archive Artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path release_archive
+          Copy-Item target/${{ matrix.target }}/release/rbat.exe release_archive/
+          Copy-Item README.md release_archive/
+          Copy-Item LICENSE release_archive/
+          Compress-Archive -Path release_archive\* -DestinationPath ${{ matrix.artifact_name }}
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: ${{ matrix.artifact_name }}
+
   publish:
     name: Publish Packages & Deploy
+    needs: [build-release-binaries]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -57,13 +128,18 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: 'rbat-client/pnpm-lock.yaml'
 
-      # Step 1: Publish rbat to Crates.io
+      # Step 1: Download All Build Artifacts
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_artifacts
+
+      # Step 2: Publish rbat to Crates.io
       - name: Publish rbat-core to Crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           echo "Publishing rbat (project-c) to crates.io..."
-          # If registry token is not provided (e.g. testing), run dry-run to verify package packaging
           if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
             echo "CARGO_REGISTRY_TOKEN is not set. Running dry-run..."
             cargo publish -p rbat --dry-run
@@ -71,13 +147,13 @@ jobs:
             cargo publish -p rbat
           fi
 
-      # Step 2: Wait for Crates.io index synchronization
+      # Step 3: Wait for Crates.io index synchronization
       - name: Delay for Crates.io Registry Sync
         run: |
           echo "Waiting 25 seconds for the index to update before publishing dependent server..."
           sleep 25
 
-      # Step 3: Publish rbat-server to Crates.io
+      # Step 4: Publish rbat-server to Crates.io
       - name: Publish rbat-server to Crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -90,7 +166,7 @@ jobs:
             cargo publish -p rbat-server
           fi
 
-      # Step 4: Run Deployment Hook & Build/Push Docker Images
+      # Step 5: Run Deployment Hook & Build/Push Docker Images
       - name: Run Deployment Hook & Build/Push Docker Images
         env:
           DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY || 'ghcr.io' }}
@@ -98,23 +174,26 @@ jobs:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME || github.actor }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD || secrets.GITHUB_TOKEN }}
         run: |
-          # Convert namespace to lowercase (required for Docker registry tagging)
           export DOCKER_NAMESPACE=$(echo "$DOCKER_NAMESPACE" | tr '[:upper:]' '[:lower:]')
           ./scripts/deploy.sh ${{ env.VERSION }}
 
-      # Step 5: Automatically create GitHub Release Draft Page
-      - name: Create GitHub Release
+      # Step 6: Automatically create GitHub Release Draft & Upload Binary Assets
+      - name: Create GitHub Release and Attach Binaries
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           if [[ "${{ github.ref }}" == refs/tags/stable-* ]]; then
             echo "Creating GitHub Release draft for ${{ github.ref_name }}..."
+            
+            # Find all packaged binaries from artifact download directory
+            ASSETS=($(find release_artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \)))
+            echo "Attaching assets: ${ASSETS[*]}"
+            
             gh release create "${{ github.ref_name }}" \
+              "${ASSETS[@]}" \
               --title "Stable Release v${{ env.VERSION }}" \
               --generate-notes \
               --draft
           else
             echo "Workflow was not triggered by a release tag. Skipping GitHub Release creation..."
           fi
-
-
