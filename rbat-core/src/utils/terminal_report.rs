@@ -193,11 +193,13 @@ mod tests {
 
     #[test]
     fn test_print_terminal_report_runs_without_panic() {
-        let mut result = AnalysisResult::default();
-        result.metadata = BinaryMetadata {
-            binary_type: "Linux ELF".to_string(),
-            entry_point: 0x401000,
-            architecture: 62,
+        let result = AnalysisResult {
+            metadata: BinaryMetadata {
+                binary_type: "Linux ELF".to_string(),
+                entry_point: 0x401000,
+                architecture: 62,
+            },
+            ..Default::default()
         };
 
         let assessment = RiskAssessment {
