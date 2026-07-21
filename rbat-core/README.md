@@ -12,12 +12,13 @@
 
 ## Features
 
-* Multi-Format Support: Native parsing for ELF, PE, and Mach-O binaries.
-* Dynamic Risk Scoring: Heuristic-based risk assessment that calculates a threat level based on entropy, suspicious imports, and behavior patterns.
-* Rich TUI Dashboard: An interactive terminal interface for navigating findings, metadata, and security recommendations.
-* Entropy Heatmaps: Visualizes section-level entropy to detect packed code, encrypted payloads, or hidden data.
-* YARA Integration: Built-in scanning for packer signatures and suspicious patterns using customized, embedded YARA rules.
-* Multi-Format Reporting: Export analysis results to PDF reports (with heatmaps), CSV logs, or JSON for automated pipelines.
+* **Multi-Format Support**: Native parsing for ELF, PE, and Mach-O binaries.
+* **Control Flow Graph (CFG) Reconstruction**: Basic block disassembly and edge tracking outputting Graphviz DOT format (`--cfg`) and interactive TUI block navigation.
+* **Declarative Custom Rule Engine**: Strict JSON rule schemas (`rbat rules`) supporting `and`/`or`/`not` condition trees, MITRE ATT&CK technique tags, and strict field validation.
+* **Dynamic Risk Scoring**: Heuristic-based risk assessment calculating threat levels based on section entropy, suspicious imports, code caves, and behavior patterns.
+* **Rich TUI Dashboard**: An interactive terminal interface (`--tui`) for navigating disassembly blocks, entropy heatmaps, findings, and security recommendations.
+* **Multi-Format Reporting**: Export analysis results to Light-Mode Executive PDF reports (with heatmaps), SIEM-ready CSV logs, or JSON dumps for automated pipelines.
+* **Shell Auto-Completions**: Generator subcommand (`rbat completions`) for Bash, Zsh, Fish, PowerShell, and Elvish.
 
 ---
 
@@ -27,14 +28,14 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rbat = "0.2.0"
+rbat = "1.0.1"
 ```
 
 ---
 
 ## Quick Start
 
-The following is a minimal example demonstrating how to run a programmatic static analysis on a target binary and retrieve its risk assessment score:
+The following minimal example demonstrates how to run a programmatic static analysis on a target binary and retrieve its risk assessment score:
 
 ```rust
 use std::path::Path;
@@ -45,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (analysis_result, risk_assessment) = analyze_batch(path)?;
 
     println!("Analysis complete for: {}", analysis_result.metadata.binary_type);
+    println!("Architecture: {}", analysis_result.metadata.architecture_name());
     println!("Threat Score: {}/100", risk_assessment.score);
     println!("Severity: {}", risk_assessment.severity);
 
@@ -58,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Programmatic Streaming Analysis
 
-You can consume analysis updates as they occur (e.g., to feed a progress bar or custom logger) using `analyze_streaming`:
+Consume analysis updates as they occur using `analyze_streaming`:
 
 ```rust
 use std::path::Path;
@@ -70,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     analyze_streaming(path, |event| match event {
         AnalysisProgress::BinaryMetadata(meta) => {
-            println!("Target platform: {}", meta.binary_type);
+            println!("Target platform: {} ({})", meta.binary_type, meta.architecture_name());
         }
         AnalysisProgress::Entropy(sections) => {
             println!("Calculated entropy for {} sections", sections.len());
@@ -105,33 +107,85 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (result, score) = analyze_batch(binary_path)?;
 
-    // PDF Report
+    // Executive Light-Mode PDF Report
     generate_pdf_report(binary_path, &score, &result, &out_dir.join("report.pdf"))?;
 
-    // CSV Report
+    // SIEM-Ready CSV Report
     generate_csv_report(binary_path, &score, &out_dir.join("report.csv"))?;
 
-    // JSON Report
+    // Structured JSON Dump
     generate_json_report(binary_path, &score, &result, &out_dir.join("report.json"))?;
 
     Ok(())
 }
 ```
 
-### CLI Mode
-
-Alternatively, run `rbat` as a command-line application.
-
-Analyze a binary and display the interactive dashboard:
-```bash
-rbat <path_to_binary> --tui
-```
-
-Generate reports and save them to a directory:
-```bash
-rbat <path_to_binary> --pdf --csv --json --out-dir ./reports
-```
 ---
+
+## CLI Mode Commands & Subcommands
+
+Run `rbat` as a command-line application using its explicit subcommand interface.
+
+### 1. `rbat analyze <PATH>`
+
+Analyze a binary executable and display terminal summary reports or generate artifacts:
+
+```bash
+# Display interactive TUI dashboard
+rbat analyze /path/to/binary --tui
+
+# Generate PDF, CSV, and JSON reports into a target directory
+rbat analyze /path/to/binary --pdf --csv --json --out-dir ./reports
+
+# Include custom JSON threat detection rules
+rbat analyze /path/to/binary --rules ./custom_rules
+
+# Output Control Flow Graph (CFG) in Graphviz DOT format to stdout
+rbat analyze /path/to/binary --cfg
+```
+
+#### `rbat analyze` Flags:
+* `-t, --tui`: Launch the interactive Ratatui terminal UI dashboard.
+* `-p, --pdf`: Generate a Light-Mode Executive PDF report.
+* `-c, --csv`: Generate a SIEM-ready CSV report.
+* `-j, --json`: Generate a structured JSON analysis report.
+* `-g, --cfg`: Output the Control Flow Graph (CFG) in Graphviz DOT format to `stdout`.
+* `-o, --out-dir <DIR>`: Output directory for generated report files (default: `.`).
+* `-r, --rules <RULES>`: Load custom JSON threat rules from a directory.
+* `-d, --dry-run`: Run static analysis pipeline without emitting output files or launching the UI.
+
+### 2. `rbat rules`
+
+Inspect, validate, or generate custom JSON threat detection rules:
+
+```bash
+# Print an annotated example JSON rule template
+rbat rules example
+
+# Output the Draft-07 JSON Schema definition
+rbat rules schema
+
+# Validate all custom JSON rules in a directory against the schema
+rbat rules validate --dir ./my_rules
+```
+
+### 3. `rbat completions <SHELL>`
+
+Generate shell completion scripts for auto-completing commands:
+
+```bash
+# Bash
+rbat completions bash > ~/.local/share/bash-completion/completions/rbat
+
+# Zsh
+rbat completions zsh > ~/.zfunc/_rbat
+
+# Fish
+rbat completions fish > ~/.config/fish/completions/rbat.fish
+```
+
+---
+
 ## Links
 
 * [Documentation (docs.rs)](https://docs.rs/rbat)

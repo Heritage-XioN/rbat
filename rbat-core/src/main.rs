@@ -1,3 +1,10 @@
+//! # RBAT CLI Executable Entry Point
+//!
+//! This module provides the main entry point for the `rbat` command-line executable.
+//! It handles subcommand dispatch (`analyze`, `rules`, `completions`), manages the streaming
+//! static analysis pipeline, displays terminal progress bars and TrueColor reports, and invokes
+//! the Ratatui interactive TUI dashboard.
+
 use clap::Parser;
 use color_eyre::Result;
 use indicatif::{ProgressBar, ProgressStyle};

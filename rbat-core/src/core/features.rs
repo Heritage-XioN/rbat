@@ -56,3 +56,80 @@ impl FeatureSet {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::types::{AnalysisResult, YaraMatches};
+
+    #[test]
+    fn test_feature_set_creation_populated() {
+        let mut res = AnalysisResult::default();
+
+        // Setup API Hooking
+        res.api_hooking.insert("VirtualAlloc".to_string(), 1);
+
+        // Setup Process Injection
+        res.process_injection
+            .insert("WriteProcessMemory".to_string());
+
+        // Setup Strings
+        let yara_match = YaraMatches {
+            offset: 0,
+            section: ".data".to_string(),
+            length: 4,
+            data: "http://malicious.com".to_string(),
+        };
+        res.string_values
+            .insert("url".to_string(), vec![yara_match]);
+
+        // Setup Mnemonics
+        res.blacklisted_mnemonics
+            .insert("cpuid".to_string(), vec![1000, 1004]);
+
+        // Setup Section Entropies
+        res.section_entropy.insert(".text".to_string(), 6.8);
+
+        // Setup Code Cave
+        res.code_cave
+            .insert("nop_addr".to_string(), vec![2000, 2001]);
+
+        // Setup Packer Signatures
+        res.packer_signatures.insert("UPX".to_string(), vec![]);
+
+        let fs = FeatureSet::from_analysis_result(&res);
+
+        // Test APIs (both hooking and process injection should be merged)
+        assert!(fs.apis.contains("VirtualAlloc"));
+        assert!(fs.apis.contains("WriteProcessMemory"));
+        assert_eq!(fs.apis.len(), 2);
+
+        // Test Strings
+        assert!(fs.strings.contains("http://malicious.com"));
+        assert_eq!(fs.strings.len(), 1);
+
+        // Test Mnemonics
+        assert!(fs.mnemonics.contains("cpuid"));
+        assert_eq!(fs.mnemonics.len(), 1);
+
+        // Test Section Entropies
+        assert_eq!(fs.section_entropies.get(".text"), Some(&6.8));
+
+        // Test booleans
+        assert!(fs.has_code_cave);
+        assert!(fs.has_packer_sig);
+    }
+
+    #[test]
+    fn test_feature_set_creation_empty() {
+        let res = AnalysisResult::default();
+        let fs = FeatureSet::from_analysis_result(&res);
+
+        assert!(fs.apis.is_empty());
+        assert!(fs.strings.is_empty());
+        assert!(fs.mnemonics.is_empty());
+        assert!(fs.section_entropies.is_empty());
+        assert!(!fs.has_code_cave);
+        assert!(!fs.has_packer_sig);
+    }
+}

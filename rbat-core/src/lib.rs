@@ -8,7 +8,7 @@
 //! - **Multi-Format Parsing**: Transparently parses ELF, PE, and Mach-O formats utilizing the `goblin` crate.
 //! - **Parallel Heuristic Evaluation**: Runs static analysis modules concurrently using `rayon` thread pools.
 //! - **High-Performance Memory Scanning**: Uses compiled YARA rules for memory scans, cached section mappings, and zero disk I/O.
-//! - **Static Disassembly & inons analysis**: Disassembly via `capstone` to detect NOP sleds, zero-entropy padding, and anti-analysis instructions without early exit evasions.
+//! - **Static Disassembly & Instruction Analysis**: Disassembly via `capstone` to detect NOP sleds, zero-entropy padding, and anti-analysis instructions without early exit evasions.
 //! - **Scoring & Reporting**: Automated risk-score classification (Safe, Suspicious, Malicious) and automated CSV/JSON/PDF generation.
 //!
 //! ## Architectural Overview
