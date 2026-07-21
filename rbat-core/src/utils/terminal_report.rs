@@ -91,8 +91,7 @@ pub fn print_terminal_report(
         "Architecture".with(COLOR_MUTED),
         analysis_result
             .metadata
-            .architecture
-            .to_string()
+            .architecture_name()
             .with(COLOR_ACCENT)
     );
     println!(

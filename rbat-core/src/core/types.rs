@@ -136,6 +136,33 @@ pub struct BinaryMetadata {
     pub architecture: u16,
 }
 
+impl BinaryMetadata {
+    /// Returns a clean, human-readable architecture name (e.g. `"x86_64"`, `"x86"`, `"ARM64"`, `"ARM"`, `"RISC-V"`).
+    pub fn architecture_name(&self) -> String {
+        match (self.binary_type.as_str(), self.architecture) {
+            // x86_64 / x64
+            (_, 62) | (_, 0x8664) => "x86_64".to_string(),
+            // x86 / i386
+            (_, 3) | (_, 0x014c) => "x86".to_string(),
+            // AArch64 / ARM64
+            (_, 183) | (_, 0xaa64) => "ARM64".to_string(),
+            // ARM 32-bit
+            (_, 40) | (_, 0x01c0) => "ARM".to_string(),
+            // RISC-V
+            (_, 243) => "RISC-V".to_string(),
+            // MIPS
+            (_, 8) => "MIPS".to_string(),
+            // PowerPC
+            (_, 20) | (_, 21) => "PowerPC".to_string(),
+            // Mach-O Machine Codes (cputype & 0xFFFF)
+            ("Mach-O", 7) | ("Mach-O (Fat)", 7) => "x86_64".to_string(),
+            ("Mach-O", 12) | ("Mach-O (Fat)", 12) => "ARM64".to_string(),
+            // Unknown Machine Code Fallback
+            _ => format!("Unknown (0x{:04X})", self.architecture),
+        }
+    }
+}
+
 /// Shared context providing read-only access to binary structures across parallel heuristic plugins.
 ///
 /// This structure holds borrows of parsed binary components, allowing heuristic analysis

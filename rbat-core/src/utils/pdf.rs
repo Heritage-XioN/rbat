@@ -185,7 +185,7 @@ pub fn generate_pdf_report(
         findings,
         binary_type: analysis_result.metadata.binary_type.clone(),
         entry_point: format!("0x{:X}", analysis_result.metadata.entry_point),
-        architecture: analysis_result.metadata.architecture.to_string(),
+        architecture: analysis_result.metadata.architecture_name(),
         capabilities,
         signatures,
     };

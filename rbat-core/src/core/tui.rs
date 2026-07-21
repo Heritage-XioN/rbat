@@ -454,7 +454,7 @@ impl App {
             ListItem::new(Line::from(vec![
                 Span::raw(" ARCH: "),
                 Span::styled(
-                    metadata.architecture.to_string(),
+                    metadata.architecture_name(),
                     Style::default().fg(palette::ACCENT),
                 ),
             ])),
