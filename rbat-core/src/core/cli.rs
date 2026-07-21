@@ -52,6 +52,16 @@ pub enum Commands {
     Analyze(AnalyzeArgs),
     /// Inspect, validate, or generate custom JSON security rules
     Rules(RulesArgs),
+    /// Generate shell completion scripts for auto-completing RBAT commands
+    Completions(CompletionsArgs),
+}
+
+/// Arguments for the `rbat completions` subcommand.
+#[derive(Parser, Debug, Clone)]
+#[command(styles = cli_styles())]
+pub struct CompletionsArgs {
+    /// Shell target (`bash`, `zsh`, `fish`, `powershell`, `elvish`)
+    pub shell: clap_complete::Shell,
 }
 
 /// Arguments for the `rbat analyze` subcommand.

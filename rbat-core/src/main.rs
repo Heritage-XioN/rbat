@@ -30,7 +30,15 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Analyze(args) => run_analyze(args),
         Commands::Rules(args) => run_rules(args),
+        Commands::Completions(args) => run_completions(args),
     }
+}
+
+fn run_completions(args: rbat::core::cli::CompletionsArgs) -> Result<()> {
+    use clap::CommandFactory;
+    let mut cmd = Cli::command();
+    clap_complete::generate(args.shell, &mut cmd, "rbat", &mut std::io::stdout());
+    Ok(())
 }
 
 fn run_rules(args: RulesArgs) -> Result<()> {

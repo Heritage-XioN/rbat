@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "name": "process_hollowing_technique",
+    "description": "Flags memory unmapping APIs combined with thread context modification used in process hollowing",
+    "mitre_attack": "T1055.012",
+    "severity": "Critical",
+    "category": "privilege_escalation",
+    "weight": 95,
+    "author": "RBAT Security Team",
+    "references": [
+      "https://attack.mitre.org/techniques/T1055/012/"
+    ],
+    "tags": ["hollowing", "evasion", "injection"]
+  },
+  "condition": {
+    "and": [
+      {
+        "or": [
+          {
+            "feature": {
+              "api": "NtUnmapViewOfSection"
+            }
+          },
+          {
+            "feature": {
+              "api": "ZwUnmapViewOfSection"
+            }
+          }
+        ]
+      },
+      {
+        "feature": {
+          "api": "SetThreadContext"
+        }
+      }
+    ]
+  }
+}
