@@ -51,7 +51,11 @@ impl Rule {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.file_name().and_then(|n| n.to_str()).is_some_and(|name| name.starts_with('.')) {
+                if path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|name| name.starts_with('.'))
+                {
                     continue;
                 }
                 if path.is_dir() {

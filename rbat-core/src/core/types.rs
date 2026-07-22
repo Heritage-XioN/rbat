@@ -315,6 +315,23 @@ pub struct RuleMeta {
     /// Tag labels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// Whether this is a library rule (referenced by other rules but not standalone).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lib: Option<bool>,
+    /// MAEC malware category mapping.
+    #[serde(
+        default,
+        rename = "maec/malware-category",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub maec_malware_category: Option<String>,
+    /// MAEC malware family mapping.
+    #[serde(
+        default,
+        rename = "maec/malware-family",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub maec_malware_family: Option<String>,
 }
 
 /// Supported tag-based feature conditions represented as raw strings.

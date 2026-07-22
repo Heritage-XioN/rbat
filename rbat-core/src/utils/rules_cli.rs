@@ -163,9 +163,7 @@ pub fn print_rule_schema() {
     eprintln!(
         "// Note: This JSON Schema specifies the shape of both custom JSON and YAML threat rules."
     );
-    eprintln!(
-        "// Upstream Mandiant Capa Rules: https://github.com/mandiant/capa-rules\n"
-    );
+    eprintln!("// Upstream Mandiant Capa Rules: https://github.com/mandiant/capa-rules\n");
     println!("{}", schema_json);
 }
 
@@ -230,7 +228,11 @@ fn validate_dir_recursive(
     let entries = fs::read_dir(dir)?;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.file_name().and_then(|n| n.to_str()).is_some_and(|name| name.starts_with('.')) {
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| name.starts_with('.'))
+        {
             continue;
         }
         if path.is_dir() {
