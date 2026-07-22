@@ -1,6 +1,6 @@
 # rbat-client
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge)](https://opensource.org/licenses/Apache-2.0)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci-client.yml?style=for-the-badge&label=build)](https://github.com/Heritage-XioN/rbat/actions)
 [![Next.js Version](https://img.shields.io/badge/Next.js-15.0+-black.svg?style=for-the-badge&logo=nextdotjs)](https://nextjs.org/)
 
@@ -67,4 +67,4 @@ pnpm start
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](../LICENSE) file for details.
+This project is licensed under the Apache License 2.0. See the [LICENSE](../LICENSE) file for details.
