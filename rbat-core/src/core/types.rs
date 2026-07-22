@@ -4,7 +4,10 @@
 //! used throughout the binary analysis pipeline, reporting, and scoring engines.
 
 use super::{BinaryArch, BinaryOS};
-use crate::core::cfg::ControlFlowGraph;
+use crate::{
+    core::{FeatureSet, cfg::ControlFlowGraph},
+    utils::rules::{StringOrVec, parse_count_threshold, parse_number_constant},
+};
 use goblin::Object;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -264,52 +267,271 @@ pub enum InstructionClass {
     Return,
 }
 
-/// Metadata describing a security rule and its mapped threat techniques.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Metadata describing a security rule aligned with the Mandiant `capa` specification.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RuleMeta {
     /// The unique rule identifier name.
     pub name: String,
-    /// Detailed behavior explanation.
-    pub description: String,
-    /// Mapped MITRE ATT&CK technique ID (e.g. `"T1055"`).
-    pub mitre_attack: String,
-    /// Quantitative threat severity rating (e.g. `"Low"`, `"Medium"`, `"High"`, `"Critical"`).
-    pub severity: String,
-    /// MITRE ATT&CK tactic category (e.g. `"defense_evasion"`, `"privilege_escalation"`).
-    pub category: String,
-    /// The individual weight contribution of this rule when matched (0-100).
-    pub weight: u32,
-    /// Optional author or creator attribution of the rule.
+    /// Rule namespace path (e.g. `"communication/c2/shell"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub author: Option<String>,
-    /// Optional list of external reference URLs or research links.
+    pub namespace: Option<String>,
+    /// Authors list or author attribution string.
+    #[serde(default, alias = "author", skip_serializing_if = "Option::is_none")]
+    pub authors: Option<StringOrVec>,
+    /// Rule evaluation scopes (e.g. `{ "static": "function" }`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<HashMap<String, String>>,
+    /// Mapped MITRE ATT&CK technique list or ID (e.g. `["Execution::Windows Command Shell [T1059.003]"]` or `"T1055"`).
+    #[serde(
+        default,
+        alias = "att&ck",
+        alias = "attack",
+        alias = "mitre_attack",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mitre_attack: Option<StringOrVec>,
+    /// Malware Behavior Catalog (MBC) technique mappings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mbc: Option<StringOrVec>,
+    /// Example binary hash offsets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub examples: Option<Vec<String>>,
+    /// Detailed behavior explanation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Threat severity rating (`"Low"`, `"Medium"`, `"High"`, `"Critical"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    /// Threat tactic category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Weight contribution (0-100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u32>,
+    /// Reference URLs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<Vec<String>>,
-    /// Optional custom tagging labels for categorization.
+    /// Tag labels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 }
 
-/// A leaf feature assertion matching code, string, or structural anomalies.
+/// Supported tag-based feature conditions represented as raw strings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleTag {
+    CodeCave,
+    PackerSig,
+    Loop,
+}
+
+/// The inner structure of the rules struct containing rule metadata and feature triggers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleInner {
+    /// The rule metadata.
+    pub meta: RuleMeta,
+    /// The condition tree/features to evaluate.
+    pub features: Vec<RuleCondition>,
+}
+
+/// Boolean logic combinations of rule conditions aligned with the Mandiant `capa` specification.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum FeatureCondition {
-    /// Matches if an imported API function contains this pattern.
-    Api(String),
-    /// Matches if an extracted string contains this pattern.
-    String(String),
-    /// Matches if a blacklisted assembly mnemonic is found.
-    Mnemonic(String),
-    /// Matches if a specific binary section's entropy is equal to or greater than `min`.
+#[serde(untagged)]
+pub enum RuleCondition {
+    // Logic Operators
+    And {
+        and: Vec<RuleCondition>,
+    },
+    Or {
+        or: Vec<RuleCondition>,
+    },
+    Not {
+        not: Box<RuleCondition>,
+    },
+    // capa Supported Feature Assertions
+    Api {
+        api: String,
+    },
+    String {
+        string: String,
+    },
+    Mnemonic {
+        mnemonic: String,
+    },
+    Match {
+        #[serde(rename = "match")]
+        match_name: String,
+    },
     Entropy {
-        /// The target binary section name (e.g. `".text"`).
         section: String,
-        /// The minimum Shannon entropy boundary (0.0 to 8.0).
         min: f64,
     },
-    /// Matches if any code caves were detected.
-    CodeCave,
-    /// Matches if any packer signatures were detected.
-    PackerSig,
+    // codebase heuristics feature
+    Tag(RuleTag),
+    // CFG properties & localized scopes
+    BasicBlocksCount {
+        #[serde(rename = "basic_blocks_count")]
+        count: usize,
+    },
+    CyclomaticComplexity {
+        #[serde(rename = "cyclomatic_complexity")]
+        min: usize,
+    },
+    BasicBlockScope {
+        #[serde(rename = "basic block")]
+        conditions: Vec<RuleCondition>,
+    },
+    CallScope {
+        #[serde(rename = "call")]
+        conditions: Vec<RuleCondition>,
+    },
+    // other capa feature checks
+    Export {
+        export: String,
+    },
+    Import {
+        import: String,
+    },
+    Section {
+        section: String,
+    },
+    Os {
+        os: String,
+    },
+    Arch {
+        arch: String,
+    },
+    Characteristic {
+        characteristic: String,
+    },
+    // catch all variant for unhandled/unsupported rules
+    Other(std::collections::HashMap<String, serde_json::Value>),
+}
+
+impl RuleCondition {
+    /// Recursively evaluates the condition against the feature set.
+    pub fn matches(&self, features: &FeatureSet) -> bool {
+        match self {
+            // Logic Operators
+            Self::And { and } => and.iter().all(|c| c.matches(features)),
+            Self::Or { or } => or.iter().any(|c| c.matches(features)),
+            Self::Not { not } => !not.matches(features),
+            // capa Supported Feature Assertions
+            Self::Api { api } => features
+                .apis
+                .iter()
+                .any(|a| a.to_lowercase().contains(&api.to_lowercase())),
+            Self::String { string } => features
+                .strings
+                .iter()
+                .any(|s| s.to_lowercase().contains(&string.to_lowercase())),
+            Self::Mnemonic { mnemonic } => features.mnemonics.contains(mnemonic),
+            Self::Match { match_name } => features
+                .apis
+                .iter()
+                .chain(features.strings.iter())
+                .any(|s| s.to_lowercase().contains(&match_name.to_lowercase())),
+            Self::Entropy { section, min } => features
+                .section_entropies
+                .get(section)
+                .map(|&e| e >= *min)
+                .unwrap_or(false),
+            // codebase heuristics checks
+            Self::Tag(RuleTag::CodeCave) => features.has_code_cave,
+            Self::Tag(RuleTag::PackerSig) => features.has_packer_sig,
+            Self::Tag(RuleTag::Loop) => features.has_loop,
+            // cfg and basic block checks
+            Self::BasicBlocksCount { count } => features.basic_blocks_count >= *count,
+            Self::CyclomaticComplexity { min } => features.max_cyclomatic_complexity >= *min,
+            Self::BasicBlockScope { conditions } => features.blocks.iter().any(|block| {
+                let local_features =
+                    FeatureSet::from_basic_block(block, &features.os, &features.arch);
+                conditions.iter().all(|cond| cond.matches(&local_features))
+            }),
+            Self::CallScope { conditions } => features.blocks.iter().any(|block| {
+                block.instructions.iter().any(|insn| {
+                    let local_features =
+                        FeatureSet::from_instruction(insn, &features.os, &features.arch);
+                    conditions.iter().all(|cond| cond.matches(&local_features))
+                })
+            }),
+            // Minimally match OS and Arch if present
+            Self::Os { os } => features.os.contains(&os.to_lowercase()),
+            Self::Arch { arch } => features.arch.contains(&arch.to_lowercase()),
+            Self::Import { import } => features
+                .apis
+                .iter()
+                .any(|api| api.to_lowercase().contains(&import.to_lowercase())),
+            Self::Export { export } => features
+                .apis
+                .iter()
+                .any(|api| api.to_lowercase().contains(&export.to_lowercase())),
+            Self::Section { section } => features.section_entropies.contains_key(section),
+            Self::Characteristic { characteristic }
+                if characteristic.to_lowercase().contains("packed") =>
+            {
+                features.has_packer_sig
+            }
+            // this represents a catch all condition for the features
+            // that are not currently unhandled or unsported
+            Self::Other(map) => {
+                for (key, value) in map {
+                    // Check if key is a count assertion, e.g. "count(api(SetHandleInformation))"
+                    if key.starts_with("count(") && key.ends_with(")") {
+                        let inner = &key[6..key.len() - 1]; // e.g. "api(SetHandleInformation)"
+                        if inner.starts_with("api(") && inner.ends_with(")") {
+                            let api_name = &inner[4..inner.len() - 1];
+                            let threshold = parse_count_threshold(value);
+                            let count = features
+                                .apis
+                                .iter()
+                                .filter(|a| a.to_lowercase().contains(&api_name.to_lowercase()))
+                                .count();
+                            if count < threshold {
+                                return false;
+                            }
+                        } else if inner.starts_with("string(") && inner.ends_with(")") {
+                            let str_val = &inner[7..inner.len() - 1];
+                            let threshold = parse_count_threshold(value);
+                            let count = features
+                                .strings
+                                .iter()
+                                .filter(|s| s.to_lowercase().contains(&str_val.to_lowercase()))
+                                .count();
+                            if count < threshold {
+                                return false;
+                            }
+                        } else if inner.starts_with("mnemonic(") && inner.ends_with(")") {
+                            let mnem = &inner[9..inner.len() - 1];
+                            let threshold = parse_count_threshold(value);
+                            let count = if features.mnemonics.iter().any(|m| m == mnem) {
+                                1
+                            } else {
+                                0
+                            };
+                            if count < threshold {
+                                return false;
+                            }
+                        }
+                    }
+                    // Check if key is "number"
+                    else if key == "number" {
+                        let target_num = parse_number_constant(value);
+                        if !features.strings.iter().any(|s| s.contains(&target_num)) {
+                            return false;
+                        }
+                    }
+                    // Fallback for unhandled property (e.g. scope info that doesn't affect detection)
+                    // If the property matches a known metadata field like scopes/examples, ignore it.
+                    // Otherwise return false.
+                    else {
+                        return false;
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
 }

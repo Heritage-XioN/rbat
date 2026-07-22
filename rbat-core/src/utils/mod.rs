@@ -10,6 +10,7 @@ pub mod get_metadata;
 pub mod json;
 pub mod pdf;
 pub mod raw_padding;
+pub mod rules;
 pub mod rules_cli;
 pub mod scoring;
 pub mod section_offset;

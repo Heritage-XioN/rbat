@@ -24,11 +24,11 @@ pub use crate::core::{
     error::RbatError,
     features::FeatureSet,
     heuristics::{disassemble_section, packer_sig_check, string_check},
-    rule::{Rule, RuleCondition},
+    rule::Rule,
     types::{
         AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryMetadata,
-        Confidence, EdgeType, FeatureCondition, Finding, InstructionInfo, MapValue, RiskAssessment,
-        RuleMeta, SectionRange, YaraMatches,
+        Confidence, EdgeType, Finding, InstructionInfo, MapValue, RiskAssessment, RuleCondition,
+        RuleInner, RuleMeta, RuleTag, SectionRange, YaraMatches,
     },
 };
 
