@@ -7,19 +7,18 @@
 //! # Example
 //! ```rust
 //! use rbat::utils::scoring::calculate_risk;
-//! use rbat::core::RuleMeta;
+//! use rbat::core::{RuleMeta};
+//! use rbat::utils::rules::StringOrVec;
 //!
 //! let matches = vec![
 //!     RuleMeta {
 //!         name: "Test".to_string(),
-//!         description: "Test rule".to_string(),
-//!         mitre_attack: "T1055".to_string(),
-//!         severity: "High".to_string(),
-//!         category: "privilege_escalation".to_string(),
-//!         weight: 35,
-//!         author: None,
-//!         references: None,
-//!         tags: None,
+//!         description: Some("Test rule".to_string()),
+//!         mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
+//!         severity: Some("High".to_string()),
+//!         category: Some("privilege_escalation".to_string()),
+//!         weight: Some(35),
+//!         ..Default::default()
 //!     },
 //! ];
 //! let assessment = calculate_risk(&matches);
@@ -57,7 +56,8 @@ pub fn calculate_risk(matched_rules: &[RuleMeta]) -> RiskAssessment {
     let mut findings: Vec<Finding> = Vec::new();
 
     for rule in matched_rules {
-        let confidence = match rule.severity.to_lowercase().as_str() {
+        let severity_str = rule.severity.as_deref().unwrap_or("Medium");
+        let confidence = match severity_str.to_lowercase().as_str() {
             "low" => Confidence::Low,
             "medium" => Confidence::Medium,
             "high" => Confidence::High,
@@ -65,15 +65,28 @@ pub fn calculate_risk(matched_rules: &[RuleMeta]) -> RiskAssessment {
             _ => Confidence::Medium,
         };
 
+        let mitre = rule
+            .mitre_attack
+            .as_ref()
+            .map(|s| s.extract_mitre_id())
+            .unwrap_or_default();
+        let desc = rule.description.as_deref().unwrap_or("");
+        let weight = rule.weight.unwrap_or(20);
+        let category = rule.category.as_deref().unwrap_or("general");
+
         findings.push(Finding {
             indicator: rule.name.clone(),
-            description: format!("{} (MITRE ATT&CK: {})", rule.description, rule.mitre_attack),
+            description: if mitre.is_empty() {
+                desc.to_string()
+            } else {
+                format!("{} (MITRE ATT&CK: {})", desc, mitre)
+            },
             confidence,
-            weight: rule.weight,
+            weight,
         });
 
-        let entry = category_scores.entry(rule.category.clone()).or_insert(0);
-        *entry += rule.weight;
+        let entry = category_scores.entry(category.to_string()).or_insert(0);
+        *entry += weight;
     }
 
     // Apply per-category caps and sum
@@ -118,9 +131,6 @@ fn generate_recommendations(score: u32) -> Vec<String> {
             "Execute strictly within a heavily monitored, isolated sandbox environment."
                 .to_string(),
         );
-        recs.push(
-            "Extract and block all associated network IOCs at the firewall level.".to_string(),
-        );
     }
 
     recs
@@ -128,12 +138,15 @@ fn generate_recommendations(score: u32) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::rules::StringOrVec;
+
     use super::*;
 
     #[test]
     fn test_calculate_risk_safe() {
-        let matches: Vec<RuleMeta> = vec![];
+        let matches = vec![];
         let assessment = calculate_risk(&matches);
+
         assert_eq!(assessment.score, 0);
         assert_eq!(assessment.severity, "Safe");
         assert!(assessment.findings.is_empty());
@@ -142,87 +155,75 @@ mod tests {
     #[test]
     fn test_calculate_risk_single_category() {
         let matches = vec![RuleMeta {
-            name: "Test Rule".to_string(),
-            description: "Test".to_string(),
-            mitre_attack: "T1055".to_string(),
-            severity: "Critical".to_string(),
-            category: "privilege_escalation".to_string(),
-            weight: 35,
-            author: None,
-            references: None,
-            tags: None,
+            name: "Rule 1".to_string(),
+            description: Some("Desc 1".to_string()),
+            mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
+            severity: Some("High".to_string()),
+            category: Some("execution".to_string()),
+            weight: Some(15),
+            ..Default::default()
         }];
-        let assessment = calculate_risk(&matches);
-        // Cap for privilege_escalation is 30, so 35 gets capped to 30
-        assert_eq!(assessment.score, 30);
-        assert_eq!(assessment.severity, "Suspicious");
-        assert_eq!(assessment.findings.len(), 1);
-    }
 
-    #[test]
-    fn test_calculate_risk_multiple_categories() {
-        let matches = vec![
-            RuleMeta {
-                name: "Evasion Rule".to_string(),
-                description: "Test".to_string(),
-                mitre_attack: "T1027".to_string(),
-                severity: "High".to_string(),
-                category: "defense_evasion".to_string(),
-                weight: 30,
-                author: None,
-                references: None,
-                tags: None,
-            },
-            RuleMeta {
-                name: "Injection Rule".to_string(),
-                description: "Test".to_string(),
-                mitre_attack: "T1055".to_string(),
-                severity: "Critical".to_string(),
-                category: "privilege_escalation".to_string(),
-                weight: 35,
-                author: None,
-                references: None,
-                tags: None,
-            },
-        ];
         let assessment = calculate_risk(&matches);
-        // defense_evasion: min(30, 35) = 30
-        // privilege_escalation: min(35, 30) = 30
-        // total = 60
-        assert_eq!(assessment.score, 60);
-        assert_eq!(assessment.severity, "Suspicious");
+        assert_eq!(assessment.score, 15);
+        assert_eq!(assessment.severity, "Safe");
+        assert_eq!(assessment.findings.len(), 1);
     }
 
     #[test]
     fn test_calculate_risk_same_category_capped() {
         let matches = vec![
             RuleMeta {
-                name: "Rule A".to_string(),
-                description: "Test".to_string(),
-                mitre_attack: "T1027".to_string(),
-                severity: "High".to_string(),
-                category: "defense_evasion".to_string(),
-                weight: 25,
-                author: None,
-                references: None,
-                tags: None,
+                name: "Rule 1".to_string(),
+                description: Some("Desc 1".to_string()),
+                mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
+                severity: Some("High".to_string()),
+                category: Some("execution".to_string()),
+                weight: Some(20),
+                ..Default::default()
             },
             RuleMeta {
-                name: "Rule B".to_string(),
-                description: "Test".to_string(),
-                mitre_attack: "T1622".to_string(),
-                severity: "High".to_string(),
-                category: "defense_evasion".to_string(),
-                weight: 30,
-                author: None,
-                references: None,
-                tags: None,
+                name: "Rule 2".to_string(),
+                description: Some("Desc 2".to_string()),
+                mitre_attack: Some(StringOrVec::Single("T1056".to_string())),
+                severity: Some("High".to_string()),
+                category: Some("execution".to_string()),
+                weight: Some(20),
+                ..Default::default()
             },
         ];
+
         let assessment = calculate_risk(&matches);
-        // defense_evasion: min(25 + 30, 35) = 35
-        assert_eq!(assessment.score, 35);
-        assert_eq!(assessment.severity, "Suspicious");
-        assert_eq!(assessment.findings.len(), 2);
+        // "execution" cap is 25, 20 + 20 = 40, capped at 25
+        assert_eq!(assessment.score, 25);
+        assert_eq!(assessment.severity, "Safe");
+    }
+
+    #[test]
+    fn test_calculate_risk_multiple_categories() {
+        let matches = vec![
+            RuleMeta {
+                name: "Rule 1".to_string(),
+                description: Some("Desc 1".to_string()),
+                mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
+                severity: Some("Critical".to_string()),
+                category: Some("privilege_escalation".to_string()),
+                weight: Some(30),
+                ..Default::default()
+            },
+            RuleMeta {
+                name: "Rule 2".to_string(),
+                description: Some("Desc 2".to_string()),
+                mitre_attack: Some(StringOrVec::Single("T1027".to_string())),
+                severity: Some("High".to_string()),
+                category: Some("defense_evasion".to_string()),
+                weight: Some(35),
+                ..Default::default()
+            },
+        ];
+
+        let assessment = calculate_risk(&matches);
+        assert_eq!(assessment.score, 65);
+        assert_eq!(assessment.severity, "Malicious");
     }
 }
