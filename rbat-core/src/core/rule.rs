@@ -16,10 +16,18 @@ pub struct Rule {
 impl Rule {
     /// Parses a Rule from raw bytes, supporting native JSON and YAML Capa rules.
     pub fn from_slice(bytes: &[u8]) -> Result<Self, String> {
-        if let Ok(rule) = yaml_serde::from_slice::<Rule>(bytes) {
-            return Ok(rule);
-        }
-        serde_json::from_slice::<Rule>(bytes).map_err(|e| e.to_string())
+        let mut rule_var = if let Ok(rule) = yaml_serde::from_slice::<Rule>(bytes) {
+            rule
+        } else {
+            serde_json::from_slice::<Rule>(bytes).map_err(|e| e.to_string())?
+        };
+        rule_var.rule.features = rule_var
+            .rule
+            .features
+            .into_iter()
+            .filter_map(|c| c.sanitize())
+            .collect();
+        Ok(rule_var)
     }
 
     /// Evaluates if the feature set matches this rule's conditions.

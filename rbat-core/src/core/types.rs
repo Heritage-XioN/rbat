@@ -427,6 +427,57 @@ pub enum RuleCondition {
 }
 
 impl RuleCondition {
+    /// Recursively sanitizes the condition tree to remove informational description-only nodes.
+    pub fn sanitize(self) -> Option<Self> {
+        match self {
+            Self::And { and } => {
+                let sanitized: Vec<RuleCondition> =
+                    and.into_iter().filter_map(|c| c.sanitize()).collect();
+                if sanitized.is_empty() {
+                    None
+                } else {
+                    Some(Self::And { and: sanitized })
+                }
+            }
+            Self::Or { or } => {
+                let sanitized: Vec<RuleCondition> =
+                    or.into_iter().filter_map(|c| c.sanitize()).collect();
+                if sanitized.is_empty() {
+                    None
+                } else {
+                    Some(Self::Or { or: sanitized })
+                }
+            }
+            Self::Not { not } => not.sanitize().map(|c| Self::Not { not: Box::new(c) }),
+            Self::BasicBlockScope { conditions } => {
+                let sanitized: Vec<RuleCondition> = conditions
+                    .into_iter()
+                    .filter_map(|c| c.sanitize())
+                    .collect();
+                Some(Self::BasicBlockScope {
+                    conditions: sanitized,
+                })
+            }
+            Self::CallScope { conditions } => {
+                let sanitized: Vec<RuleCondition> = conditions
+                    .into_iter()
+                    .filter_map(|c| c.sanitize())
+                    .collect();
+                Some(Self::CallScope {
+                    conditions: sanitized,
+                })
+            }
+            Self::Other(map) => {
+                if map.len() == 1 && map.contains_key("description") {
+                    None
+                } else {
+                    Some(Self::Other(map))
+                }
+            }
+            other => Some(other),
+        }
+    }
+
     /// Recursively evaluates the condition against the feature set.
     pub fn matches(&self, features: &FeatureSet) -> bool {
         match self {
@@ -494,6 +545,11 @@ impl RuleCondition {
             // that are not currently unhandled or unsported
             Self::Other(map) => {
                 for (key, value) in map {
+                    // Ignore informational description fields inside logic trees
+                    if key == "description" {
+                        continue;
+                    }
+
                     // Check if key is a count assertion, e.g. "count(api(SetHandleInformation))"
                     if key.starts_with("count(") && key.ends_with(")") {
                         let inner = &key[6..key.len() - 1]; // e.g. "api(SetHandleInformation)"
@@ -530,6 +586,9 @@ impl RuleCondition {
                             if count < threshold {
                                 return false;
                             }
+                        } else {
+                            // Return false for unsupported count types (e.g. characteristic, match)
+                            return false;
                         }
                     }
                     // Check if key is "number"
@@ -539,9 +598,7 @@ impl RuleCondition {
                             return false;
                         }
                     }
-                    // Fallback for unhandled property (e.g. scope info that doesn't affect detection)
-                    // If the property matches a known metadata field like scopes/examples, ignore it.
-                    // Otherwise return false.
+                    // Fallback for unhandled property
                     else {
                         return false;
                     }
