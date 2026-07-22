@@ -33,58 +33,76 @@ const COLOR_DANGER: Color = Color::Rgb {
     b: 68,
 };
 
-/// Outputs an annotated example JSON rule template to stdout.
+/// Outputs an annotated example JSON and YAML rule template to stdout.
 pub fn print_rule_example() {
     let example_json = r#"{
-  "meta": {
-    "name": "suspicious_process_injection",
-    "description": "Flags process memory injection API call sequences",
-    "mitre_attack": "T1055",
-    "severity": "High",
-    "category": "process_injection",
-    "weight": 80,
-    "author": "RBAT Security Team",
-    "references": [
-      "https://attack.mitre.org/techniques/T1055/"
-    ],
-    "tags": [
-      "injection",
-      "malware"
-    ]
-  },
-  "condition": {
-    "and": [
+  "rule": {
+    "meta": {
+      "name": "privilege_escalation_process_injection",
+      "description": "Flags classical process injection sequence: VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread",
+      "mitre_attack": "Privilege Escalation::Process Injection [T1055]",
+      "severity": "Critical",
+      "category": "privilege_escalation",
+      "weight": 80,
+      "authors": "RBAT Security Team",
+      "tags": ["injection", "process_memory", "remote_thread"]
+    },
+    "features": [
       {
-        "feature": {
-          "api": "VirtualAllocEx"
-        }
-      },
-      {
-        "feature": {
-          "api": "WriteProcessMemory"
-        }
-      },
-      {
-        "feature": {
-          "api": "CreateRemoteThread"
-        }
+        "and": [
+          { "api": "VirtualAllocEx" },
+          { "api": "WriteProcessMemory" },
+          { "api": "CreateRemoteThread" }
+        ]
       }
     ]
   }
 }"#;
 
+    let example_yaml = r#"rule:
+  meta:
+    name: privilege_escalation_process_injection
+    description: Flags classical process injection sequence VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread
+    mitre_attack:
+      - Privilege Escalation::Process Injection [T1055]
+    severity: Critical
+    category: privilege_escalation
+    weight: 80
+    authors:
+      - RBAT Security Team
+    tags:
+      - injection
+      - process_memory
+      - remote_thread
+  features:
+    - and:
+      - api: VirtualAllocEx
+      - api: WriteProcessMemory
+      - api: CreateRemoteThread"#;
+
     println!(
         "\n{}",
-        "── RBAT CUSTOM JSON RULE EXAMPLE ──────────────────────────────".with(COLOR_BORDER)
+        "── RBAT CUSTOM JSON RULE TEMPLATE ─────────────────────────────".with(COLOR_BORDER)
     );
     println!("{}", example_json);
     println!(
         "{}\n",
         "─────────────────────────────────────────────────────────────────".with(COLOR_BORDER)
     );
+
+    println!(
+        "{}",
+        "── RBAT CUSTOM YAML RULE TEMPLATE (CAPA COMPATIBLE) ───────────".with(COLOR_BORDER)
+    );
+    println!("{}", example_yaml);
+    println!(
+        "{}\n",
+        "─────────────────────────────────────────────────────────────────".with(COLOR_BORDER)
+    );
+
     println!(
         "  {}",
-        "Save this template as a .json file inside your custom rules directory."
+        "Save this template as a .json or .yaml file inside your custom rules directory."
             .with(COLOR_MUTED)
             .italic()
     );
@@ -96,9 +114,15 @@ pub fn print_rule_example() {
     );
     println!(
         "  {}",
-        "Condition operators: and, or, not."
+        "Condition operators: and, or, not, basic block, call."
             .with(COLOR_MUTED)
             .italic()
+    );
+    println!(
+        "  {}",
+        "Upstream Mandiant Capa Rules Repository: https://github.com/mandiant/capa-rules"
+            .with(COLOR_ACCENT)
+            .bold()
     );
 }
 
@@ -108,37 +132,40 @@ pub fn print_rule_schema() {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Rule",
   "type": "object",
-  "additionalProperties": false,
-  "required": ["meta", "condition"],
+  "required": ["rule"],
   "properties": {
-    "meta": {
+    "rule": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "description", "mitre_attack", "severity", "category", "weight"],
+      "required": ["meta", "features"],
       "properties": {
-        "name": { "type": "string" },
-        "description": { "type": "string" },
-        "mitre_attack": { "type": "string" },
-        "severity": { "type": "string" },
-        "category": { "type": "string" },
-        "weight": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "author": { "type": "string" },
-        "references": {
-          "type": "array",
-          "items": { "type": "string" }
+        "meta": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "namespace": { "type": "string" },
+            "authors": { "type": ["string", "array"] },
+            "mitre_attack": { "type": ["string", "array"] },
+            "severity": { "type": "string" },
+            "category": { "type": "string" },
+            "weight": { "type": "integer", "minimum": 0, "maximum": 100 }
+          }
         },
-        "tags": {
-          "type": "array",
-          "items": { "type": "string" }
+        "features": {
+          "type": "array"
         }
       }
-    },
-    "condition": {
-      "type": "object"
     }
   }
 }"#;
 
+    eprintln!(
+        "// Note: This JSON Schema specifies the shape of both custom JSON and YAML threat rules."
+    );
+    eprintln!(
+        "// Upstream Mandiant Capa Rules: https://github.com/mandiant/capa-rules\n"
+    );
     println!("{}", schema_json);
 }
 
@@ -165,47 +192,10 @@ pub fn validate_rules_directory(dir: &Path) -> color_eyre::Result<()> {
         line_sep
     );
 
-    let entries = fs::read_dir(dir)?;
     let mut valid_count = 0;
     let mut invalid_count = 0;
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
-            let filename = path.file_name().unwrap_or_default().to_string_lossy();
-            match fs::read(&path) {
-                Ok(data) => match serde_json::from_slice::<crate::core::Rule>(&data) {
-                    Ok(rule) => {
-                        valid_count += 1;
-                        println!(
-                            "  {} {} -> \"{}\"",
-                            "✔ [VALID]".with(COLOR_SUCCESS).bold(),
-                            filename.with(COLOR_MUTED),
-                            rule.meta.name.with(COLOR_ACCENT)
-                        );
-                    }
-                    Err(err) => {
-                        invalid_count += 1;
-                        println!(
-                            "  {} {} -> {}",
-                            "❌ [INVALID]".with(COLOR_DANGER).bold(),
-                            filename.with(COLOR_DANGER),
-                            err.to_string().with(COLOR_MUTED)
-                        );
-                    }
-                },
-                Err(err) => {
-                    invalid_count += 1;
-                    println!(
-                        "  {} {} -> Failed to read file: {}",
-                        "❌ [ERROR]".with(COLOR_DANGER).bold(),
-                        filename.with(COLOR_DANGER),
-                        err
-                    );
-                }
-            }
-        }
-    }
+    validate_dir_recursive(dir, &mut valid_count, &mut invalid_count)?;
 
     println!("{}", line_sep);
     println!(
@@ -232,6 +222,61 @@ pub fn validate_rules_directory(dir: &Path) -> color_eyre::Result<()> {
     }
 }
 
+fn validate_dir_recursive(
+    dir: &Path,
+    valid_count: &mut usize,
+    invalid_count: &mut usize,
+) -> color_eyre::Result<()> {
+    let entries = fs::read_dir(dir)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.file_name().and_then(|n| n.to_str()).is_some_and(|name| name.starts_with('.')) {
+            continue;
+        }
+        if path.is_dir() {
+            validate_dir_recursive(&path, valid_count, invalid_count)?;
+        } else if path.is_file()
+            && path
+                .extension()
+                .is_some_and(|ext| ext == "json" || ext == "yaml" || ext == "yml")
+        {
+            let filename = path.file_name().unwrap_or_default().to_string_lossy();
+            match fs::read(&path) {
+                Ok(data) => match crate::core::Rule::from_slice(&data) {
+                    Ok(rule) => {
+                        *valid_count += 1;
+                        println!(
+                            "  {} {} -> \"{}\"",
+                            "✔ [VALID]".with(COLOR_SUCCESS).bold(),
+                            filename.with(COLOR_MUTED),
+                            rule.rule.meta.name.with(COLOR_ACCENT)
+                        );
+                    }
+                    Err(err) => {
+                        *invalid_count += 1;
+                        println!(
+                            "  {} {} -> {}",
+                            "❌ [INVALID]".with(COLOR_DANGER).bold(),
+                            filename.with(COLOR_DANGER),
+                            err.to_string().with(COLOR_MUTED)
+                        );
+                    }
+                },
+                Err(err) => {
+                    *invalid_count += 1;
+                    println!(
+                        "  {} {} -> Failed to read file: {}",
+                        "❌ [ERROR]".with(COLOR_DANGER).bold(),
+                        filename.with(COLOR_DANGER),
+                        err
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,21 +293,18 @@ mod tests {
         let dir = tempdir().unwrap();
         let rule_path = dir.path().join("test_rule.json");
         let valid_json = r#"{
-  "meta": {
-    "name": "test_rule",
-    "description": "test",
-    "mitre_attack": "T1000",
-    "severity": "Low",
-    "category": "test",
-    "weight": 10,
-    "author": "Alice",
-    "references": ["https://example.com"],
-    "tags": ["test"]
-  },
-  "condition": {
-    "feature": {
-      "code_cave": null
-    }
+  "rule": {
+    "meta": {
+      "name": "test_rule",
+      "description": "test",
+      "mitre_attack": "T1000",
+      "severity": "Low",
+      "category": "test",
+      "weight": 10
+    },
+    "features": [
+      "code_cave"
+    ]
   }
 }"#;
         fs::write(&rule_path, valid_json).unwrap();
@@ -275,23 +317,97 @@ mod tests {
         let dir = tempdir().unwrap();
         let rule_path = dir.path().join("invalid_rule.json");
         let invalid_json = r#"{
-  "meta": {
-    "name": "test_rule",
-    "description": "test",
-    "mitre_attack": "T1000",
-    "severity": "Low",
-    "category": "test",
-    "weight": 10,
-    "unknown_typo_field": "invalid"
-  },
-  "condition": {
-    "feature": {
-      "code_cave": null
-    }
+  "rule": {
+    "meta": {
+      "name": "test_rule",
+      "description": "test",
+      "mitre_attack": "T1000",
+      "severity": "Low",
+      "category": "test",
+      "weight": 10,
+      "unknown_typo_field": "invalid"
+    },
+    "features": [
+      "code_cave"
+    ]
   }
 }"#;
         fs::write(&rule_path, invalid_json).unwrap();
 
         assert!(validate_rules_directory(dir.path()).is_err());
+    }
+
+    #[test]
+    fn test_validate_rules_directory_yaml_and_capa() {
+        let dir = tempdir().unwrap();
+        let rule_path = dir.path().join("capa_rule.yaml");
+        let valid_yaml = r#"
+rule:
+  meta:
+    name: "capa_process_injection"
+    description: "Detects process injection API calls"
+    att&ck: "T1055"
+    severity: "High"
+    category: "privilege_escalation"
+    weight: 80
+  features:
+    - and:
+        - api: VirtualAllocEx
+        - api: WriteProcessMemory
+"#;
+        fs::write(&rule_path, valid_yaml).unwrap();
+
+        assert!(validate_rules_directory(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_authentic_mandiant_capa_rule() {
+        let dir = tempdir().unwrap();
+        let rule_path = dir.path().join("reverse_shell.yaml");
+        let authentic_capa_yaml = r#"
+rule:
+  meta:
+    name: create reverse shell
+    namespace: communication/c2/shell
+    authors:
+      - moritz.raabe@mandiant.com
+    scopes:
+      static: function
+      dynamic: span of calls
+    att&ck:
+      - Execution::Command and Scripting Interpreter::Windows Command Shell [T1059.003]
+    mbc:
+      - Impact::Remote Access::Reverse Shell [B0022.001]
+    examples:
+      - C91887D861D9BD4A5872249B641BC9F9:0x401A77
+  features:
+    - or:
+        - and:
+            - api: PeekNamedPipe
+            - api: CreateProcess
+            - api: ReadFile
+            - api: WriteFile
+        - and:
+            - match: host-interaction/process/create
+            - match: read pipe
+            - match: write pipe
+        - and:
+            - match: create pipe
+            - match: host-interaction/process/create
+            - or:
+                - basic block:
+                    - and:
+                        - count(api(SetHandleInformation)): 2 or more
+                        - number: 1 = HANDLE_FLAG_INHERIT
+                - call:
+                    - and:
+                        - count(api(SetHandleInformation)): 2 or more
+                        - number: 1 = HANDLE_FLAG_INHERIT
+"#;
+        fs::write(&rule_path, authentic_capa_yaml).unwrap();
+
+        let data = fs::read(&rule_path).unwrap();
+        assert!(crate::core::Rule::from_slice(&data).is_ok());
+        assert!(validate_rules_directory(dir.path()).is_ok());
     }
 }
