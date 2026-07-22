@@ -20,8 +20,6 @@
 * **Multi-Format Reporting**: Export analysis results to Light-Mode Executive PDF reports (with heatmaps), SIEM-ready CSV logs, or JSON dumps for automated pipelines.
 * **Shell Auto-Completions**: Generator subcommand (`rbat completions`) for Bash, Zsh, Fish, PowerShell, and Elvish.
 
----
-
 ## Installation
 
 Add this to your `Cargo.toml`:
@@ -30,6 +28,16 @@ Add this to your `Cargo.toml`:
 [dependencies]
 rbat = "1.0.1"
 ```
+
+### Capa Rules Submodule
+
+To use the embedded Mandiant Capa ruleset, ensure the rules submodule is initialized and cloned:
+
+```bash
+git submodule update --init --recursive
+```
+
+If the submodule is not checked out at compile-time, `rbat` will build with the minimal json rules present in the codebase and or fallback to loading custom rules from user-specified directories.
 
 ---
 
@@ -159,13 +167,13 @@ rbat analyze /path/to/binary --cfg
 Inspect, validate, or generate custom JSON threat detection rules:
 
 ```bash
-# Print an annotated example JSON rule template
+# Print an annotated example JSON and yaml rule template
 rbat rules example
 
 # Output the Draft-07 JSON Schema definition
 rbat rules schema
 
-# Validate all custom JSON rules in a directory against the schema
+# Validate all custom JSON and yaml rules in a directory against the schema
 rbat rules validate --dir ./my_rules
 ```
 
