@@ -1,23 +1,24 @@
 {
-  "meta": {
-    "name": "Persistence: API Hooking",
-    "description": "Detects API functions commonly used for hooking, detour, or interception techniques.",
-    "mitre_attack": "T1056",
-    "severity": "High",
-    "category": "persistence",
-    "weight": 25,
-    "author": "RBAT Security Team",
-    "references": [
-      "https://attack.mitre.org/techniques/T1056/"
-    ],
-    "tags": ["api_hooking", "detours", "interception"]
-  },
-  "condition": {
-    "or": [
-      { "feature": { "api": "SetWindowsHookEx" } },
-      { "feature": { "api": "DetourAttach" } },
-      { "feature": { "api": "MH_CreateHook" } },
-      { "feature": { "api": "frida_agent_main" } }
+  "rule": {
+    "meta": {
+      "name": "persistence_api_hooking",
+      "description": "Detects API functions commonly used for hooking, detour, or interception techniques",
+      "severity": "High",
+      "category": "persistence",
+      "weight": 25,
+      "mitre_attack": "Persistence::Input Capture [T1056]",
+      "authors": "RBAT Security Team",
+      "tags": ["api_hooking", "detours", "interception"]
+    },
+    "features": [
+      {
+        "or": [
+          { "api": "SetWindowsHookEx" },
+          { "api": "DetourAttach" },
+          { "api": "MH_CreateHook" },
+          { "api": "frida_agent_main" }
+        ]
+      }
     ]
   }
 }

@@ -1,21 +1,17 @@
 {
-  "meta": {
-    "name": "Evasion: Obfuscation / Packed Executable",
-    "description": "Detects signs of crypters, packers, or high-entropy executable sections indicative of compressed/encrypted code.",
-    "mitre_attack": "T1027",
-    "severity": "Medium",
-    "category": "defense_evasion",
-    "weight": 25,
-    "author": "RBAT Security Team",
-    "references": [
-      "https://attack.mitre.org/techniques/T1027/"
-    ],
-    "tags": ["packer", "obfuscation", "crypter"]
-  },
-  "condition": {
-    "or": [
-      { "feature": "packer_sig" },
-      { "feature": { "entropy": { "section": ".text", "min": 7.2 } } }
+  "rule": {
+    "meta": {
+      "name": "evasion_obfuscated_packed_executable",
+      "description": "Identifies signatures of popular binary runtime packers (UPX, ASPack, Themida)",
+      "severity": "Medium",
+      "category": "defense_evasion",
+      "weight": 20,
+      "mitre_attack": "Defense Evasion::Software Packing [T1027.002]",
+      "authors": "RBAT Security Team",
+      "tags": ["packer", "upx", "themida"]
+    },
+    "features": [
+      "packer_sig"
     ]
   }
 }

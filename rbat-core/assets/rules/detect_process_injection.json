@@ -1,23 +1,23 @@
 {
-  "meta": {
-    "name": "Privilege Escalation: Process Injection",
-    "description": "Detects suspicious API calls related to remote memory allocation, writing process memory, or remote execution.",
-    "mitre_attack": "T1055",
-    "severity": "Critical",
-    "category": "privilege_escalation",
-    "weight": 35,
-    "author": "RBAT Security Team",
-    "references": [
-      "https://attack.mitre.org/techniques/T1055/"
-    ],
-    "tags": ["process_injection", "injection", "memory"]
-  },
-  "condition": {
-    "or": [
-      { "feature": { "api": "VirtualAllocEx" } },
-      { "feature": { "api": "WriteProcessMemory" } },
-      { "feature": { "api": "CreateRemoteThread" } },
-      { "feature": { "api": "NtCreateThreadEx" } }
+  "rule": {
+    "meta": {
+      "name": "privilege_escalation_process_injection",
+      "description": "Flags classical process injection sequence: VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread",
+      "severity": "Critical",
+      "category": "privilege_escalation",
+      "weight": 80,
+      "mitre_attack": "Privilege Escalation::Process Injection [T1055]",
+      "authors": "RBAT Security Team",
+      "tags": ["injection", "process_memory", "remote_thread"]
+    },
+    "features": [
+      {
+        "and": [
+          { "api": "VirtualAllocEx" },
+          { "api": "WriteProcessMemory" },
+          { "api": "CreateRemoteThread" }
+        ]
+      }
     ]
   }
 }

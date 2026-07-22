@@ -1,22 +1,23 @@
 {
-  "meta": {
-    "name": "Evasion: Anti-Debugging or Anti-VM Instructions",
-    "description": "Detects presence of CPU instructions often used for virtual machine detection or debugger checks.",
-    "mitre_attack": "T1622",
-    "severity": "High",
-    "category": "defense_evasion",
-    "weight": 30,
-    "author": "RBAT Security Team",
-    "references": [
-      "https://attack.mitre.org/techniques/T1622/"
-    ],
-    "tags": ["anti_debugging", "anti_vm", "evasion"]
-  },
-  "condition": {
-    "or": [
-      { "feature": { "mnemonic": "rdtsc" } },
-      { "feature": { "mnemonic": "cpuid" } },
-      { "feature": { "api": "IsDebuggerPresent" } }
+  "rule": {
+    "meta": {
+      "name": "anti_debugging_or_vm_instructions",
+      "description": "Detects CPU instructions and APIs used for virtual machine detection or debugger checks",
+      "severity": "High",
+      "category": "defense_evasion",
+      "weight": 30,
+      "mitre_attack": "Defense Evasion::Debugger Evasion [T1622]",
+      "authors": "RBAT Security Team",
+      "tags": ["anti_debugging", "anti_vm", "evasion"]
+    },
+    "features": [
+      {
+        "or": [
+          { "mnemonic": "rdtsc" },
+          { "mnemonic": "cpuid" },
+          { "api": "IsDebuggerPresent" }
+        ]
+      }
     ]
   }
 }

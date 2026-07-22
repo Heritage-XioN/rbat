@@ -1,18 +1,17 @@
 {
-  "meta": {
-    "name": "Evasion: Code Caves Detected",
-    "description": "Large blocks of executable null bytes or NOP sleds detected, indicating potential payload injection sites.",
-    "mitre_attack": "T1027.009",
-    "severity": "High",
-    "category": "defense_evasion",
-    "weight": 25,
-    "author": "RBAT Security Team",
-    "references": [
-      "https://attack.mitre.org/techniques/T1027/009/"
-    ],
-    "tags": ["code_cave", "injection", "padding"]
-  },
-  "condition": {
-    "feature": "code_cave"
+  "rule": {
+    "meta": {
+      "name": "evasion_code_caves_detected",
+      "description": "Large blocks of executable null bytes or NOP sleds detected, indicating potential payload injection sites",
+      "severity": "High",
+      "category": "defense_evasion",
+      "weight": 25,
+      "mitre_attack": "Defense Evasion::Embedded Payload [T1027.009]",
+      "authors": "RBAT Security Team",
+      "tags": ["code_cave", "injection", "padding"]
+    },
+    "features": [
+      "code_cave"
+    ]
   }
 }

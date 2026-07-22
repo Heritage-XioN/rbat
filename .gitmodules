@@ -1,0 +1,3 @@
+[submodule "rbat-core/assets/capa-rules"]
+	path = rbat-core/assets/capa-rules
+	url = https://github.com/mandiant/capa-rules.git
