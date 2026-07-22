@@ -37,6 +37,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install System Dependencies (Linux)
         if: runner.os == 'Linux'
@@ -91,6 +93,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Extract Version from Tag
         id: get_version

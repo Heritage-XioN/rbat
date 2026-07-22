@@ -26,6 +26,7 @@ jobs:
           # Use RELEASE_PAT if available to trigger downstream workflows on tag push
           token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          submodules: recursive
 
       - name: Install System Dependencies
         run: |
