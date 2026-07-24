@@ -663,12 +663,12 @@ impl App {
                     Row::new(vec![
                         Cell::from(format!("0x{:08X}", inst.address))
                             .style(Style::default().fg(palette::MUTED)),
-                        Cell::from(inst.mnemonic.as_str()).style(
+                        Cell::from(&*inst.mnemonic).style(
                             Style::default()
                                 .fg(palette::ACCENT)
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Cell::from(inst.op_str.as_str()).style(Style::default().fg(palette::TEXT)),
+                        Cell::from(&*inst.op_str).style(Style::default().fg(palette::TEXT)),
                     ])
                 })
                 .collect();

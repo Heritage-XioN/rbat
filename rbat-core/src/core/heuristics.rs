@@ -51,7 +51,7 @@ pub fn disassemble_section(
     };
 
     for i in instructions {
-        let mnemonic = i.mnemonic.as_str();
+        let mnemonic = &*i.mnemonic;
 
         // Accumulate NOP sleds
         if mnemonic == "nop" {
@@ -152,14 +152,14 @@ mod tests {
         for addr in 0x1000..0x1080 {
             instructions.push(InstructionInfo {
                 address: addr as u64,
-                mnemonic: "nop".to_string(),
-                op_str: "".to_string(),
+                mnemonic: "nop".into(),
+                op_str: "".into(),
             });
         }
         instructions.push(InstructionInfo {
             address: 0x1080,
-            mnemonic: "rdtsc".to_string(),
-            op_str: "".to_string(),
+            mnemonic: "rdtsc".into(),
+            op_str: "".into(),
         });
 
         let (code_cave, blacklisted) = disassemble_section(&instructions, &[], 0x1000).unwrap();

@@ -30,7 +30,7 @@
 //!     let buffer = std::fs::read(binary_path)?;
 //!     
 //!     // Perform batch analysis to retrieve findings and risk score
-//!     let (result, assessment) = analyze_batch(&buffer)?;
+//!     let (result, assessment) = analyze_batch(&buffer, None)?;
 //!     
 //!     println!("Binary Architecture: {}", result.metadata.architecture);
 //!     println!("Calculated Risk Score: {}", assessment.score);

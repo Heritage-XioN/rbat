@@ -256,8 +256,8 @@ mod tests {
         let instructions = vec![
             crate::core::InstructionInfo {
                 address: 0x1000,
-                mnemonic: "nop".to_string(),
-                op_str: "".to_string(),
+                mnemonic: "nop".into(),
+                op_str: "".into(),
             };
             128
         ];

@@ -62,7 +62,7 @@ pub fn analyze_stored_binary(s3_client: S3Client, file_id: String, webhook_secre
 
             // Offload to Rayon's CPU threads
             rayon::spawn(move || {
-                let result = analyze_batch(&payload);
+                let result = analyze_batch(&payload, None);
                 let _ = tx.send(result);
             });
 

@@ -12,7 +12,10 @@ use std::sync::atomic::AtomicBool;
 use super::{AnalysisProgress, AnalysisResult, MapValue, Result, RiskAssessment, parser::Parser};
 use crate::{
     core::{AnalysisContext, traits::HeuristicPlugin, types::InstructionInfo},
-    utils::{scoring::calculate_risk, stream_error_helper::capture_error_and_cancel},
+    utils::{
+        flirt::collect_function_entry_points, scoring::calculate_risk,
+        stream_error_helper::capture_error_and_cancel,
+    },
 };
 
 /// Starts the parallel static analysis pipeline in streaming mode.
@@ -21,18 +24,25 @@ use crate::{
 /// to the `on_progress` callback. If any plugin fails, the remaining plugins are cancelled
 /// and the first encountered error is returned.
 ///
+/// FLIRT matching with bundled signatures runs automatically if no custom matcher is provided.
+/// To add custom signatures, load them at the call site and pass a merged `FlirtMatcher`.
+///
 /// # Example
 /// ```rust,no_run
 /// use rbat::core::analyzer::analyze_streaming;
 ///
-/// analyze_streaming(b"some binary bytes", |progress| {
+/// analyze_streaming(b"some binary bytes", None, |progress| {
 ///     // Handle progress updates here
 /// }).unwrap();
 /// ```
 ///
 /// # Errors
 /// Returns `RbatError` if file operations, binary parsing, or plugin scanning fails.
-pub fn analyze_streaming<F>(buffer: &[u8], on_progress: F) -> Result<()>
+pub fn analyze_streaming<F>(
+    buffer: &[u8],
+    custom_flirt: Option<crate::core::flirt::FlirtMatcher>,
+    on_progress: F,
+) -> Result<()>
 where
     F: Fn(AnalysisProgress) + Send + Sync,
 {
@@ -62,10 +72,26 @@ where
             .iter()
             .map(|insn| InstructionInfo {
                 address: insn.address(),
-                mnemonic: insn.mnemonic().unwrap_or("").to_string(),
-                op_str: insn.op_str().unwrap_or("").to_string(),
+                mnemonic: insn.mnemonic().unwrap_or("").into(),
+                op_str: insn.op_str().unwrap_or("").into(),
             })
             .collect();
+
+        // Run FLIRT signature matching (either with custom matcher or fallback to embedded)
+        let entry_points =
+            collect_function_entry_points(&binary_object, &instructions, arch, *entry_addr);
+
+        let library_functions = match custom_flirt {
+            Some(ref matcher) => {
+                matcher.identify_library_functions(&entry_points, text_bytes, *entry_addr)
+            }
+            None => {
+                let embedded = crate::core::flirt::FlirtMatcher::load_embedded();
+                embedded.identify_library_functions(&entry_points, text_bytes, *entry_addr)
+            }
+        };
+
+        on_progress(AnalysisProgress::LibraryFunctions(library_functions));
 
         let ctx = AnalysisContext {
             buffer,
@@ -120,16 +146,19 @@ where
 /// ```rust,no_run
 /// use rbat::core::analyzer::analyze_batch;
 ///
-/// let (result, assessment) = analyze_batch(b"some binary bytes").unwrap();
+/// let (result, assessment) = analyze_batch(b"some binary bytes", None).unwrap();
 /// println!("Threat score: {}", assessment.score);
 /// ```
 ///
 /// # Errors
 /// Returns `RbatError` if file reading, header parsing, or thread orchestration fails.
-pub fn analyze_batch(buffer: &[u8]) -> Result<(AnalysisResult, RiskAssessment)> {
+pub fn analyze_batch(
+    buffer: &[u8],
+    custom_flirt: Option<crate::core::flirt::FlirtMatcher>,
+) -> Result<(AnalysisResult, RiskAssessment)> {
     let (tx, rx) = std::sync::mpsc::channel();
 
-    analyze_streaming(buffer, move |event| {
+    analyze_streaming(buffer, custom_flirt, move |event| {
         let _ = tx.send(event);
     })?;
 
@@ -142,20 +171,29 @@ pub fn analyze_batch(buffer: &[u8]) -> Result<(AnalysisResult, RiskAssessment)> 
                 analysis_result.blacklisted_mnemonics = blacklisted_mnemonics;
             }
             AnalysisProgress::Strings(string_values) => {
-                analysis_result.string_values = string_values
+                analysis_result.string_values = string_values;
             }
             AnalysisProgress::PackerSigs(packer_signatures) => {
-                analysis_result.packer_signatures = packer_signatures
+                analysis_result.packer_signatures = packer_signatures;
             }
             AnalysisProgress::Entropy(section_entropy) => {
-                analysis_result.section_entropy = section_entropy
+                analysis_result.section_entropy = section_entropy;
             }
-            AnalysisProgress::ApiHooking(api_hooking) => analysis_result.api_hooking = api_hooking,
+            AnalysisProgress::ApiHooking(api_hooking) => {
+                analysis_result.api_hooking = api_hooking;
+            }
             AnalysisProgress::ProcessInjection(process_injection) => {
-                analysis_result.process_injection = process_injection
+                analysis_result.process_injection = process_injection;
             }
-            AnalysisProgress::BinaryMetadata(metadata) => analysis_result.metadata = metadata,
-            AnalysisProgress::CFG(cfg) => analysis_result.cfg = Some(cfg),
+            AnalysisProgress::BinaryMetadata(metadata) => {
+                analysis_result.metadata = metadata;
+            }
+            AnalysisProgress::CFG(cfg) => {
+                analysis_result.cfg = Some(cfg);
+            }
+            AnalysisProgress::LibraryFunctions(library_functions) => {
+                analysis_result.library_functions = library_functions;
+            }
         }
     }
 
@@ -183,7 +221,7 @@ mod tests {
         test_helpers::generate_elf(&path);
         let buffer = fs::read(&path).unwrap();
 
-        let result = analyze_batch(&buffer);
+        let result = analyze_batch(&buffer, None);
         assert!(result.is_ok());
         let (analysis, assessment) = result.unwrap();
 
@@ -194,7 +232,7 @@ mod tests {
     #[test]
     fn test_analyze_streaming_err() {
         let buffer = b"invalid_binary_data_format".to_vec();
-        let result = analyze_streaming(&buffer, |_| {});
+        let result = analyze_streaming(&buffer, None, |_| {});
         assert!(result.is_err());
     }
 }

@@ -32,11 +32,15 @@ pub enum AnalysisProgress {
     BinaryMetadata(BinaryMetadata),
     /// Reconstructed Control Flow Graph.
     CFG(ControlFlowGraph),
+    /// Matched library functions mapped by start virtual address.
+    LibraryFunctions(HashMap<u64, String>),
 }
 
 /// Built-in binary assets embedded directly into the library compilation.
 #[derive(RustEmbed)]
 #[folder = "./assets/"]
+#[exclude = "flirtdb/*"]
+#[exclude = "signatures_embedded/*"]
 pub struct Asset;
 
 /// Details of a single YARA rule signature match within a binary section.
@@ -73,6 +77,8 @@ pub struct AnalysisResult {
     pub packer_signatures: HashMap<String, Vec<YaraMatches>>,
     /// Reconstructed Control Flow Graph.
     pub cfg: Option<ControlFlowGraph>,
+    /// Matched library functions mapped by start virtual address.
+    pub library_functions: HashMap<u64, String>,
 }
 
 /// Auxiliary key-value mapping wrapper for binary properties.
@@ -227,9 +233,9 @@ pub struct InstructionInfo {
     /// The virtual memory address of the instruction.
     pub address: u64,
     /// The instruction mnemonic (e.g. `"mov"`, `"jmp"`).
-    pub mnemonic: String,
+    pub mnemonic: std::sync::Arc<str>,
     /// The instruction operands string (e.g. `"rax, rcx"`).
-    pub op_str: String,
+    pub op_str: std::sync::Arc<str>,
 }
 
 /// Represents a basic block: a straight-line sequence of execution with a single entry and exit.
@@ -494,7 +500,7 @@ impl RuleCondition {
                 .strings
                 .iter()
                 .any(|s| s.to_lowercase().contains(&string.to_lowercase())),
-            Self::Mnemonic { mnemonic } => features.mnemonics.contains(mnemonic),
+            Self::Mnemonic { mnemonic } => features.mnemonics.iter().any(|m| &**m == mnemonic),
             Self::Match { match_name } => features
                 .apis
                 .iter()
@@ -578,7 +584,7 @@ impl RuleCondition {
                         } else if inner.starts_with("mnemonic(") && inner.ends_with(")") {
                             let mnem = &inner[9..inner.len() - 1];
                             let threshold = parse_count_threshold(value);
-                            let count = if features.mnemonics.iter().any(|m| m == mnem) {
+                            let count = if features.mnemonics.iter().any(|m| **m == *mnem) {
                                 1
                             } else {
                                 0

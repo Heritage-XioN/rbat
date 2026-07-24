@@ -96,10 +96,17 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
 
     let (tx, rx) = mpsc::channel();
 
-    // Runs streaming analysis on a background thread while main thread updates spinner
+    // Prepare optional FLIRT matcher if custom signatures are provided
+    let mut custom_flirt = None;
+    if let Some(ref sigs_dir) = args.signatures {
+        let mut flirt = rbat::core::FlirtMatcher::load_embedded();
+        flirt.extend(rbat::core::FlirtMatcher::load_from_directory(sigs_dir));
+        custom_flirt = Some(flirt);
+    }
+
     let thread_buffer = buffer.clone();
     let analysis_thread = std::thread::spawn(move || {
-        analyze_streaming(&thread_buffer, move |event| {
+        analyze_streaming(&thread_buffer, custom_flirt, move |event| {
             let _ = tx.send(event);
         })
     });
@@ -161,13 +168,20 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
                 analysis_result.cfg = Some(cfg);
                 spinner.set_message("Reconstructed Control Flow Graph");
             }
+            AnalysisProgress::LibraryFunctions(library_functions) => {
+                analysis_result.library_functions = library_functions.clone();
+                spinner.set_message(format!(
+                    "Matched {} library functions via FLIRT",
+                    library_functions.len()
+                ));
+            }
         }
     }
 
     // Check analysis thread result
     match analysis_thread.join() {
         Ok(analysis_result_inner) => match analysis_result_inner {
-            Ok(_) => spinner.finish_with_message("Analysis complete! 🚀"),
+            Ok(_) => spinner.finish_with_message("Analysis complete!"),
             Err(e) => {
                 spinner.finish_with_message("Analysis failed! ❌");
                 return Err(color_eyre::eyre::eyre!(e));

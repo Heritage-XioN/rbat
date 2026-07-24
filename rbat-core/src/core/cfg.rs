@@ -33,14 +33,14 @@ impl ControlFlowGraph {
         }
 
         for (idx, insn) in instructions.iter().enumerate() {
-            let mnemonic = insn.mnemonic.as_str();
+            let mnemonic = &*insn.mnemonic;
             let class = classify_instruction(mnemonic, arch);
 
             match class {
                 InstructionClass::ConditionalJump
                 | InstructionClass::UnconditionalJump
                 | InstructionClass::Call => {
-                    if let Some(target) = parse_target_address(insn.op_str.as_str()) {
+                    if let Some(target) = parse_target_address(&insn.op_str) {
                         leaders.insert(target);
                     }
                     if idx + 1 < instructions.len() {
@@ -226,8 +226,8 @@ mod tests {
     fn insn(address: u64, mnemonic: &str, op_str: &str) -> InstructionInfo {
         InstructionInfo {
             address,
-            mnemonic: mnemonic.to_string(),
-            op_str: op_str.to_string(),
+            mnemonic: mnemonic.into(),
+            op_str: op_str.into(),
         }
     }
 

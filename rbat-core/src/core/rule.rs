@@ -108,7 +108,7 @@ mod tests {
         section_entropies.insert(".text".to_owned(), 7.8);
 
         let features = FeatureSet {
-            apis: vec!["VirtualAlloc".to_owned()],
+            apis: vec!["VirtualAlloc".into()],
             strings: Vec::new(),
             mnemonics: Vec::new(),
             section_entropies,
@@ -181,18 +181,18 @@ mod tests {
             instructions: vec![
                 InstructionInfo {
                     address: 0x1000,
-                    mnemonic: "mov".to_string(),
-                    op_str: "1 = HANDLE_FLAG_INHERIT".to_string(),
+                    mnemonic: "mov".into(),
+                    op_str: "1 = HANDLE_FLAG_INHERIT".into(),
                 },
                 InstructionInfo {
                     address: 0x1005,
-                    mnemonic: "call".to_string(),
-                    op_str: "SetHandleInformation".to_string(),
+                    mnemonic: "call".into(),
+                    op_str: "SetHandleInformation".into(),
                 },
                 InstructionInfo {
                     address: 0x1010,
-                    mnemonic: "call".to_string(),
-                    op_str: "SetHandleInformation".to_string(),
+                    mnemonic: "call".into(),
+                    op_str: "SetHandleInformation".into(),
                 },
             ],
         };

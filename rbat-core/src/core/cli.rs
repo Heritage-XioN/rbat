@@ -91,6 +91,9 @@ pub struct AnalyzeArgs {
     /// Optional directory containing custom JSON rules to load alongside embedded rules.
     #[arg(short, long)]
     pub rules: Option<PathBuf>,
+    /// Optional directory containing custom FLIRT signatures (.sig or .pat files).
+    #[arg(short, long)]
+    pub signatures: Option<PathBuf>,
     /// Output the Control Flow Graph (CFG) in Graphviz DOT format to stdout.
     #[arg(long)]
     pub cfg: bool,
