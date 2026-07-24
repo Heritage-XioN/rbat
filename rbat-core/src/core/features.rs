@@ -5,17 +5,18 @@
 
 use crate::core::AnalysisResult;
 use crate::core::types::{BasicBlock, InstructionInfo};
+use crate::utils::flirt::find_function_range;
 use std::collections::HashMap;
 
 /// Collected metrics and indicators extracted from the binary for rule evaluation.
 #[derive(Debug, Clone)]
 pub struct FeatureSet {
     /// Mapped API imports and suspicious dynamic symbol links.
-    pub apis: Vec<String>,
+    pub apis: Vec<std::sync::Arc<str>>,
     /// Mapped string constants.
-    pub strings: Vec<String>,
+    pub strings: Vec<std::sync::Arc<str>>,
     /// Blacklisted instruction mnemonics.
-    pub mnemonics: Vec<String>,
+    pub mnemonics: Vec<std::sync::Arc<str>>,
     /// Section Shannon entropies.
     pub section_entropies: HashMap<String, f64>,
     /// Whether any code caves (NOP/zero/trap runs) were mapped.
@@ -37,24 +38,83 @@ pub struct FeatureSet {
 impl FeatureSet {
     /// Populates a `FeatureSet` from the aggregate analysis findings.
     pub fn from_analysis_result(res: &AnalysisResult) -> Self {
+        // Calculate library ranges if any library functions are matched
+        let mut library_ranges = Vec::new();
+        if let Some(ref cfg) = res.cfg {
+            // Collect all instructions across all basic blocks
+            let mut all_instructions: Vec<&InstructionInfo> = cfg
+                .blocks
+                .values()
+                .flat_map(|block| block.instructions.iter())
+                .collect();
+            all_instructions.sort_unstable_by_key(|insn| insn.address);
+            all_instructions.dedup_by_key(|insn| insn.address);
+
+            // Reconstruct all entry points (matched library functions + basic block starts)
+            let mut all_entry_points = std::collections::HashSet::new();
+            for &addr in res.library_functions.keys() {
+                all_entry_points.insert(addr);
+            }
+            for block in cfg.blocks.values() {
+                all_entry_points.insert(block.start_address);
+            }
+
+            let arch_enum = match res.metadata.architecture_name().as_str() {
+                "x86_64" => crate::core::BinaryArch::X64,
+                "x86" => crate::core::BinaryArch::X86,
+                "arm" => crate::core::BinaryArch::Arm,
+                _ => crate::core::BinaryArch::Arm64,
+            };
+
+            for &start_addr in res.library_functions.keys() {
+                let range = find_function_range(
+                    start_addr,
+                    &all_instructions,
+                    &all_entry_points,
+                    &arch_enum,
+                );
+                library_ranges.push(range);
+            }
+        }
+
+        let is_lib_block = |addr: u64| {
+            for &(start, end) in &library_ranges {
+                if addr >= start && addr <= end {
+                    return true;
+                }
+            }
+            false
+        };
+
         let mut apis = Vec::new();
-        for api_name in res.api_hooking.keys() {
-            apis.push(api_name.clone());
+        for (api_name, &addr) in &res.api_hooking {
+            if !is_lib_block(addr) {
+                apis.push(api_name.as_str().into());
+            }
         }
         for api_name in &res.process_injection {
-            apis.push(api_name.clone());
+            apis.push(api_name.as_str().into());
         }
 
         let mut strings = Vec::new();
         for instances in res.string_values.values() {
             for inst in instances {
-                strings.push(inst.data.clone());
+                if !is_lib_block(inst.offset as u64) {
+                    strings.push(inst.data.as_str().into());
+                }
             }
         }
 
         let mut mnemonics = Vec::new();
-        for m in res.blacklisted_mnemonics.keys() {
-            mnemonics.push(m.clone());
+        for (m, addrs) in &res.blacklisted_mnemonics {
+            let filtered_addrs: Vec<u64> = addrs
+                .iter()
+                .copied()
+                .filter(|&addr| !is_lib_block(addr))
+                .collect();
+            if !filtered_addrs.is_empty() {
+                mnemonics.push(m.as_str().into());
+            }
         }
 
         let mut basic_blocks_count = 0;
@@ -63,18 +123,40 @@ impl FeatureSet {
         let mut blocks = Vec::new();
 
         if let Some(ref cfg) = res.cfg {
-            basic_blocks_count = cfg.blocks.len();
-            blocks = cfg.blocks.values().cloned().collect();
+            let filtered_blocks: Vec<BasicBlock> = cfg
+                .blocks
+                .values()
+                .filter(|block| !is_lib_block(block.start_address))
+                .cloned()
+                .collect();
 
-            // Cycle/Loop detection via petgraph
-            let graph = cfg.to_petgraph();
+            basic_blocks_count = filtered_blocks.len();
+            blocks = filtered_blocks;
+
+            // Reconstruct the petgraph containing only non-library blocks
+            let mut graph = petgraph::graph::DiGraph::new();
+            let mut indices = std::collections::HashMap::new();
+
+            for block in &blocks {
+                let idx = graph.add_node(block.clone());
+                indices.insert(block.start_address, idx);
+            }
+
+            let mut filtered_edges_count = 0;
+            for &(src, dst, edge_type) in &cfg.edges {
+                if let (Some(&src_idx), Some(&dst_idx)) = (indices.get(&src), indices.get(&dst)) {
+                    graph.add_edge(src_idx, dst_idx, edge_type);
+                    filtered_edges_count += 1;
+                }
+            }
+
+            // Cycle/Loop detection via petgraph on user code only
             has_loop = petgraph::algo::toposort(&graph, None).is_err();
 
-            // McCabe complexity: E - V + 2
-            let edges_count = cfg.edges.len();
+            // McCabe complexity on user code only
             if basic_blocks_count > 0 {
-                max_cyclomatic_complexity = if edges_count >= basic_blocks_count {
-                    edges_count - basic_blocks_count + 2
+                max_cyclomatic_complexity = if filtered_edges_count >= basic_blocks_count {
+                    filtered_edges_count - basic_blocks_count + 2
                 } else {
                     1
                 };
@@ -107,7 +189,11 @@ impl FeatureSet {
             mnemonics.push(insn.mnemonic.clone());
 
             // Capture API names from call targets
-            if insn.mnemonic.to_lowercase() == "call" {
+            let class = crate::utils::cfg::classify_instruction(
+                &insn.mnemonic,
+                &crate::core::BinaryArch::X64,
+            );
+            if class == crate::core::types::InstructionClass::Call {
                 apis.push(insn.op_str.clone());
             }
 
@@ -201,16 +287,16 @@ mod tests {
         let fs = FeatureSet::from_analysis_result(&res);
 
         // Test APIs (both hooking and process injection should be merged)
-        assert!(fs.apis.contains(&"VirtualAlloc".to_string()));
-        assert!(fs.apis.contains(&"WriteProcessMemory".to_string()));
+        assert!(fs.apis.contains(&"VirtualAlloc".into()));
+        assert!(fs.apis.contains(&"WriteProcessMemory".into()));
         assert_eq!(fs.apis.len(), 2);
 
         // Test Strings
-        assert!(fs.strings.contains(&"http://malicious.com".to_string()));
+        assert!(fs.strings.contains(&"http://malicious.com".into()));
         assert_eq!(fs.strings.len(), 1);
 
         // Test Mnemonics
-        assert!(fs.mnemonics.contains(&"cpuid".to_string()));
+        assert!(fs.mnemonics.contains(&"cpuid".into()));
         assert_eq!(fs.mnemonics.len(), 1);
 
         // Test Section Entropies
@@ -232,5 +318,51 @@ mod tests {
         assert!(fs.section_entropies.is_empty());
         assert!(!fs.has_code_cave);
         assert!(!fs.has_packer_sig);
+    }
+
+    #[test]
+    fn test_feature_set_library_exclusion() {
+        use crate::core::cfg::ControlFlowGraph;
+        use crate::core::types::InstructionInfo;
+
+        let mut res = AnalysisResult::default();
+        res.metadata.architecture = 62;
+
+        let insns = vec![
+            InstructionInfo {
+                address: 0x1000,
+                mnemonic: "mov".into(),
+                op_str: "1 = HANDLE_FLAG_INHERIT".into(),
+            },
+            InstructionInfo {
+                address: 0x2000,
+                mnemonic: "ret".into(),
+                op_str: "".into(),
+            },
+        ];
+
+        let cfg = ControlFlowGraph::new(&insns, &crate::core::BinaryArch::X64);
+        res.cfg = Some(cfg);
+
+        // Add library function at 0x2000
+        res.library_functions.insert(0x2000, "strlen".to_string());
+
+        // Add blacklisted mnemonic and API call inside the library block (at 0x2000)
+        res.blacklisted_mnemonics
+            .insert("cpuid".to_string(), vec![0x2000]);
+        res.api_hooking.insert("VirtualAlloc".to_string(), 0x2000);
+
+        let fs = FeatureSet::from_analysis_result(&res);
+
+        // The user block at 0x1000 should be retained
+        assert!(fs.blocks.iter().any(|b| b.start_address == 0x1000));
+
+        // The library block at 0x2000 should be excluded
+        assert!(!fs.blocks.iter().any(|b| b.start_address == 0x2000));
+        assert_eq!(fs.basic_blocks_count, 1);
+
+        // The API call and blacklisted mnemonic from the library block should be excluded
+        assert!(fs.apis.is_empty());
+        assert!(fs.mnemonics.is_empty());
     }
 }
