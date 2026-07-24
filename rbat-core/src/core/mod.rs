@@ -9,6 +9,7 @@ pub mod cli;
 mod disassembler;
 pub mod error;
 pub mod features;
+pub mod flirt;
 pub mod heuristics;
 pub mod parser;
 pub mod plugins;
@@ -23,6 +24,7 @@ pub use crate::core::{
     disassembler::{BinaryArch, BinaryOS, Factory},
     error::RbatError,
     features::FeatureSet,
+    flirt::FlirtMatcher,
     heuristics::{disassemble_section, packer_sig_check, string_check},
     rule::Rule,
     types::{

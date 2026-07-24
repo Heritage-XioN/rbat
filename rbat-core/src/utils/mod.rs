@@ -6,6 +6,7 @@
 pub mod cfg;
 pub mod csv;
 pub mod entropy;
+pub mod flirt;
 pub mod get_metadata;
 pub mod json;
 pub mod pdf;
