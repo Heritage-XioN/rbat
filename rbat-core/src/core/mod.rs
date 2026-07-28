@@ -34,4 +34,5 @@ pub use crate::core::{
     },
 };
 
+/// A specialized Result type for rbat core operations.
 pub type Result<T> = core::result::Result<T, RbatError>;

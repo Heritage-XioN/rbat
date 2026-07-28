@@ -29,10 +29,13 @@ pub struct FeatureSet<'a> {
     /// Mapped CPU architecture string.
     pub arch: String,
     // CFG structural fields
+    /// The total count of basic blocks.
     pub basic_blocks_count: usize,
+    /// Indicates if a loop structure was detected.
     pub has_loop: bool,
+    /// The maximum cyclomatic complexity across blocks.
     pub max_cyclomatic_complexity: usize,
-    // Captured basic blocks for scope evaluation
+    /// A list of references to the basic blocks.
     pub blocks: Vec<&'a BasicBlock>,
 }
 

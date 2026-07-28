@@ -1,3 +1,5 @@
+//! Fast Library Identification and Recognition Technology module.
+
 use fast_flirt::{FlirtSet, Pattern, sig};
 use rust_embed::RustEmbed;
 use std::collections::HashMap;

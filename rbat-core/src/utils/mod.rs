@@ -17,5 +17,7 @@ pub mod scoring;
 pub mod section_offset;
 pub mod stream_error_helper;
 pub mod terminal_report;
+/// Module containing helper functions specifically used for unit testing.
+#[cfg(test)]
 pub mod test_helpers;
 pub mod viz;

@@ -11,6 +11,7 @@ use crate::core::{Asset, RuleInner, RuleMeta, features::FeatureSet};
 /// The unified top-level structure starting with the standard `rule:` key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rule {
+    /// The inner rule structure containing metadata and evaluation conditions.
     pub rule: RuleInner,
 }
 
@@ -33,7 +34,10 @@ impl Rule {
 
     /// Evaluates if the feature set matches this rule's conditions.
     pub fn matches(&self, features: &FeatureSet, needle: &crate::core::types::NeedleIndex) -> bool {
-        self.rule.features.iter().all(|c| c.matches(features, needle))
+        self.rule
+            .features
+            .iter()
+            .all(|c| c.matches(features, needle))
     }
 
     /// Loads all embedded JSON and YAML rules from assets.

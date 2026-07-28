@@ -95,7 +95,10 @@ impl ControlFlowGraph {
 
             let basic_block = BasicBlock {
                 start_address: start_addr,
-                end_address: block_insns.last().unwrap().address(),
+                end_address: block_insns
+                    .last()
+                    .expect("block_insns cannot be empty")
+                    .address(),
                 instructions: inst_infos,
             };
 
@@ -179,7 +182,9 @@ impl ControlFlowGraph {
             for insn in &block.instructions {
                 label.push_str(&format!(
                     "0x{:X}: {:<6} {}\\l",
-                    insn.address(), insn.format_mnemonic(), insn.format_operands()
+                    insn.address(),
+                    insn.format_mnemonic(),
+                    insn.format_operands()
                 ));
             }
             dot.push_str(&format!("  node_0x{:X} [label=\"{}\"];\n", addr, label));

@@ -112,6 +112,7 @@ pub struct App {
 }
 
 impl App {
+    /// Creates a new App instance given the analysis results.
     pub fn new(analysis_result: AnalysisResult, assessment: RiskAssessment) -> Self {
         let mut overview_state = ListState::default();
         overview_state.select(Some(0));
@@ -663,15 +664,16 @@ impl App {
                     Row::new(vec![
                         Cell::from(format!("0x{:08X}", inst.address()))
                             .style(Style::default().fg(palette::MUTED)),
-                        Cell::from(inst.format_mnemonic()).style(
-                            Style::default().fg(match inst.format_mnemonic().as_str() {
+                        Cell::from(inst.format_mnemonic()).style(Style::default().fg(
+                            match inst.format_mnemonic().as_str() {
                                 "call" | "ret" => palette::ACCENT,
                                 "jmp" | "je" | "jne" => palette::ACCENT_DIM,
                                 "int3" | "nop" => palette::MUTED,
                                 _ => palette::TEXT,
-                            }),
-                        ),
-                        Cell::from(inst.format_operands()).style(Style::default().fg(palette::TEXT)),
+                            },
+                        )),
+                        Cell::from(inst.format_operands())
+                            .style(Style::default().fg(palette::TEXT)),
                     ])
                 })
                 .collect();

@@ -18,17 +18,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Supported target operating systems for assembly syntax style selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOS {
+    /// Windows operating system.
     Win,
+    /// Linux operating system.
     Linux,
+    /// macOS operating system.
     Mac,
 }
 
 /// Supported CPU architectures for disassembly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryArch {
+    /// 32-bit x86 architecture.
     X86,
+    /// 64-bit x86-64 architecture.
     X64,
+    /// 32-bit ARM architecture.
     Arm,
+    /// 64-bit ARM (AArch64) architecture.
     Arm64,
 }
 
@@ -336,19 +343,24 @@ impl<'de> serde::Deserialize<'de> for InstructionInfo {
     }
 }
 
+/// Represents a single disassembled instruction with pre-computed optimization metadata.
 #[cfg(feature = "backend-capstone")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstructionInfo {
+    /// The memory address of the instruction.
     pub address: u64,
+    /// The cached mnemonic string.
     pub mnemonic: std::sync::Arc<str>,
+    /// The cached operand string.
     pub op_str: std::sync::Arc<str>,
-    /// Pre-computed set of Aho-Corasick pattern IDs matched against this instruction's text.
+    /// The set of PatternIDs this instruction matched.
     #[serde(skip)]
     pub matched: Vec<PatternID>,
 }
 
 #[cfg(feature = "backend-capstone")]
 impl InstructionInfo {
+    /// Instantiates an `InstructionInfo` from a Capstone instruction.
     pub fn from_capstone(insn: &capstone::Insn) -> Self {
         Self {
             address: insn.address(),
@@ -358,23 +370,28 @@ impl InstructionInfo {
         }
     }
 
+    /// Returns the address of the instruction.
     pub fn address(&self) -> u64 {
         self.address
     }
 
+    /// Returns a new lowercase formatted mnemonic string.
     pub fn format_mnemonic(&self) -> String {
         self.mnemonic.to_string()
     }
 
+    /// Returns a new lowercase formatted operand string.
     pub fn format_operands(&self) -> String {
         self.op_str.to_string()
     }
 
+    /// Zero-allocation formatted mnemonic writer.
     pub fn format_mnemonic_into(&self, buf: &mut String) {
         buf.clear();
         buf.push_str(&self.mnemonic);
     }
 
+    /// Zero-allocation formatted operand writer.
     pub fn format_operands_into(&self, buf: &mut String) {
         buf.clear();
         buf.push_str(&self.op_str);
@@ -407,12 +424,18 @@ pub enum EdgeType {
     Call,
 }
 
+/// Categorizes an instruction into control flow classes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstructionClass {
+    /// Normal sequential instruction.
     Normal,
+    /// Conditional branching instruction.
     ConditionalJump,
+    /// Unconditional branching instruction.
     UnconditionalJump,
+    /// Subroutine call instruction.
     Call,
+    /// Subroutine return instruction.
     Return,
 }
 
@@ -487,8 +510,11 @@ pub struct RuleMeta {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RuleTag {
+    /// Signifies a code cave (NOP sled or null padding).
     CodeCave,
+    /// Signifies a known packer signature.
     PackerSig,
+    /// Signifies a tight loop construct.
     Loop,
 }
 
@@ -506,72 +532,111 @@ pub struct RuleInner {
 #[serde(untagged)]
 pub enum RuleCondition {
     // Logic Operators
+    /// Logical AND condition.
     And {
+        /// List of conditions that must all be true.
         and: Vec<RuleCondition>,
     },
+    /// Logical OR condition.
     Or {
+        /// List of conditions where at least one must be true.
         or: Vec<RuleCondition>,
     },
+    /// Logical NOT condition.
     Not {
+        /// The condition that must be false.
         not: Box<RuleCondition>,
     },
     // capa Supported Feature Assertions
+    /// Requires a specific API call.
     Api {
+        /// The API name (e.g. `VirtualAlloc`).
         api: String,
     },
+    /// Requires a specific string literal.
     String {
+        /// The string literal to find.
         string: String,
     },
+    /// Requires a specific assembly mnemonic.
     Mnemonic {
+        /// The mnemonic (e.g. `mov`).
         mnemonic: String,
     },
+    /// Matches against another rule by name.
     Match {
+        /// The name of the rule to match.
         #[serde(rename = "match")]
         match_name: String,
     },
+    /// Requires the section entropy to exceed a threshold.
     Entropy {
+        /// The section name.
         section: String,
+        /// The minimum entropy threshold.
         min: f64,
     },
     // codebase heuristics feature
+    /// Requires a specific heuristic tag to be present.
     Tag(RuleTag),
     // CFG properties & localized scopes
+    /// Requires a minimum number of basic blocks in the function.
     BasicBlocksCount {
+        /// The minimum basic blocks count.
         #[serde(rename = "basic_blocks_count")]
         count: usize,
     },
+    /// Requires a minimum cyclomatic complexity.
     CyclomaticComplexity {
+        /// The minimum complexity score.
         #[serde(rename = "cyclomatic_complexity")]
         min: usize,
     },
+    /// Requires conditions to be met within the same basic block.
     BasicBlockScope {
+        /// The scoped conditions.
         #[serde(rename = "basic block")]
         conditions: Vec<RuleCondition>,
     },
+    /// Requires conditions to be met within a specific function call.
     CallScope {
+        /// The scoped conditions.
         #[serde(rename = "call")]
         conditions: Vec<RuleCondition>,
     },
     // other capa feature checks
+    /// Requires a specific exported symbol.
     Export {
+        /// The exported symbol name.
         export: String,
     },
+    /// Requires a specific imported symbol.
     Import {
+        /// The imported symbol name.
         import: String,
     },
+    /// Requires a specific PE/ELF section.
     Section {
+        /// The section name.
         section: String,
     },
+    /// Requires a specific Operating System target.
     Os {
+        /// The OS name (e.g. `windows`).
         os: String,
     },
+    /// Requires a specific Architecture target.
     Arch {
+        /// The architecture name (e.g. `i386`).
         arch: String,
     },
+    /// Requires a specific PE characteristic flag.
     Characteristic {
+        /// The characteristic flag name.
         characteristic: String,
     },
     // catch all variant for unhandled/unsupported rules
+    /// A catch-all variant for unsupported or unknown CAPA rule types.
     Other(std::collections::HashMap<String, serde_json::Value>),
 }
 
@@ -991,9 +1056,11 @@ impl RuleCondition {
 /// to populate `InstructionInfo::matched`, turning subsequent rule evaluation
 /// lookups into O(1) `HashSet::contains` checks.
 pub struct NeedleIndex {
-    /// The compiled Aho-Corasick automaton (case-insensitive).
+    /// The compiled Aho-Corasick automaton.
     pub automaton: AhoCorasick,
+    /// A mapping from a text string to its PatternID.
     pub lookup: HashMap<String, PatternID>,
+    /// A bitmask array tracking which PatternIDs were found anywhere in the CFG.
     pub present: Vec<AtomicBool>,
 }
 

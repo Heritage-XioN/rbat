@@ -122,7 +122,10 @@ where
         });
     }
 
-    if let Some(err) = error_state.into_inner().unwrap() {
+    if let Some(err) = error_state
+        .into_inner()
+        .expect("error_state RwLock was poisoned")
+    {
         return Err(err);
     }
 

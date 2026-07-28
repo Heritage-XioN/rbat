@@ -62,6 +62,7 @@ impl<'bin> Parser<'bin> {
         Ok(section_entropy)
     }
 
+    /// Parses the binary buffer for initial map values.
     pub fn parse_buffer(&self) -> Result<HashMap<String, MapValue>> {
         let mut binary_data: HashMap<String, MapValue> = HashMap::new();
 
@@ -111,6 +112,7 @@ impl<'bin> Parser<'bin> {
         Ok(binary_data)
     }
 
+    /// Checks for process injection indicators.
     pub fn check_process_injec(&self) -> Result<HashSet<String>> {
         let blacklist = &[
             "ptrace",
@@ -170,6 +172,7 @@ impl<'bin> Parser<'bin> {
         Ok(sus_func)
     }
 
+    /// Detects API hooking signatures within section ranges.
     pub fn detect_api_hooking(
         &self,
         section_ranges: &[SectionRange],

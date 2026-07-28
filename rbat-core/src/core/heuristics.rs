@@ -39,23 +39,21 @@ pub fn disassemble_section(
     let mut counter: i32 = 0;
 
     let mut blacklisted_mnemonics: BlacklistedMnemonics = HashMap::new();
-    let blacklist = if let Some(bl) = BLACKLISTED_MNEMONICS.get() {
-        bl
-    } else {
-        let set: HashSet<String> = ["rdtsc", "int1", "rdpmc", "sidt", "sldt", "sgdt", "smsw"]
+    let blacklist = BLACKLISTED_MNEMONICS.get_or_init(|| {
+        ["rdtsc", "int1", "rdpmc", "sidt", "sldt", "sgdt", "smsw"]
             .iter()
             .map(|&s| s.to_string())
-            .collect();
-        let _ = BLACKLISTED_MNEMONICS.set(set);
-        BLACKLISTED_MNEMONICS.get().unwrap()
-    };
+            .collect()
+    });
 
+    let mut buf_m = String::new();
     for i in instructions {
-        let mnemonic = &*i.mnemonic;
+        i.format_mnemonic_into(&mut buf_m);
+        let mnemonic = buf_m.as_str();
 
         // Accumulate NOP sleds
         if mnemonic == "nop" {
-            nop_addr.push(i.address);
+            nop_addr.push(i.address());
             counter += 1;
         } else {
             if counter >= 128 {
@@ -71,7 +69,7 @@ pub fn disassemble_section(
             let entry = blacklisted_mnemonics
                 .entry(mnemonic.to_string())
                 .or_default();
-            entry.push(i.address);
+            entry.push(i.address());
         }
     }
 
@@ -103,20 +101,17 @@ pub fn disassemble_section(
 /// Helper function to perform YARA string detection.
 ///
 /// # Errors
-/// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if goblin fails to parse the file format.
+/// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if object fails to parse the file format.
 pub fn string_check(
     buffer: &[u8],
     section_ranges: &[SectionRange],
 ) -> Result<HashMap<String, Vec<YaraMatches>>> {
-    let rules = if let Some(rules) = SUSPICIOUS_STRINGS_RULES.get() {
-        rules
-    } else {
-        let handler = YaraHandler::new("yara/suspicious_strings.yar".to_owned());
-        let rules = handler.compile_yara_rule()?;
-        let _ = SUSPICIOUS_STRINGS_RULES.set(rules);
-        SUSPICIOUS_STRINGS_RULES.get().unwrap()
-    };
     let handler = YaraHandler::new("yara/suspicious_strings.yar".to_owned());
+    let rules = SUSPICIOUS_STRINGS_RULES.get_or_init(|| {
+        handler
+            .compile_yara_rule()
+            .expect("Failed to compile embedded suspicious_strings.yar")
+    });
     let results = handler.scan_mem(rules, buffer, section_ranges)?;
     Ok(results)
 }
@@ -124,25 +119,22 @@ pub fn string_check(
 /// Helper function to check packer and compiler signatures.
 ///
 /// # Errors
-/// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if goblin fails to parse the file format.
+/// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if object fails to parse the file format.
 pub fn packer_sig_check(
     buffer: &[u8],
     section_ranges: &[SectionRange],
 ) -> Result<HashMap<String, Vec<YaraMatches>>> {
-    let rules = if let Some(rules) = PACKER_SIGNATURES_RULES.get() {
-        rules
-    } else {
-        let handler = YaraHandler::new("yara/packer_signatures.yar".to_owned());
-        let rules = handler.compile_yara_rule()?;
-        let _ = PACKER_SIGNATURES_RULES.set(rules);
-        PACKER_SIGNATURES_RULES.get().unwrap()
-    };
     let handler = YaraHandler::new("yara/packer_signatures.yar".to_owned());
+    let rules = PACKER_SIGNATURES_RULES.get_or_init(|| {
+        handler
+            .compile_yara_rule()
+            .expect("Failed to compile embedded packer_signatures.yar")
+    });
     let results = handler.scan_mem(rules, buffer, section_ranges)?;
     Ok(results)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
 
@@ -154,12 +146,14 @@ mod tests {
                 address: addr as u64,
                 mnemonic: "nop".into(),
                 op_str: "".into(),
+                matched: Vec::new(),
             });
         }
         instructions.push(InstructionInfo {
             address: 0x1080,
             mnemonic: "rdtsc".into(),
             op_str: "".into(),
+            matched: Vec::new(),
         });
 
         let (code_cave, blacklisted) = disassemble_section(&instructions, &[], 0x1000).unwrap();

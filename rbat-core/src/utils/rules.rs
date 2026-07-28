@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Helper enum to deserialize either a single String or a Vec<String> from Serde
+/// Helper enum to deserialize either a single String or a `Vec<String>` from Serde
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum StringOrVec {
