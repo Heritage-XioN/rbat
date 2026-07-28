@@ -4,14 +4,14 @@
 //! a target binary. It exposes both a streaming API (which pushes progress updates to a callback)
 //! and a blocking batch API (which waits for all plugins to complete and calculates a risk score).
 
-use goblin::Object;
+use object::File;
 use rayon;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
 use super::{AnalysisProgress, AnalysisResult, MapValue, Result, RiskAssessment, parser::Parser};
 use crate::{
-    core::{AnalysisContext, traits::HeuristicPlugin, types::InstructionInfo},
+    core::{AnalysisContext, flirt::FlirtMatcher, traits::HeuristicPlugin},
     utils::{
         flirt::collect_function_entry_points, scoring::calculate_risk,
         stream_error_helper::capture_error_and_cancel,
@@ -40,7 +40,7 @@ use crate::{
 /// Returns `RbatError` if file operations, binary parsing, or plugin scanning fails.
 pub fn analyze_streaming<F>(
     buffer: &[u8],
-    custom_flirt: Option<crate::core::flirt::FlirtMatcher>,
+    custom_flirt: Option<FlirtMatcher>,
     on_progress: F,
 ) -> Result<()>
 where
@@ -49,7 +49,7 @@ where
     let error_state = Mutex::new(None);
     let cancel_flag = AtomicBool::new(false);
 
-    let binary_object = Object::parse(buffer)?;
+    let binary_object = File::parse(buffer)?;
     let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, buffer)?;
     let parsed = Parser::new(buffer, &binary_object);
     let binary_data = parsed.parse_buffer()?;
@@ -65,17 +65,9 @@ where
         binary_data.get("text_bytes"),
         binary_data.get("entry_addr"),
     ) {
-        let factory = crate::core::disassembler::Factory::disasm(*os, *arch);
-        let cs = factory.disassemble()?;
-        let cs_insns = cs.disasm_all(text_bytes, *entry_addr)?;
-        let instructions: Vec<InstructionInfo> = cs_insns
-            .iter()
-            .map(|insn| InstructionInfo {
-                address: insn.address(),
-                mnemonic: insn.mnemonic().unwrap_or("").into(),
-                op_str: insn.op_str().unwrap_or("").into(),
-            })
-            .collect();
+        let factory = crate::core::disassembler::DisassemblerImpl::new(*os, *arch);
+        use crate::core::traits::Disassembler;
+        let instructions = factory.disassemble(text_bytes, *entry_addr)?;
 
         // Run FLIRT signature matching (either with custom matcher or fallback to embedded)
         let entry_points =
@@ -147,14 +139,14 @@ where
 /// use rbat::core::analyzer::analyze_batch;
 ///
 /// let (result, assessment) = analyze_batch(b"some binary bytes", None).unwrap();
-/// println!("Threat score: {}", assessment.score);
+/// println!("Risk Score: {}", assessment.score);
 /// ```
 ///
 /// # Errors
 /// Returns `RbatError` if file reading, header parsing, or thread orchestration fails.
 pub fn analyze_batch(
     buffer: &[u8],
-    custom_flirt: Option<crate::core::flirt::FlirtMatcher>,
+    custom_flirt: Option<FlirtMatcher>,
 ) -> Result<(AnalysisResult, RiskAssessment)> {
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -197,11 +189,14 @@ pub fn analyze_batch(
         }
     }
 
-    // Evaluate declarative semantic rules
-    let features = crate::core::features::FeatureSet::from_analysis_result(&analysis_result);
+    // Evaluate the rules
     let rules = crate::core::Rule::load_embedded();
-    let matched_rules = crate::core::Rule::evaluate(&features, &rules);
-
+    let needle_index = crate::core::types::NeedleIndex::build_from_rules(&rules);
+    if let Some(ref mut cfg) = analysis_result.cfg {
+        needle_index.populate_cfg(cfg);
+    }
+    let features = crate::core::features::FeatureSet::from_analysis_result(&analysis_result);
+    let matched_rules = crate::core::Rule::evaluate(&features, &rules, &needle_index);
     let score = calculate_risk(&matched_rules);
 
     Ok((analysis_result, score))

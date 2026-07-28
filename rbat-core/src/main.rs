@@ -14,7 +14,7 @@ use rbat::{
         analyzer::analyze_streaming,
         cli::{AnalyzeArgs, Cli, Commands, RulesAction, RulesArgs},
         tui::App,
-        types::AnalysisProgress,
+        types::{AnalysisProgress, NeedleIndex},
     },
     utils::{
         csv::generate_csv_report,
@@ -104,9 +104,8 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         custom_flirt = Some(flirt);
     }
 
-    let thread_buffer = buffer.clone();
     let analysis_thread = std::thread::spawn(move || {
-        analyze_streaming(&thread_buffer, custom_flirt, move |event| {
+        analyze_streaming(&buffer, custom_flirt, move |event| {
             let _ = tx.send(event);
         })
     });
@@ -203,14 +202,22 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         }
     }
 
-    // Compute threat risk assessment
-    let features = rbat::core::features::FeatureSet::from_analysis_result(&analysis_result);
+    // load rules
     let mut rules = rbat::core::Rule::load_embedded();
     if let Some(ref rules_dir) = args.rules {
         let custom_rules = rbat::core::Rule::load_from_directory(rules_dir);
         rules.extend(custom_rules);
     }
-    let matched_rules = rbat::core::Rule::evaluate(&features, &rules);
+
+    // build global needle index for matching strings
+    let needle_index = NeedleIndex::build_from_rules(&rules);
+    if let Some(ref mut cfg) = analysis_result.cfg {
+        needle_index.populate_cfg(cfg);
+    }
+
+    // construct featureset and evaluate againsts loaded rules
+    let features = rbat::core::features::FeatureSet::from_analysis_result(&analysis_result);
+    let matched_rules = rbat::core::Rule::evaluate(&features, &rules, &needle_index);
     let risk_assessment = calculate_risk(&matched_rules);
 
     // Setup output directory
