@@ -71,6 +71,8 @@ pub use iced_backend::*;
 
 #[cfg(feature = "backend-iced")]
 mod iced_backend {
+    use crate::core::{BinaryArch, BinaryOS};
+
     use super::*;
     use iced_x86::{Code, Decoder, DecoderOptions};
 
