@@ -51,7 +51,8 @@ use rbat::core::analyzer::analyze_batch;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new("path/to/binary");
-    let (analysis_result, risk_assessment) = analyze_batch(path)?;
+    let buffer = std::fs::read(path)?;
+    let (analysis_result, risk_assessment) = analyze_batch(&buffer, None, rbat::core::disassembler::DisassemblerBackend::Dynamic)?;
 
     println!("Analysis complete for: {}", analysis_result.metadata.binary_type);
     println!("Architecture: {}", analysis_result.metadata.architecture_name());
@@ -77,8 +78,9 @@ use rbat::core::types::AnalysisProgress;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new("path/to/binary");
+    let buffer = std::fs::read(path)?;
 
-    analyze_streaming(path, |event| match event {
+    analyze_streaming(&buffer, None, rbat::core::disassembler::DisassemblerBackend::Dynamic, |event| match event {
         AnalysisProgress::BinaryMetadata(meta) => {
             println!("Target platform: {} ({})", meta.binary_type, meta.architecture_name());
         }
@@ -110,10 +112,11 @@ use rbat::utils::{
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let binary_path = Path::new("path/to/binary");
+    let buffer = std::fs::read(binary_path)?;
     let out_dir = Path::new("./reports");
     std::fs::create_dir_all(out_dir)?;
 
-    let (result, score) = analyze_batch(binary_path)?;
+    let (result, score) = analyze_batch(&buffer, None, rbat::core::disassembler::DisassemblerBackend::Dynamic)?;
 
     // Executive Light-Mode PDF Report
     generate_pdf_report(binary_path, &score, &result, &out_dir.join("report.pdf"))?;
@@ -160,6 +163,8 @@ rbat analyze /path/to/binary --cfg
 * `-g, --cfg`: Output the Control Flow Graph (CFG) in Graphviz DOT format to `stdout`.
 * `-o, --out-dir <DIR>`: Output directory for generated report files (default: `.`).
 * `-r, --rules <RULES>`: Load custom JSON threat rules from a directory.
+* `-s, --signatures <SIGNATURES>`: Optional directory containing custom FLIRT signatures (.sig or .pat files).
+* `-b, --backend <BACKEND>`: Disassembler backend engine to use [default: dynamic] [possible values: capstone, iced, dynamic].
 * `-d, --dry-run`: Run static analysis pipeline without emitting output files or launching the UI.
 
 ### 2. `rbat rules`

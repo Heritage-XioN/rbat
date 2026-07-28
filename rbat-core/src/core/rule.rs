@@ -3,6 +3,7 @@
 //! This module implements the `Rule` struct, nested logic conditions,
 //! rule evaluation, and embedded template loader.
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{Asset, RuleInner, RuleMeta, features::FeatureSet};
@@ -31,8 +32,8 @@ impl Rule {
     }
 
     /// Evaluates if the feature set matches this rule's conditions.
-    pub fn matches(&self, features: &FeatureSet) -> bool {
-        self.rule.features.iter().all(|c| c.matches(features))
+    pub fn matches(&self, features: &FeatureSet, needle: &crate::core::types::NeedleIndex) -> bool {
+        self.rule.features.iter().all(|c| c.matches(features, needle))
     }
 
     /// Loads all embedded JSON and YAML rules from assets.
@@ -86,21 +87,25 @@ impl Rule {
     }
 
     /// Evaluates a set of rules against the feature set and returns matching rule metadata.
-    pub fn evaluate(features: &FeatureSet, rules: &[Self]) -> Vec<RuleMeta> {
+    pub fn evaluate(
+        features: &FeatureSet,
+        rules: &[Self],
+        needle: &crate::core::types::NeedleIndex,
+    ) -> Vec<RuleMeta> {
         rules
-            .iter()
-            .filter(|rule| rule.matches(features))
+            .par_iter()
+            .filter(|rule| rule.matches(features, needle))
             .map(|rule| rule.rule.meta.clone())
             .collect()
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use crate::core::{RuleCondition, RuleTag};
 
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_rule_evaluation() {
@@ -108,9 +113,9 @@ mod tests {
         section_entropies.insert(".text".to_owned(), 7.8);
 
         let features = FeatureSet {
-            apis: vec!["VirtualAlloc".into()],
-            strings: Vec::new(),
-            mnemonics: Vec::new(),
+            apis: HashSet::from(["VirtualAlloc".to_string()]),
+            strings: HashSet::new(),
+            mnemonics: HashSet::new(),
             section_entropies,
             has_code_cave: false,
             has_packer_sig: false,
@@ -160,7 +165,8 @@ mod tests {
         };
 
         let rules = vec![rule_api, rule_entropy];
-        let matches = Rule::evaluate(&features, &rules);
+        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+        let matches = Rule::evaluate(&features, &rules, &needle);
 
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].name, "ApiMatch");
@@ -175,7 +181,7 @@ mod tests {
         // SetHandleInformation (call)
         // SetHandleInformation (call)
         // arg: 1 = HANDLE_FLAG_INHERIT (mov/push parameter)
-        let block1 = BasicBlock {
+        let mut block1 = BasicBlock {
             start_address: 0x1000,
             end_address: 0x1010,
             instructions: vec![
@@ -183,33 +189,21 @@ mod tests {
                     address: 0x1000,
                     mnemonic: "mov".into(),
                     op_str: "1 = HANDLE_FLAG_INHERIT".into(),
+                    matched: Vec::new(),
                 },
                 InstructionInfo {
                     address: 0x1005,
                     mnemonic: "call".into(),
                     op_str: "SetHandleInformation".into(),
+                    matched: Vec::new(),
                 },
                 InstructionInfo {
                     address: 0x1010,
                     mnemonic: "call".into(),
                     op_str: "SetHandleInformation".into(),
+                    matched: Vec::new(),
                 },
             ],
-        };
-
-        let features = FeatureSet {
-            apis: Vec::new(),
-            strings: Vec::new(),
-            mnemonics: Vec::new(),
-            section_entropies: HashMap::new(),
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: "windows".to_string(),
-            arch: "x86".to_string(),
-            basic_blocks_count: 1,
-            has_loop: true,
-            max_cyclomatic_complexity: 5,
-            blocks: vec![block1],
         };
 
         // Rule checking Loop presence & Cyclomatic Complexity
@@ -264,7 +258,36 @@ mod tests {
         };
 
         let rules = vec![rule_cfg, rule_scope];
-        let matches = Rule::evaluate(&features, &rules);
+        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+
+        // Manually populate matched sets since we bypass CFG in this test
+        for insn in block1.instructions.iter_mut() {
+            let haystack = format!("{} {}", insn.format_mnemonic(), insn.format_operands());
+            for mat in needle.automaton.find_iter(&haystack) {
+                let p = mat.pattern();
+                needle.present[p.as_usize()].store(true, std::sync::atomic::Ordering::Relaxed);
+                if !insn.matched.contains(&p) {
+                    insn.matched.push(p);
+                }
+            }
+        }
+
+        let features = FeatureSet {
+            apis: HashSet::new(),
+            strings: HashSet::new(),
+            mnemonics: HashSet::new(),
+            section_entropies: HashMap::new(),
+            has_code_cave: false,
+            has_packer_sig: false,
+            os: "Windows".to_owned(),
+            arch: "x86_64".to_owned(),
+            basic_blocks_count: 1,
+            has_loop: true,
+            max_cyclomatic_complexity: 5,
+            blocks: vec![&block1],
+        };
+
+        let matches = Rule::evaluate(&features, &rules, &needle);
 
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].name, "CfgRule");

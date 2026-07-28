@@ -3,20 +3,21 @@
 //! This module implements the `FeatureSet` structure which extracts and flattens
 //! binary analysis results into fast-lookup sets and maps for rule evaluation.
 
-use crate::core::AnalysisResult;
-use crate::core::types::{BasicBlock, InstructionInfo};
-use crate::utils::flirt::find_function_range;
-use std::collections::HashMap;
+use crate::core::{
+    AnalysisResult, BasicBlock, BinaryArch, EdgeType, InstructionClass, InstructionInfo,
+};
+use crate::utils::{cfg::classify_instruction, flirt::find_function_range};
+use std::collections::{HashMap, HashSet};
 
 /// Collected metrics and indicators extracted from the binary for rule evaluation.
 #[derive(Debug, Clone)]
-pub struct FeatureSet {
+pub struct FeatureSet<'a> {
     /// Mapped API imports and suspicious dynamic symbol links.
-    pub apis: Vec<std::sync::Arc<str>>,
+    pub apis: HashSet<String>,
     /// Mapped string constants.
-    pub strings: Vec<std::sync::Arc<str>>,
+    pub strings: HashSet<String>,
     /// Blacklisted instruction mnemonics.
-    pub mnemonics: Vec<std::sync::Arc<str>>,
+    pub mnemonics: HashSet<String>,
     /// Section Shannon entropies.
     pub section_entropies: HashMap<String, f64>,
     /// Whether any code caves (NOP/zero/trap runs) were mapped.
@@ -32,12 +33,12 @@ pub struct FeatureSet {
     pub has_loop: bool,
     pub max_cyclomatic_complexity: usize,
     // Captured basic blocks for scope evaluation
-    pub blocks: Vec<BasicBlock>,
+    pub blocks: Vec<&'a BasicBlock>,
 }
 
-impl FeatureSet {
+impl<'a> FeatureSet<'a> {
     /// Populates a `FeatureSet` from the aggregate analysis findings.
-    pub fn from_analysis_result(res: &AnalysisResult) -> Self {
+    pub fn from_analysis_result(res: &'a AnalysisResult) -> Self {
         // Calculate library ranges if any library functions are matched
         let mut library_ranges = Vec::new();
         if let Some(ref cfg) = res.cfg {
@@ -47,11 +48,11 @@ impl FeatureSet {
                 .values()
                 .flat_map(|block| block.instructions.iter())
                 .collect();
-            all_instructions.sort_unstable_by_key(|insn| insn.address);
-            all_instructions.dedup_by_key(|insn| insn.address);
+            all_instructions.sort_unstable_by_key(|insn| insn.address());
+            all_instructions.dedup_by_key(|insn| insn.address());
 
             // Reconstruct all entry points (matched library functions + basic block starts)
-            let mut all_entry_points = std::collections::HashSet::new();
+            let mut all_entry_points = HashSet::new();
             for &addr in res.library_functions.keys() {
                 all_entry_points.insert(addr);
             }
@@ -86,26 +87,27 @@ impl FeatureSet {
             false
         };
 
-        let mut apis = Vec::new();
+        let mut apis = HashSet::new();
+        let mut strings = HashSet::new();
+
         for (api_name, &addr) in &res.api_hooking {
             if !is_lib_block(addr) {
-                apis.push(api_name.as_str().into());
+                apis.insert(api_name.to_lowercase());
             }
         }
         for api_name in &res.process_injection {
-            apis.push(api_name.as_str().into());
+            apis.insert(api_name.to_lowercase());
         }
 
-        let mut strings = Vec::new();
         for instances in res.string_values.values() {
             for inst in instances {
                 if !is_lib_block(inst.offset as u64) {
-                    strings.push(inst.data.as_str().into());
+                    strings.insert(inst.data.to_lowercase());
                 }
             }
         }
 
-        let mut mnemonics = Vec::new();
+        let mut mnemonics = HashSet::new();
         for (m, addrs) in &res.blacklisted_mnemonics {
             let filtered_addrs: Vec<u64> = addrs
                 .iter()
@@ -113,7 +115,7 @@ impl FeatureSet {
                 .filter(|&addr| !is_lib_block(addr))
                 .collect();
             if !filtered_addrs.is_empty() {
-                mnemonics.push(m.as_str().into());
+                mnemonics.insert(m.as_str().into());
             }
         }
 
@@ -123,22 +125,21 @@ impl FeatureSet {
         let mut blocks = Vec::new();
 
         if let Some(ref cfg) = res.cfg {
-            let filtered_blocks: Vec<BasicBlock> = cfg
+            let filtered_blocks: Vec<&'a BasicBlock> = cfg
                 .blocks
                 .values()
                 .filter(|block| !is_lib_block(block.start_address))
-                .cloned()
                 .collect();
 
             basic_blocks_count = filtered_blocks.len();
             blocks = filtered_blocks;
 
             // Reconstruct the petgraph containing only non-library blocks
-            let mut graph = petgraph::graph::DiGraph::new();
+            let mut graph = petgraph::graph::DiGraph::<u64, EdgeType>::new();
             let mut indices = std::collections::HashMap::new();
 
             for block in &blocks {
-                let idx = graph.add_node(block.clone());
+                let idx = graph.add_node(block.start_address);
                 indices.insert(block.start_address, idx);
             }
 
@@ -181,24 +182,31 @@ impl FeatureSet {
 
     /// Extracts localized features from a single basic block.
     pub fn from_basic_block(block: &BasicBlock, binary_os: &str, binary_arch: &str) -> Self {
-        let mut apis = Vec::new();
-        let mut strings = Vec::new();
-        let mut mnemonics = Vec::new();
+        let mut apis = HashSet::new();
+        let mut strings = HashSet::new();
+        let mut mnemonics = HashSet::new();
+
+        let mut buf_m = String::new();
+        let mut buf_o = String::new();
 
         for insn in &block.instructions {
-            mnemonics.push(insn.mnemonic.clone());
+            insn.format_mnemonic_into(&mut buf_m);
+            if !mnemonics.contains(&buf_m) {
+                mnemonics.insert(buf_m.clone());
+            }
 
             // Capture API names from call targets
-            let class = crate::utils::cfg::classify_instruction(
-                &insn.mnemonic,
-                &crate::core::BinaryArch::X64,
-            );
-            if class == crate::core::types::InstructionClass::Call {
-                apis.push(insn.op_str.clone());
+            let class = classify_instruction(&buf_m, &BinaryArch::X64);
+
+            insn.format_operands_into(&mut buf_o);
+            if class == InstructionClass::Call && !apis.contains(&buf_o) {
+                apis.insert(buf_o.to_lowercase());
             }
 
             // Capture any numeric/constants/strings used as instruction arguments
-            strings.push(insn.op_str.clone());
+            if !strings.contains(&buf_o) {
+                strings.insert(buf_o.to_lowercase());
+            }
         }
 
         Self {
@@ -219,13 +227,21 @@ impl FeatureSet {
 
     /// Extracts localized features from a single instruction.
     pub fn from_instruction(insn: &InstructionInfo, binary_os: &str, binary_arch: &str) -> Self {
-        let apis = if insn.mnemonic.to_lowercase() == "call" {
-            vec![insn.op_str.clone()]
-        } else {
-            Vec::new()
-        };
-        let strings = vec![insn.op_str.clone()];
-        let mnemonics = vec![insn.mnemonic.clone()];
+        let mut apis = HashSet::new();
+        let mut strings = HashSet::new();
+        let mut mnemonics = HashSet::new();
+
+        let mut buf_m = String::new();
+        let mut buf_o = String::new();
+
+        insn.format_mnemonic_into(&mut buf_m);
+        mnemonics.insert(buf_m.clone());
+
+        insn.format_operands_into(&mut buf_o);
+        strings.insert(buf_o.to_lowercase());
+        if buf_m.to_lowercase() == "call" {
+            apis.insert(buf_o.to_lowercase());
+        }
 
         Self {
             apis,
@@ -244,7 +260,7 @@ impl FeatureSet {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
     use crate::core::types::{AnalysisResult, YaraMatches};
@@ -287,16 +303,16 @@ mod tests {
         let fs = FeatureSet::from_analysis_result(&res);
 
         // Test APIs (both hooking and process injection should be merged)
-        assert!(fs.apis.contains(&"VirtualAlloc".into()));
-        assert!(fs.apis.contains(&"WriteProcessMemory".into()));
+        assert!(fs.apis.contains("virtualalloc"));
+        assert!(fs.apis.contains("writeprocessmemory"));
         assert_eq!(fs.apis.len(), 2);
 
         // Test Strings
-        assert!(fs.strings.contains(&"http://malicious.com".into()));
+        assert!(fs.strings.contains("http://malicious.com"));
         assert_eq!(fs.strings.len(), 1);
 
         // Test Mnemonics
-        assert!(fs.mnemonics.contains(&"cpuid".into()));
+        assert!(fs.mnemonics.contains("cpuid"));
         assert_eq!(fs.mnemonics.len(), 1);
 
         // Test Section Entropies
@@ -333,11 +349,13 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "mov".into(),
                 op_str: "1 = HANDLE_FLAG_INHERIT".into(),
+                matched: Vec::new(),
             },
             InstructionInfo {
                 address: 0x2000,
                 mnemonic: "ret".into(),
                 op_str: "".into(),
+                matched: Vec::new(),
             },
         ];
 
