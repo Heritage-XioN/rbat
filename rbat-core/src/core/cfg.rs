@@ -29,26 +29,30 @@ impl ControlFlowGraph {
     pub fn new(instructions: &[InstructionInfo], arch: &BinaryArch) -> Self {
         let mut leaders = HashSet::new();
         if !instructions.is_empty() {
-            leaders.insert(instructions[0].address);
+            leaders.insert(instructions[0].address());
         }
 
+        let mut buf_m = String::new();
+        let mut buf_o = String::new();
+
         for (idx, insn) in instructions.iter().enumerate() {
-            let mnemonic = &*insn.mnemonic;
-            let class = classify_instruction(mnemonic, arch);
+            insn.format_mnemonic_into(&mut buf_m);
+            let class = classify_instruction(&buf_m, arch);
 
             match class {
                 InstructionClass::ConditionalJump
                 | InstructionClass::UnconditionalJump
                 | InstructionClass::Call => {
-                    if let Some(target) = parse_target_address(&insn.op_str) {
+                    insn.format_operands_into(&mut buf_o);
+                    if let Some(target) = parse_target_address(&buf_o) {
                         leaders.insert(target);
                     }
                     if idx + 1 < instructions.len() {
-                        leaders.insert(instructions[idx + 1].address);
+                        leaders.insert(instructions[idx + 1].address());
                     }
                 }
                 InstructionClass::Return if idx + 1 < instructions.len() => {
-                    leaders.insert(instructions[idx + 1].address);
+                    leaders.insert(instructions[idx + 1].address());
                 }
                 _ => {}
             }
@@ -56,7 +60,7 @@ impl ControlFlowGraph {
 
         let mut addr_to_idx = HashMap::new();
         for (idx, insn) in instructions.iter().enumerate() {
-            addr_to_idx.insert(insn.address, idx);
+            addr_to_idx.insert(insn.address(), idx);
         }
 
         let mut sorted_leaders: Vec<u64> = leaders.into_iter().collect();
@@ -91,7 +95,7 @@ impl ControlFlowGraph {
 
             let basic_block = BasicBlock {
                 start_address: start_addr,
-                end_address: block_insns.last().unwrap().address,
+                end_address: block_insns.last().unwrap().address(),
                 instructions: inst_infos,
             };
 
@@ -107,8 +111,10 @@ impl ControlFlowGraph {
                 None => continue,
             };
 
-            let class = classify_instruction(&last_insn.mnemonic, arch);
-            let target = parse_target_address(&last_insn.op_str);
+            last_insn.format_mnemonic_into(&mut buf_m);
+            let class = classify_instruction(&buf_m, arch);
+            last_insn.format_operands_into(&mut buf_o);
+            let target = parse_target_address(&buf_o);
             let next_block_addr = if idx + 1 < block_starts.len() {
                 Some(block_starts[idx + 1])
             } else {
@@ -173,7 +179,7 @@ impl ControlFlowGraph {
             for insn in &block.instructions {
                 label.push_str(&format!(
                     "0x{:X}: {:<6} {}\\l",
-                    insn.address, insn.mnemonic, insn.op_str
+                    insn.address(), insn.format_mnemonic(), insn.format_operands()
                 ));
             }
             dot.push_str(&format!("  node_0x{:X} [label=\"{}\"];\n", addr, label));
@@ -217,7 +223,7 @@ impl ControlFlowGraph {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
     use crate::core::{BinaryArch, EdgeType, types::InstructionInfo};
@@ -228,6 +234,7 @@ mod tests {
             address,
             mnemonic: mnemonic.into(),
             op_str: op_str.into(),
+            matched: Vec::new(),
         }
     }
 

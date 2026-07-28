@@ -11,14 +11,14 @@
 //! # Example
 //! ```rust
 //! use std::path::Path;
-//! use goblin::Object;
+//! use object::File;
 //! use rbat::core::{AnalysisContext, BinaryArch, BinaryOS, AnalysisProgress};
 //! use rbat::core::plugins::MetadataPlugin;
 //! use rbat::core::traits::HeuristicPlugin;
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let buffer = vec![0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 62, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 56, 0, 1, 0, 64, 0, 0, 0, 0, 0];
-//! let obj = Object::parse(&buffer)?;
+//! let obj = File::parse(buffer.as_slice())?;
 //! let section_ranges = vec![];
 //!
 //! let ctx = AnalysisContext {
@@ -170,12 +170,12 @@ impl HeuristicPlugin for CfgPlugin {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
     use crate::core::{BinaryArch, BinaryOS};
     use crate::utils::test_helpers::test_helpers;
-    use goblin::Object;
+    use object::File;
     use std::fs;
     use tempfile::tempdir;
 
@@ -186,7 +186,7 @@ mod tests {
         test_helpers::generate_elf(&path);
 
         let buffer = fs::read(&path).unwrap();
-        let obj = Object::parse(&buffer).unwrap();
+        let obj = File::parse(buffer.as_slice()).unwrap();
         let section_ranges =
             crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
 
@@ -217,7 +217,7 @@ mod tests {
         test_helpers::generate_elf(&path);
 
         let buffer = fs::read(&path).unwrap();
-        let obj = Object::parse(&buffer).unwrap();
+        let obj = File::parse(buffer.as_slice()).unwrap();
         let section_ranges =
             crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
 
@@ -248,7 +248,7 @@ mod tests {
         test_helpers::generate_elf(&path);
 
         let buffer = fs::read(&path).unwrap();
-        let obj = Object::parse(&buffer).unwrap();
+        let obj = File::parse(buffer.as_slice()).unwrap();
         let section_ranges =
             crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
 
@@ -258,6 +258,7 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "nop".into(),
                 op_str: "".into(),
+                matched: Vec::new(),
             };
             128
         ];

@@ -21,16 +21,15 @@ pub mod yarahandler;
 
 pub use crate::core::{
     cfg::ControlFlowGraph,
-    disassembler::{BinaryArch, BinaryOS, Factory},
     error::RbatError,
     features::FeatureSet,
     flirt::FlirtMatcher,
     heuristics::{disassemble_section, packer_sig_check, string_check},
     rule::Rule,
     types::{
-        AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryMetadata,
-        Confidence, EdgeType, Finding, InstructionInfo, MapValue, RiskAssessment, RuleCondition,
-        RuleInner, RuleMeta, RuleTag, SectionRange, YaraMatches,
+        AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryArch,
+        BinaryMetadata, BinaryOS, Confidence, EdgeType, Finding, InstructionInfo, MapValue,
+        RiskAssessment, RuleCondition, RuleInner, RuleMeta, RuleTag, SectionRange, YaraMatches,
     },
 };
 

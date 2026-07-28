@@ -661,14 +661,17 @@ impl App {
                 .iter()
                 .map(|inst| {
                     Row::new(vec![
-                        Cell::from(format!("0x{:08X}", inst.address))
+                        Cell::from(format!("0x{:08X}", inst.address()))
                             .style(Style::default().fg(palette::MUTED)),
-                        Cell::from(&*inst.mnemonic).style(
-                            Style::default()
-                                .fg(palette::ACCENT)
-                                .add_modifier(Modifier::BOLD),
+                        Cell::from(inst.format_mnemonic()).style(
+                            Style::default().fg(match inst.format_mnemonic().as_str() {
+                                "call" | "ret" => palette::ACCENT,
+                                "jmp" | "je" | "jne" => palette::ACCENT_DIM,
+                                "int3" | "nop" => palette::MUTED,
+                                _ => palette::TEXT,
+                            }),
                         ),
-                        Cell::from(&*inst.op_str).style(Style::default().fg(palette::TEXT)),
+                        Cell::from(inst.format_operands()).style(Style::default().fg(palette::TEXT)),
                     ])
                 })
                 .collect();

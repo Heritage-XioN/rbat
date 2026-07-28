@@ -23,16 +23,21 @@ pub enum RbatError {
     ParseError(
         #[from]
         #[serde(serialize_with = "serialize_to_string")]
-        goblin::error::Error,
+        object::Error,
     ),
 
     /// Capstone disassembly engine failure.
+    #[cfg(feature = "backend-capstone")]
     #[error("Error occurred while disassembling binary bytes")]
     DisassemblerError(
         #[from]
         #[serde(serialize_with = "serialize_to_string")]
         capstone::Error,
     ),
+
+    /// Generic disassembly engine failure or configuration error.
+    #[error("Disassembly error: {0}")]
+    GenericDisassemblerError(String),
 
     /// YARA rules compilation failure.
     #[error("Error occurred while compiling YARA rules")]
