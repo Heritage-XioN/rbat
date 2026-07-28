@@ -4,12 +4,15 @@
 //! symbol resolution, function entry point extraction, and demangling.
 
 use crate::core::InstructionInfo;
-use goblin::Object;
+use crate::core::types::InstructionClass;
+use crate::utils::cfg::classify_instruction;
+use crate::utils::cfg::parse_target_address;
+use object::{Object, ObjectSymbol};
 use std::collections::HashSet;
 
 /// Discovers potential function entry points from symbols, exports, and call destinations.
 pub fn collect_function_entry_points(
-    binary_object: &Object,
+    binary_object: &object::File,
     instructions: &[InstructionInfo],
     arch: &crate::core::BinaryArch,
     entry_addr: u64,
@@ -19,53 +22,30 @@ pub fn collect_function_entry_points(
 
     // Collect from call instructions
     for insn in instructions {
-        if crate::utils::cfg::classify_instruction(&insn.mnemonic, arch)
+        if crate::utils::cfg::classify_instruction(&insn.format_mnemonic(), arch)
             == crate::core::types::InstructionClass::Call
-            && let Some(target) = crate::utils::cfg::parse_target_address(&insn.op_str)
+            && let Some(target) = parse_target_address(&insn.format_operands())
         {
             entry_points.insert(target);
         }
     }
 
-    // Collect from symbol tables / exports
-    match binary_object {
-        Object::Elf(elf) => {
-            for sym in &elf.syms {
-                if sym.is_function() && sym.st_value > 0 {
-                    entry_points.insert(sym.st_value);
-                }
-            }
-            for sym in &elf.dynsyms {
-                if sym.is_function() && sym.st_value > 0 {
-                    entry_points.insert(sym.st_value);
-                }
+    for sym in binary_object.symbols() {
+        if sym.address() > 0 && sym.kind() == object::SymbolKind::Text {
+            entry_points.insert(sym.address());
+        }
+    }
+    for sym in binary_object.dynamic_symbols() {
+        if sym.address() > 0 && sym.kind() == object::SymbolKind::Text {
+            entry_points.insert(sym.address());
+        }
+    }
+    if let Ok(exports) = binary_object.exports() {
+        for export in exports {
+            if export.address() > 0 {
+                entry_points.insert(export.address());
             }
         }
-        Object::PE(pe) => {
-            for export in &pe.exports {
-                entry_points.insert(pe.image_base + export.rva as u64);
-            }
-        }
-        Object::Mach(mach) => {
-            let mut collect_macho = |macho: &goblin::mach::MachO<'_>| {
-                for (_, sym) in macho.symbols().flatten() {
-                    if !sym.is_undefined() && sym.n_value > 0 {
-                        entry_points.insert(sym.n_value);
-                    }
-                }
-            };
-            match mach {
-                goblin::mach::Mach::Binary(macho) => collect_macho(macho),
-                goblin::mach::Mach::Fat(fat) => {
-                    for arch_entry in fat {
-                        if let Ok(goblin::mach::SingleArch::MachO(macho)) = arch_entry {
-                            collect_macho(&macho);
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
     }
 
     entry_points
@@ -76,10 +56,10 @@ pub fn collect_function_entry_points(
 pub fn find_function_range(
     start_addr: u64,
     instructions: &[&InstructionInfo],
-    all_entry_points: &std::collections::HashSet<u64>,
+    all_entry_points: &HashSet<u64>,
     arch: &crate::core::BinaryArch,
 ) -> (u64, u64) {
-    let start_idx = match instructions.binary_search_by_key(&start_addr, |insn| insn.address) {
+    let start_idx = match instructions.binary_search_by_key(&start_addr, |insn| insn.address()) {
         Ok(idx) => idx,
         Err(_) => {
             return (start_addr, start_addr);
@@ -88,14 +68,14 @@ pub fn find_function_range(
 
     let mut end_addr = start_addr;
     for insn in instructions.iter().skip(start_idx) {
-        if insn.address != start_addr && all_entry_points.contains(&insn.address) {
+        if insn.address() != start_addr && all_entry_points.contains(&insn.address()) {
             break;
         }
 
-        end_addr = insn.address;
+        end_addr = insn.address();
 
-        let class = crate::utils::cfg::classify_instruction(&insn.mnemonic, arch);
-        if class == crate::core::types::InstructionClass::Return {
+        let class = classify_instruction(&insn.format_mnemonic(), arch);
+        if class == InstructionClass::Return {
             break;
         }
     }
@@ -137,7 +117,7 @@ pub fn normalize_symbol(name: &str) -> String {
     name
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use crate::utils::flirt::normalize_symbol;
 
@@ -161,22 +141,28 @@ mod tests {
     #[test]
     fn test_collect_function_entry_points() {
         use crate::core::{BinaryArch, InstructionInfo};
-        use goblin::Object;
+        use object::File;
 
         let instructions = vec![
             InstructionInfo {
                 address: 0x1000,
                 mnemonic: "mov".into(),
                 op_str: "eax, 1".into(),
+                matched: Vec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "call".into(),
                 op_str: "0x2000".into(),
+                matched: Vec::new(),
             },
         ];
 
-        let empty_obj = Object::Unknown(0);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dummy_elf");
+        crate::utils::test_helpers::test_helpers::generate_elf(&path);
+        let buffer = std::fs::read(&path).unwrap();
+        let empty_obj = File::parse(buffer.as_slice()).unwrap();
         let entry_points = super::collect_function_entry_points(
             &empty_obj,
             &instructions,
@@ -198,21 +184,25 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "push".into(),
                 op_str: "rbp".into(),
+                matched: Vec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "mov".into(),
                 op_str: "eax, 1".into(),
+                matched: Vec::new(),
             },
             InstructionInfo {
                 address: 0x100A,
                 mnemonic: "ret".into(),
                 op_str: "".into(),
+                matched: Vec::new(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
                 mnemonic: "xor".into(),
                 op_str: "eax, eax".into(),
+                matched: Vec::new(),
             },
         ];
 
@@ -232,16 +222,19 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "push".into(),
                 op_str: "rbp".into(),
+                matched: Vec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "int3".into(),
                 op_str: "".into(),
+                matched: Vec::new(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
                 mnemonic: "xor".into(),
                 op_str: "eax, eax".into(),
+                matched: Vec::new(),
             },
         ];
         let insns_no_ret: Vec<&InstructionInfo> = insns_no_ret_data.iter().collect();

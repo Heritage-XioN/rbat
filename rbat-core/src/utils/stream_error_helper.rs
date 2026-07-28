@@ -21,7 +21,7 @@ pub fn capture_error_and_cancel(
         return;
     }
 
-    let mut guard = state.lock().unwrap();
+    let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if guard.is_none() {
         *guard = Some(err);
         cancel_flag.store(true, Ordering::Relaxed);

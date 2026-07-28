@@ -5,7 +5,7 @@
 //! binary analysis of ELF, PE, and Mach-O files.
 //!
 //! ## Key Features
-//! - **Multi-Format Parsing**: Transparently parses ELF, PE, and Mach-O formats utilizing the `goblin` crate.
+//! - **Multi-Format Parsing**: Transparently parses ELF, PE, and Mach-O formats utilizing the `object` crate.
 //! - **Parallel Heuristic Evaluation**: Runs static analysis modules concurrently using `rayon` thread pools.
 //! - **High-Performance Memory Scanning**: Uses compiled YARA rules for memory scans, cached section mappings, and zero disk I/O.
 //! - **Static Disassembly & Instruction Analysis**: Disassembly via `capstone` to detect NOP sleds, zero-entropy padding, and anti-analysis instructions without early exit evasions.
@@ -13,7 +13,7 @@
 //!
 //! ## Architectural Overview
 //! The analysis pipeline consists of three main stages:
-//! 1. **Parsing and Range Caching**: The binary buffer is read and parsed into a `goblin::Object`. Section boundaries are precomputed and cached in `SectionRange` elements for $O(1)$ virtual memory offset mapping.
+//! 1. **Parsing and Range Caching**: The binary buffer is read and parsed into a `object::File`. Section boundaries are precomputed and cached in `SectionRange` elements for $O(1)$ virtual memory offset mapping.
 //! 2. **Context and Plugin Dispatch**: An `AnalysisContext` borrows all read-only binary structures. A registry of `HeuristicPlugin` trait objects executes concurrently via a Rayon thread scope.
 //! 3. **Aggregation and Assessment**: Results are aggregated into an `AnalysisResult` and evaluated by a scoring engine to produce a `RiskAssessment` containing findings and recommendations.
 //!
