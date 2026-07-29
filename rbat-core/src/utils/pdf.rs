@@ -26,6 +26,7 @@ struct ReportTemplate {
     binary_type: String,
     entry_point: String,
     architecture: String,
+    total_analysis_time_ms: u128,
     capabilities: Vec<TechnicalFinding>,
     signatures: Vec<TechnicalFinding>,
 }
@@ -172,6 +173,7 @@ pub fn generate_pdf_report(
         binary_type: analysis_result.metadata.binary_type.clone(),
         entry_point: format!("0x{:X}", analysis_result.metadata.entry_point),
         architecture: analysis_result.metadata.architecture_name(),
+        total_analysis_time_ms: analysis_result.total_analysis_time_ms,
         capabilities,
         signatures,
     };

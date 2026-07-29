@@ -104,6 +104,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         custom_flirt = Some(flirt);
     }
 
+    let start_time = std::time::Instant::now();
     let analysis_thread = std::thread::spawn(move || {
         analyze_streaming(&buffer, custom_flirt, move |event| {
             let _ = tx.send(event);
@@ -174,7 +175,9 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     // Check analysis thread result
     match analysis_thread.join() {
         Ok(analysis_result_inner) => match analysis_result_inner {
-            Ok(_) => spinner.finish_with_message("Analysis complete!"),
+            Ok(_) => {
+                spinner.set_message("Plugin analysis complete!");
+            }
             Err(e) => {
                 spinner.finish_with_message("Analysis failed! ❌");
                 return Err(color_eyre::eyre::eyre!(e));
@@ -203,6 +206,8 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         rules.extend(custom_rules);
     }
 
+    spinner.set_message(format!("Evaluating {} heuristics...", rules.len()));
+
     // build global needle index for matching strings
     let needle_index = NeedleIndex::build_from_rules(&rules);
     if let Some(ref mut cfg) = analysis_result.cfg {
@@ -213,6 +218,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let features = rbat::core::features::FeatureSet::from_analysis_result(&analysis_result);
     let matched_rules = rbat::core::Rule::evaluate(&features, &rules, &needle_index);
     let risk_assessment = calculate_risk(&matched_rules);
+
+    let elapsed = start_time.elapsed();
+    analysis_result.total_analysis_time_ms = elapsed.as_millis();
+    spinner.finish_with_message(format!("Analysis completed in {:.2?}! ✅", elapsed));
 
     // Setup output directory
     let base_dir = args.out_dir.unwrap_or_else(|| PathBuf::from("."));
@@ -237,7 +246,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     // CSV report generation
     if args.csv {
         let csv_path = base_dir.join("report.csv");
-        generate_csv_report(&args.path, &risk_assessment, &csv_path)?;
+        generate_csv_report(&args.path, &risk_assessment, &analysis_result, &csv_path)?;
         generated_reports.push(("CSV", csv_path));
     }
 

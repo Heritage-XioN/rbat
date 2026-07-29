@@ -176,6 +176,16 @@ pub fn print_terminal_report(
 
     println!("{}", line_sep);
 
+    if analysis_result.total_analysis_time_ms > 0 {
+        let seconds = (analysis_result.total_analysis_time_ms as f64) / 1000.0;
+        println!(
+            "  {} {}",
+            "⏱️ Total Analysis Time:".with(COLOR_ACCENT).bold(),
+            format!("{:.2}s", seconds).with(COLOR_SUCCESS_LIGHT)
+        );
+        println!("{}", line_sep);
+    }
+
     // Footer Hint
     println!(
         "  {}",

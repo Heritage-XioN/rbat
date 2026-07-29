@@ -146,6 +146,7 @@ pub fn analyze_batch(
     buffer: &[u8],
     custom_flirt: Option<FlirtMatcher>,
 ) -> Result<(AnalysisResult, RiskAssessment)> {
+    let start_time = std::time::Instant::now();
     let (tx, rx) = std::sync::mpsc::channel();
 
     analyze_streaming(buffer, custom_flirt, move |event| {
@@ -196,6 +197,8 @@ pub fn analyze_batch(
     let features = crate::core::features::FeatureSet::from_analysis_result(&analysis_result);
     let matched_rules = crate::core::Rule::evaluate(&features, &rules, &needle_index);
     let score = calculate_risk(&matched_rules);
+
+    analysis_result.total_analysis_time_ms = start_time.elapsed().as_millis();
 
     Ok((analysis_result, score))
 }

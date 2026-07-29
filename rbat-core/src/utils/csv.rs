@@ -14,6 +14,7 @@ use std::path::Path;
 pub fn generate_csv_report(
     filename: &Path,
     assessment: &RiskAssessment,
+    analysis_result: &crate::core::AnalysisResult,
     out_path: &Path,
 ) -> Result<()> {
     let mut wtr = Writer::from_path(out_path)?;
@@ -24,6 +25,7 @@ pub fn generate_csv_report(
     wtr.write_record([
         "Timestamp",
         "Filename",
+        "Total_Time_ms",
         "Risk_Score",
         "Severity",
         "Indicator_Type",
@@ -33,12 +35,14 @@ pub fn generate_csv_report(
 
     let score = assessment.score.to_string();
     let severity = &assessment.severity;
+    let time_ms = analysis_result.total_analysis_time_ms.to_string();
 
     // Flatten the assessment findings into individual rows, or write a clean summary row
     if assessment.findings.is_empty() {
         wtr.write_record([
             &timestamp,
             &filename_str,
+            &time_ms,
             &score,
             severity,
             "NO_FINDINGS",
@@ -50,6 +54,7 @@ pub fn generate_csv_report(
             wtr.write_record([
                 &timestamp,
                 &filename_str,
+                &time_ms,
                 &score,
                 severity,
                 &finding.indicator,
@@ -82,7 +87,8 @@ mod tests {
             recommendations: vec![],
         };
 
-        let result = generate_csv_report(Path::new("test_bin"), &assessment, &out_path);
+        let analysis = crate::core::AnalysisResult::default();
+        let result = generate_csv_report(Path::new("test_bin"), &assessment, &analysis, &out_path);
         assert!(result.is_ok());
         assert!(out_path.exists());
     }

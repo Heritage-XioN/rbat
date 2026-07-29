@@ -114,6 +114,8 @@ pub struct AnalysisResult {
     pub cfg: Option<ControlFlowGraph>,
     /// Matched library functions mapped by start virtual address.
     pub library_functions: HashMap<u64, String>,
+    /// Total time taken for the full analysis pipeline in milliseconds.
+    pub total_analysis_time_ms: u128,
 }
 
 /// Confidence rating of a security finding.
