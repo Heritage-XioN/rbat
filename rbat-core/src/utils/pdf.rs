@@ -97,20 +97,6 @@ pub fn generate_pdf_report(
     // Map Technical Capabilities
     let mut capabilities = Vec::new();
 
-    for (api, count) in &analysis_result.api_hooking {
-        capabilities.push(TechnicalFinding {
-            category: "API Hooking".to_string(),
-            details: format!("{} st_value {}", api, count),
-        });
-    }
-
-    for func in &analysis_result.process_injection {
-        capabilities.push(TechnicalFinding {
-            category: "Process Injection".to_string(),
-            details: format!("Suspicious function: {}", func),
-        });
-    }
-
     for (section, caves) in &analysis_result.code_cave {
         capabilities.push(TechnicalFinding {
             category: "Code Cave".to_string(),

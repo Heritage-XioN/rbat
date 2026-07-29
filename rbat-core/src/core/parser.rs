@@ -11,7 +11,7 @@
 //!
 //! # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 //! let obj = File::parse(buffer)?;
-//! let parser = Parser::new(buffer, &obj);
+//! let parser = Parser::new(&obj);
 //!
 //! let metadata = parser.parse_buffer()?;
 //! let entropy = parser.evaluate_section_entropy()?;
@@ -19,29 +19,24 @@
 //! # }
 //! ```
 
-use crate::{core::SectionRange, utils::entropy::calculate_entropy};
+use crate::utils::entropy::calculate_entropy;
 use object::{Architecture, BinaryFormat, File, Object, ObjectSection, ObjectSymbol, SectionKind};
 use std::collections::{HashMap, HashSet};
 
-use super::{BinaryArch, BinaryOS, MapValue, RbatError, Result, yarahandler::YaraHandler};
+use super::{BinaryArch, BinaryOS, MapValue, RbatError, Result};
 
 /// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
 /// It holds the raw binary buffer and the parsed object from the `object` crate.
 #[derive(Debug)]
 pub struct Parser<'bin> {
-    /// Raw bytes of the binary.
-    buffer: &'bin [u8],
     /// The parsed object representation.
     binary_object: &'bin File<'bin, &'bin [u8]>,
 }
 
 impl<'bin> Parser<'bin> {
     /// Creates a new `Parser` instance.
-    pub fn new(buffer: &'bin [u8], binary_object: &'bin File<'bin, &'bin [u8]>) -> Self {
-        Parser {
-            buffer,
-            binary_object,
-        }
+    pub fn new(binary_object: &'bin File<'bin, &'bin [u8]>) -> Self {
+        Parser { binary_object }
     }
 
     /// Evaluates the Shannon entropy for each section of the binary.
@@ -112,131 +107,50 @@ impl<'bin> Parser<'bin> {
         Ok(binary_data)
     }
 
-    /// Checks for process injection indicators.
-    pub fn check_process_injec(&self) -> Result<HashSet<String>> {
-        let blacklist = &[
-            "ptrace",
-            "process_vm_read",
-            "process_vm_write",
-            "VirtualAllocEx",
-            "VirtualProtectEx",
-            "WriteProcessMemory",
-            "CreateRemoteThread",
-            "NtCreateThreadEx",
-            "QueueUserAPC",
-            "RtlCreateUserThread",
-            "task_for_pid",
-            "pid_for_task",
-            "mach_vm_allocate",
-            "mach_vm_write",
-            "mach_vm_protect",
-            "thread_create_running",
-            "pthread_create_from_mach_thread",
-        ];
-        let mut sus_func: HashSet<String> = HashSet::new();
-
-        let matches_blacklist = |name: &str| {
-            let normalized = name.trim_start_matches('_');
-            blacklist
-                .iter()
-                .any(|item: &&str| item.eq_ignore_ascii_case(normalized))
-        };
+    /// Extracts all dynamically imported symbols.
+    pub fn extract_imports(&self) -> Result<HashSet<String>> {
+        let mut imports_set = HashSet::new();
 
         if let Ok(imports) = self.binary_object.imports() {
             for import in imports {
-                let name = String::from_utf8_lossy(import.name());
-                if matches_blacklist(&name) {
-                    sus_func.insert(name.to_string());
-                }
+                let name = String::from_utf8_lossy(import.name()).into_owned();
+                imports_set.insert(name);
             }
         }
 
+        // Also extract undefined dynamic symbols which act as imports
         for symbol in self.binary_object.dynamic_symbols() {
             if let Ok(name) = symbol.name()
                 && symbol.is_undefined()
-                && matches_blacklist(name)
             {
-                sus_func.insert(name.to_string());
+                imports_set.insert(name.to_string());
             }
         }
 
-        for symbol in self.binary_object.symbols() {
-            if let Ok(name) = symbol.name()
-                && symbol.is_undefined()
-                && matches_blacklist(name)
-            {
-                sus_func.insert(name.to_string());
-            }
-        }
-
-        Ok(sus_func)
+        Ok(imports_set)
     }
 
-    /// Detects API hooking signatures within section ranges.
-    pub fn detect_api_hooking(
-        &self,
-        section_ranges: &[SectionRange],
-    ) -> Result<HashMap<String, u64>> {
-        let mut api_hooking_func: HashMap<String, u64> = HashMap::new();
-        let blacklist = &[
-            "SetWindowsHookEx",
-            "UnhookWindowsHookEx",
-            "CallNextHookEx",
-            "SetWinEventHook",
-            "UnhookWinEventHook",
-            "DetourTransactionBegin",
-            "DetourUpdateThread",
-            "DetourAttach",
-            "MH_Initialize",
-            "MH_CreateHook",
-            "frida_agent_main",
-            "EasyHook",
-            "hook_function",
-            "unhook_function",
-            "trampoline",
-        ];
+    /// Extracts all exported symbols.
+    pub fn extract_exports(&self) -> Result<HashSet<String>> {
+        let mut exports_set = HashSet::new();
 
-        let matches_blacklist = |name: &str| blacklist.iter().any(|b| name.contains(b));
+        if let Ok(exports) = self.binary_object.exports() {
+            for export in exports {
+                let name = String::from_utf8_lossy(export.name()).into_owned();
+                exports_set.insert(name);
+            }
+        }
 
+        // Also extract defined dynamic symbols which act as exports
         for symbol in self.binary_object.dynamic_symbols() {
             if let Ok(name) = symbol.name()
-                && matches_blacklist(name)
+                && !symbol.is_undefined()
             {
-                api_hooking_func.insert(name.to_string(), symbol.address());
+                exports_set.insert(name.to_string());
             }
         }
 
-        for symbol in self.binary_object.symbols() {
-            if let Ok(name) = symbol.name()
-                && matches_blacklist(name)
-            {
-                api_hooking_func.insert(name.to_string(), symbol.address());
-            }
-        }
-
-        if let Ok(imports) = self.binary_object.imports() {
-            for import in imports {
-                let name = String::from_utf8_lossy(import.name());
-                if matches_blacklist(&name) {
-                    let dll = String::from_utf8_lossy(import.library());
-                    api_hooking_func.insert(format!("{}!{}", dll, name), 0);
-                }
-            }
-        }
-
-        let yara = YaraHandler::new("yara/api_hooking.yar".to_owned());
-        if let Ok(rules) = yara.compile_yara_rule()
-            && let Ok(matches) = yara.scan_mem(&rules, self.buffer, section_ranges)
-        {
-            for (rule_name, instances) in matches {
-                for m in instances {
-                    let key = format!("{}:{}", rule_name, m.data);
-                    api_hooking_func.entry(key).or_insert(m.offset as u64);
-                }
-            }
-        }
-
-        Ok(api_hooking_func)
+        Ok(exports_set)
     }
 }
 
@@ -256,7 +170,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = object::File::parse(&buffer[..]).unwrap();
-        let parser = Parser::new(&buffer, &binary_object);
+        let parser = Parser::new(&binary_object);
         let result = parser.evaluate_section_entropy();
         assert!(result.is_ok());
         let entropy = result.unwrap();
@@ -271,7 +185,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = object::File::parse(&buffer[..]).unwrap();
-        let parser = Parser::new(&buffer, &binary_object);
+        let parser = Parser::new(&binary_object);
         let result = parser.parse_buffer();
         match result {
             Ok(data) => {
@@ -290,7 +204,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = object::File::parse(&buffer[..]).unwrap();
-        let parser = Parser::new(&buffer, &binary_object);
+        let parser = Parser::new(&binary_object);
         let result = parser.evaluate_section_entropy();
         assert!(result.is_ok());
         let entropy = result.unwrap();
@@ -305,7 +219,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let binary_object = object::File::parse(&buffer[..]).unwrap();
-        let parser = Parser::new(&buffer, &binary_object);
+        let parser = Parser::new(&binary_object);
         let result = parser.parse_buffer();
         match result {
             Err(RbatError::UnsupportedBinaryFormat(msg)) => {

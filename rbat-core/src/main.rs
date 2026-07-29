@@ -145,19 +145,13 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
                     section_entropy.len()
                 ));
             }
-            AnalysisProgress::ApiHooking(api_hooking) => {
-                analysis_result.api_hooking = api_hooking.clone();
-                spinner.set_message(format!(
-                    "Detected {} API hooking targets",
-                    api_hooking.len()
-                ));
+            AnalysisProgress::Imports(imports) => {
+                analysis_result.imports = imports.clone();
+                spinner.set_message(format!("Extracted {} imported symbols", imports.len()));
             }
-            AnalysisProgress::ProcessInjection(process_injection) => {
-                analysis_result.process_injection = process_injection.clone();
-                spinner.set_message(format!(
-                    "Flagged {} process injection functions",
-                    process_injection.len()
-                ));
+            AnalysisProgress::Exports(exports) => {
+                analysis_result.exports = exports.clone();
+                spinner.set_message(format!("Extracted {} exported symbols", exports.len()));
             }
             AnalysisProgress::BinaryMetadata(metadata) => {
                 analysis_result.metadata = metadata;

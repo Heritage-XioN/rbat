@@ -51,7 +51,7 @@ where
 
     let binary_object = File::parse(buffer)?;
     let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, buffer)?;
-    let parsed = Parser::new(buffer, &binary_object);
+    let parsed = Parser::new(&binary_object);
     let binary_data = parsed.parse_buffer()?;
 
     if let (
@@ -101,8 +101,8 @@ where
             Box::new(crate::core::plugins::StringCheckPlugin),
             Box::new(crate::core::plugins::PackerSigCheckPlugin),
             Box::new(crate::core::plugins::EntropyPlugin),
-            Box::new(crate::core::plugins::ApiHookingPlugin),
-            Box::new(crate::core::plugins::ProcessInjectionPlugin),
+            Box::new(crate::core::plugins::ImportsPlugin),
+            Box::new(crate::core::plugins::ExportsPlugin),
             Box::new(crate::core::plugins::MetadataPlugin),
             Box::new(crate::core::plugins::CfgPlugin),
         ];
@@ -174,11 +174,11 @@ pub fn analyze_batch(
             AnalysisProgress::Entropy(section_entropy) => {
                 analysis_result.section_entropy = section_entropy;
             }
-            AnalysisProgress::ApiHooking(api_hooking) => {
-                analysis_result.api_hooking = api_hooking;
+            AnalysisProgress::Imports(imports) => {
+                analysis_result.imports = imports;
             }
-            AnalysisProgress::ProcessInjection(process_injection) => {
-                analysis_result.process_injection = process_injection;
+            AnalysisProgress::Exports(exports) => {
+                analysis_result.exports = exports;
             }
             AnalysisProgress::BinaryMetadata(metadata) => {
                 analysis_result.metadata = metadata;

@@ -106,39 +106,39 @@ impl HeuristicPlugin for EntropyPlugin {
     }
 
     fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
-        let parser = Parser::new(ctx.buffer, ctx.binary_object);
+        let parser = Parser::new(ctx.binary_object);
         let results = parser.evaluate_section_entropy()?;
         Ok(AnalysisProgress::Entropy(results))
     }
 }
 
-/// A plugin that checks imported functions and symbols to identify potential API hooking or function redirection logic.
-pub struct ApiHookingPlugin;
+/// A plugin that extracts imported functions and symbols.
+pub struct ImportsPlugin;
 
-impl HeuristicPlugin for ApiHookingPlugin {
+impl HeuristicPlugin for ImportsPlugin {
     fn name(&self) -> &'static str {
-        "api_hooking"
+        "imports"
     }
 
     fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
-        let parser = Parser::new(ctx.buffer, ctx.binary_object);
-        let results = parser.detect_api_hooking(ctx.section_ranges)?;
-        Ok(AnalysisProgress::ApiHooking(results))
+        let parser = Parser::new(ctx.binary_object);
+        let results = parser.extract_imports()?;
+        Ok(AnalysisProgress::Imports(results))
     }
 }
 
-/// A plugin that analyzes imported library symbols to detect common API patterns indicative of process injection or hollow injection.
-pub struct ProcessInjectionPlugin;
+/// A plugin that extracts exported functions and symbols.
+pub struct ExportsPlugin;
 
-impl HeuristicPlugin for ProcessInjectionPlugin {
+impl HeuristicPlugin for ExportsPlugin {
     fn name(&self) -> &'static str {
-        "process_injection"
+        "exports"
     }
 
     fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
-        let parser = Parser::new(ctx.buffer, ctx.binary_object);
-        let results = parser.check_process_injec()?;
-        Ok(AnalysisProgress::ProcessInjection(results))
+        let parser = Parser::new(ctx.binary_object);
+        let results = parser.extract_exports()?;
+        Ok(AnalysisProgress::Exports(results))
     }
 }
 

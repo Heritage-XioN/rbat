@@ -241,20 +241,15 @@ mod tests {
                     conditions: vec![RuleCondition::And {
                         and: vec![
                             // count(api(SetHandleInformation)) >= 2
-                            RuleCondition::Other({
-                                let mut m = std::collections::HashMap::new();
-                                m.insert(
-                                    "count(api(SetHandleInformation))".to_string(),
-                                    serde_json::Value::String("2 or more".to_string()),
-                                );
-                                m.insert(
-                                    "number".to_string(),
-                                    serde_json::Value::String(
-                                        "1 = HANDLE_FLAG_INHERIT".to_string(),
-                                    ),
-                                );
-                                m
-                            }),
+                            RuleCondition::Count {
+                                condition: Box::new(RuleCondition::Api {
+                                    api: "sethandleinformation".to_string(),
+                                }),
+                                count: 2,
+                            },
+                            RuleCondition::Number {
+                                number: "1 = handle_flag_inherit".to_string(),
+                            },
                         ],
                     }],
                 }],

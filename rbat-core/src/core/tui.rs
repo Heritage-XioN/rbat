@@ -193,9 +193,7 @@ impl App {
             }
             Tab::Security => {
                 let total = self.analysis_result.packer_signatures.len()
-                    + self.analysis_result.string_values.len()
-                    + self.analysis_result.api_hooking.len()
-                    + self.analysis_result.process_injection.len();
+                    + self.analysis_result.string_values.len();
                 let i = match self.security_state.selected() {
                     Some(i) => {
                         if i >= total.saturating_sub(1) {
@@ -275,9 +273,7 @@ impl App {
             }
             Tab::Security => {
                 let total = self.analysis_result.packer_signatures.len()
-                    + self.analysis_result.string_values.len()
-                    + self.analysis_result.api_hooking.len()
-                    + self.analysis_result.process_injection.len();
+                    + self.analysis_result.string_values.len();
                 let i = match self.security_state.selected() {
                     Some(i) => {
                         if i == 0 {
@@ -573,32 +569,6 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(format!("{} ({} matches)", rule, matches.len())),
-            ])));
-        }
-        for (api, addr) in &self.analysis_result.api_hooking {
-            items.push(ListItem::new(Line::from(vec![
-                Span::styled(
-                    "HOOK: ",
-                    Style::default()
-                        .fg(palette::WARNING_LIGHT)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(api),
-                Span::styled(
-                    format!(" @ 0x{:X}", addr),
-                    Style::default().fg(palette::MUTED),
-                ),
-            ])));
-        }
-        for func in &self.analysis_result.process_injection {
-            items.push(ListItem::new(Line::from(vec![
-                Span::styled(
-                    "INJECT: ",
-                    Style::default()
-                        .fg(palette::DANGER)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(func),
             ])));
         }
 

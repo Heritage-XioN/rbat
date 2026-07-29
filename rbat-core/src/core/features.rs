@@ -93,12 +93,10 @@ impl<'a> FeatureSet<'a> {
         let mut apis = HashSet::new();
         let mut strings = HashSet::new();
 
-        for (api_name, &addr) in &res.api_hooking {
-            if !is_lib_block(addr) {
-                apis.insert(api_name.to_lowercase());
-            }
+        for api_name in &res.imports {
+            apis.insert(api_name.to_lowercase());
         }
-        for api_name in &res.process_injection {
+        for api_name in &res.exports {
             apis.insert(api_name.to_lowercase());
         }
 
@@ -273,11 +271,10 @@ mod tests {
         let mut res = AnalysisResult::default();
 
         // Setup API Hooking
-        res.api_hooking.insert("VirtualAlloc".to_string(), 1);
+        res.imports.insert("VirtualAlloc".to_string());
 
-        // Setup Process Injection
-        res.process_injection
-            .insert("WriteProcessMemory".to_string());
+        // Setup Exports
+        res.exports.insert("WriteProcessMemory".to_string());
 
         // Setup Strings
         let yara_match = YaraMatches {
@@ -371,8 +368,6 @@ mod tests {
         // Add blacklisted mnemonic and API call inside the library block (at 0x2000)
         res.blacklisted_mnemonics
             .insert("cpuid".to_string(), vec![0x2000]);
-        res.api_hooking.insert("VirtualAlloc".to_string(), 0x2000);
-
         let fs = FeatureSet::from_analysis_result(&res);
 
         // The user block at 0x1000 should be retained
@@ -382,8 +377,7 @@ mod tests {
         assert!(!fs.blocks.iter().any(|b| b.start_address == 0x2000));
         assert_eq!(fs.basic_blocks_count, 1);
 
-        // The API call and blacklisted mnemonic from the library block should be excluded
-        assert!(fs.apis.is_empty());
+        // The blacklisted mnemonic from the library block should be excluded
         assert!(fs.mnemonics.is_empty());
     }
 }
