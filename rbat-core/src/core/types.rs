@@ -39,6 +39,15 @@ pub enum BinaryArch {
     Arm64,
 }
 
+/// Context extracted from parsing the binary's basic executable headers.
+#[derive(Debug, Clone)]
+pub struct ParsedBinaryContext {
+    pub os: BinaryOS,
+    pub arch: BinaryArch,
+    pub entry_addr: u64,
+    pub text_bytes: Vec<u8>,
+}
+
 /// Represents the progress updates emitted during static analysis.
 pub enum AnalysisProgress {
     /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
@@ -105,19 +114,6 @@ pub struct AnalysisResult {
     pub cfg: Option<ControlFlowGraph>,
     /// Matched library functions mapped by start virtual address.
     pub library_functions: HashMap<u64, String>,
-}
-
-/// Auxiliary key-value mapping wrapper for binary properties.
-#[derive(Debug)]
-pub enum MapValue {
-    /// Extracted raw bytes.
-    Bytes(Vec<u8>),
-    /// Numerical word value.
-    Word(u64),
-    /// Operating system type.
-    OS(BinaryOS),
-    /// Binary CPU architecture.
-    Arch(BinaryArch),
 }
 
 /// Confidence rating of a security finding.

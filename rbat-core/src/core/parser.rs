@@ -19,11 +19,11 @@
 //! # }
 //! ```
 
-use crate::utils::entropy::calculate_entropy;
+use crate::{core::ParsedBinaryContext, utils::entropy::calculate_entropy};
 use object::{Architecture, BinaryFormat, File, Object, ObjectSection, ObjectSymbol, SectionKind};
 use std::collections::{HashMap, HashSet};
 
-use super::{BinaryArch, BinaryOS, MapValue, RbatError, Result};
+use super::{BinaryArch, BinaryOS, RbatError, Result};
 
 /// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
 /// It holds the raw binary buffer and the parsed object from the `object` crate.
@@ -57,10 +57,8 @@ impl<'bin> Parser<'bin> {
         Ok(section_entropy)
     }
 
-    /// Parses the binary buffer for initial map values.
-    pub fn parse_buffer(&self) -> Result<HashMap<String, MapValue>> {
-        let mut binary_data: HashMap<String, MapValue> = HashMap::new();
-
+    /// Parses the binary buffer for initial mapped values.
+    pub fn parse_buffer(&self) -> Result<ParsedBinaryContext> {
         let os = match self.binary_object.format() {
             BinaryFormat::Elf => BinaryOS::Linux,
             BinaryFormat::Pe => BinaryOS::Win,
@@ -71,7 +69,6 @@ impl<'bin> Parser<'bin> {
                 ));
             }
         };
-        binary_data.insert("os".to_string(), MapValue::OS(os));
 
         let arch = match self.binary_object.architecture() {
             Architecture::X86_64 | Architecture::X86_64_X32 => BinaryArch::X64,
@@ -85,26 +82,27 @@ impl<'bin> Parser<'bin> {
                 )));
             }
         };
-        binary_data.insert("arch".to_string(), MapValue::Arch(arch));
-        binary_data.insert(
-            "entry_addr".to_string(),
-            MapValue::Word(self.binary_object.entry()),
-        );
 
+        let entry_addr = self.binary_object.entry();
+
+        let mut text_bytes = None;
         for section in self.binary_object.sections() {
             if section.kind() == SectionKind::Text
                 && let Ok(data) = section.uncompressed_data()
             {
-                binary_data.insert("text_bytes".to_string(), MapValue::Bytes(data.into_owned()));
+                text_bytes = Some(data.into_owned());
                 break;
             }
         }
 
-        if !binary_data.contains_key("text_bytes") {
-            return Err(RbatError::MissingExecutableSection);
-        }
+        let text_bytes = text_bytes.ok_or(RbatError::MissingExecutableSection)?;
 
-        Ok(binary_data)
+        Ok(ParsedBinaryContext {
+            os,
+            arch,
+            entry_addr,
+            text_bytes,
+        })
     }
 
     /// Extracts all dynamically imported symbols.
@@ -189,10 +187,10 @@ mod tests {
         let result = parser.parse_buffer();
         match result {
             Ok(data) => {
-                assert!(data.contains_key("os"));
-                assert!(data.contains_key("text_bytes"));
+                assert!(!data.text_bytes.is_empty());
+                assert_eq!(data.os, BinaryOS::Linux);
             }
-            Err(e) => panic!("parse_buffer failed with: {:?}", e),
+            Err(_) => panic!("Failed to parse ELF buffer"),
         }
     }
 

@@ -9,12 +9,12 @@ use rayon;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
-use super::{AnalysisProgress, AnalysisResult, MapValue, Result, RiskAssessment, parser::Parser};
+use super::{AnalysisProgress, AnalysisResult, Result, RiskAssessment, parser::Parser};
 use crate::{
-    core::{AnalysisContext, flirt::FlirtMatcher, traits::HeuristicPlugin},
+    core::{AnalysisContext, ParsedBinaryContext, flirt::FlirtMatcher, traits::HeuristicPlugin},
     utils::{
         flirt::collect_function_entry_points, scoring::calculate_risk,
-        stream_error_helper::capture_error_and_cancel,
+        section_offset::build_section_map, stream_error_helper::capture_error_and_cancel,
     },
 };
 
@@ -50,77 +50,72 @@ where
     let cancel_flag = AtomicBool::new(false);
 
     let binary_object = File::parse(buffer)?;
-    let section_ranges = crate::utils::section_offset::build_section_map(&binary_object, buffer)?;
+    let section_ranges = build_section_map(&binary_object, buffer)?;
     let parsed = Parser::new(&binary_object);
     let binary_data = parsed.parse_buffer()?;
 
-    if let (
-        Some(MapValue::OS(os)),
-        Some(MapValue::Arch(arch)),
-        Some(MapValue::Bytes(text_bytes)),
-        Some(MapValue::Word(entry_addr)),
-    ) = (
-        binary_data.get("os"),
-        binary_data.get("arch"),
-        binary_data.get("text_bytes"),
-        binary_data.get("entry_addr"),
-    ) {
-        let factory = crate::core::disassembler::DisassemblerImpl::new(*os, *arch);
-        use crate::core::traits::Disassembler;
-        let instructions = factory.disassemble(text_bytes, *entry_addr)?;
+    let ParsedBinaryContext {
+        os,
+        arch,
+        entry_addr,
+        text_bytes,
+    } = binary_data;
 
-        // Run FLIRT signature matching (either with custom matcher or fallback to embedded)
-        let entry_points =
-            collect_function_entry_points(&binary_object, &instructions, arch, *entry_addr);
+    let factory = crate::core::disassembler::DisassemblerImpl::new(os, arch);
+    use crate::core::traits::Disassembler;
+    let instructions = factory.disassemble(&text_bytes, entry_addr)?;
 
-        let library_functions = match custom_flirt {
-            Some(ref matcher) => {
-                matcher.identify_library_functions(&entry_points, text_bytes, *entry_addr)
-            }
-            None => {
-                let embedded = crate::core::flirt::FlirtMatcher::load_embedded();
-                embedded.identify_library_functions(&entry_points, text_bytes, *entry_addr)
-            }
-        };
+    // Run FLIRT signature matching (either with custom matcher or fallback to embedded)
+    let entry_points =
+        collect_function_entry_points(&binary_object, &instructions, &arch, entry_addr);
 
-        on_progress(AnalysisProgress::LibraryFunctions(library_functions));
+    let library_functions = match custom_flirt {
+        Some(ref matcher) => {
+            matcher.identify_library_functions(&entry_points, &text_bytes, entry_addr)
+        }
+        None => {
+            let embedded = crate::core::flirt::FlirtMatcher::load_embedded();
+            embedded.identify_library_functions(&entry_points, &text_bytes, entry_addr)
+        }
+    };
 
-        let ctx = AnalysisContext {
-            buffer,
-            binary_object: &binary_object,
-            section_ranges: &section_ranges,
-            os: *os,
-            arch: *arch,
-            text_bytes,
-            entry_addr: *entry_addr,
-            instructions: &instructions,
-        };
+    on_progress(AnalysisProgress::LibraryFunctions(library_functions));
 
-        let plugins: Vec<Box<dyn HeuristicPlugin>> = vec![
-            Box::new(crate::core::plugins::DisassemblyPlugin),
-            Box::new(crate::core::plugins::StringCheckPlugin),
-            Box::new(crate::core::plugins::PackerSigCheckPlugin),
-            Box::new(crate::core::plugins::EntropyPlugin),
-            Box::new(crate::core::plugins::ImportsPlugin),
-            Box::new(crate::core::plugins::ExportsPlugin),
-            Box::new(crate::core::plugins::MetadataPlugin),
-            Box::new(crate::core::plugins::CfgPlugin),
-        ];
+    let ctx = AnalysisContext {
+        buffer,
+        binary_object: &binary_object,
+        section_ranges: &section_ranges,
+        os,
+        arch,
+        text_bytes: &text_bytes,
+        entry_addr,
+        instructions: &instructions,
+    };
 
-        rayon::scope(|s| {
-            for plugin in &plugins {
-                s.spawn(|_| {
-                    if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                        return;
-                    }
-                    match plugin.run(&ctx) {
-                        Ok(progress) => on_progress(progress),
-                        Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
-                    }
-                });
-            }
-        });
-    }
+    let plugins: Vec<Box<dyn HeuristicPlugin>> = vec![
+        Box::new(crate::core::plugins::DisassemblyPlugin),
+        Box::new(crate::core::plugins::StringCheckPlugin),
+        Box::new(crate::core::plugins::PackerSigCheckPlugin),
+        Box::new(crate::core::plugins::EntropyPlugin),
+        Box::new(crate::core::plugins::ImportsPlugin),
+        Box::new(crate::core::plugins::ExportsPlugin),
+        Box::new(crate::core::plugins::MetadataPlugin),
+        Box::new(crate::core::plugins::CfgPlugin),
+    ];
+
+    rayon::scope(|s| {
+        for plugin in &plugins {
+            s.spawn(|_| {
+                if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+                match plugin.run(&ctx) {
+                    Ok(progress) => on_progress(progress),
+                    Err(e) => capture_error_and_cancel(&error_state, e, &cancel_flag),
+                }
+            });
+        }
+    });
 
     if let Some(err) = error_state
         .into_inner()
