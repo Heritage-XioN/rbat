@@ -5,7 +5,7 @@
 
 use crate::{
     core::{FeatureSet, Rule, cfg::ControlFlowGraph},
-    utils::rules::{StringOrVec, parse_count_threshold},
+    utils::rules::{StringOrVec, parse_number_constant},
 };
 
 use aho_corasick::{AhoCorasick, PatternID};
@@ -50,10 +50,10 @@ pub enum AnalysisProgress {
     PackerSigs(HashMap<String, Vec<YaraMatches>>),
     /// Computed entropy score per binary section.
     Entropy(HashMap<String, f64>),
-    /// Identified API hooks or imported function calls.
-    ApiHooking(HashMap<String, u64>),
-    /// Process injection API occurrences.
-    ProcessInjection(HashSet<String>),
+    /// Dynamically imported symbols and APIs.
+    Imports(HashSet<String>),
+    /// Exported symbols and functions.
+    Exports(HashSet<String>),
     /// Extracted binary format metadata.
     BinaryMetadata(BinaryMetadata),
     /// Reconstructed Control Flow Graph.
@@ -91,10 +91,10 @@ pub struct AnalysisResult {
     pub code_cave: HashMap<String, Vec<u64>>,
     /// Count and location of blacklisted anti-analysis instructions.
     pub blacklisted_mnemonics: HashMap<String, Vec<u64>>,
-    /// System and API calls associated with library/function hooking.
-    pub api_hooking: HashMap<String, u64>,
-    /// Indicators of process injection capabilities.
-    pub process_injection: HashSet<String>,
+    /// Dynamically imported APIs and symbols.
+    pub imports: HashSet<String>,
+    /// Exported symbols and functions.
+    pub exports: HashSet<String>,
     /// Entropy score per binary section.
     pub section_entropy: HashMap<String, f64>,
     /// String extraction YARA matches.
@@ -635,6 +635,23 @@ pub enum RuleCondition {
         /// The characteristic flag name.
         characteristic: String,
     },
+    /// Requires a specific number constant.
+    Number {
+        /// The target number string.
+        number: String,
+    },
+    /// Requires a specific offset constant.
+    Offset {
+        /// The target offset string.
+        offset: String,
+    },
+    /// A count threshold for an underlying condition.
+    Count {
+        /// The condition being counted.
+        condition: Box<RuleCondition>,
+        /// The count threshold.
+        count: usize,
+    },
     // catch all variant for unhandled/unsupported rules
     /// A catch-all variant for unsupported or unknown CAPA rule types.
     Other(std::collections::HashMap<String, serde_json::Value>),
@@ -682,16 +699,57 @@ impl RuleCondition {
                 })
             }
             Self::Other(mut map) => {
-                if map.len() == 1 && map.contains_key("description") {
-                    None
-                } else {
-                    if let Some(val) = map.remove("number") {
-                        let target_num = crate::utils::rules::parse_number_constant(&val);
-                        map.insert(
-                            "number".to_string(),
-                            serde_json::Value::String(target_num.to_lowercase()),
-                        );
+                if map.len() == 1 {
+                    let key = map.keys().next().unwrap().clone();
+                    let val = map.remove(&key).unwrap();
+
+                    if key == "description" {
+                        return None;
+                    } else if key == "number" {
+                        let target_num = parse_number_constant(&val);
+                        return Some(Self::Number {
+                            number: target_num.to_lowercase(),
+                        });
+                    } else if key == "offset" {
+                        let target_num = parse_number_constant(&val);
+                        return Some(Self::Offset {
+                            offset: target_num.to_lowercase(),
+                        });
+                    } else if key.starts_with("count(") && key.ends_with(")") {
+                        let inner_str = &key[6..key.len() - 1]; // e.g. "api(VirtualAlloc)"
+                        let inner_cond = if inner_str.starts_with("api(") {
+                            Some(Self::Api {
+                                api: inner_str[4..inner_str.len() - 1].to_string(),
+                            })
+                        } else if inner_str.starts_with("match(") {
+                            Some(Self::Match {
+                                match_name: inner_str[6..inner_str.len() - 1].to_string(),
+                            })
+                        } else if inner_str.starts_with("string(") {
+                            Some(Self::String {
+                                string: inner_str[7..inner_str.len() - 1].to_string(),
+                            })
+                        } else if inner_str.starts_with("mnemonic(") {
+                            Some(Self::Mnemonic {
+                                mnemonic: inner_str[9..inner_str.len() - 1].to_string(),
+                            })
+                        } else {
+                            None
+                        };
+
+                        if let Some(cond) = inner_cond {
+                            let count = crate::utils::rules::parse_count_threshold(&val);
+                            if let Some(sanitized_cond) = cond.sanitize() {
+                                return Some(Self::Count {
+                                    condition: Box::new(sanitized_cond),
+                                    count,
+                                });
+                            }
+                        }
                     }
+                    map.insert(key, val);
+                    Some(Self::Other(map))
+                } else {
                     Some(Self::Other(map))
                 }
             }
@@ -785,70 +843,44 @@ impl RuleCondition {
             Self::Characteristic { characteristic } if characteristic.contains("packed") => {
                 features.has_packer_sig
             }
-            // this represents a catch all condition for the features
-            // that are not currently unhandled or supported
-            Self::Other(map) => {
-                for (key, value) in map {
-                    // Ignore informational description fields inside logic trees
-                    if key == "description" {
-                        continue;
-                    }
-
-                    // Check if key is a count assertion, e.g. "count(api(SetHandleInformation))"
-                    if key.starts_with("count(") && key.ends_with(")") {
-                        let inner = &key[6..key.len() - 1]; // e.g. "api(SetHandleInformation)"
-                        if inner.starts_with("api(") && inner.ends_with(")") {
-                            let api_name = &inner[4..inner.len() - 1];
-                            let threshold = parse_count_threshold(value);
-                            let count = features
-                                .apis
-                                .iter()
-                                .filter(|a| a.contains(api_name))
-                                .count();
-                            if count < threshold {
-                                return false;
-                            }
-                        } else if inner.starts_with("string(") && inner.ends_with(")") {
-                            let str_val = &inner[7..inner.len() - 1];
-                            let threshold = parse_count_threshold(value);
-                            let count = features
-                                .strings
-                                .iter()
-                                .filter(|s| s.contains(str_val))
-                                .count();
-                            if count < threshold {
-                                return false;
-                            }
-                        } else if inner.starts_with("mnemonic(") && inner.ends_with(")") {
-                            let mnem = &inner[9..inner.len() - 1];
-                            let threshold = parse_count_threshold(value);
-                            let count = if features.mnemonics.iter().any(|m| **m == *mnem) {
-                                1
-                            } else {
-                                0
-                            };
-                            if count < threshold {
-                                return false;
-                            }
-                        } else {
-                            // Return false for unsupported count types (e.g. characteristic, match)
-                            return false;
-                        }
-                    }
-                    // Check if key is "number"
-                    else if key == "number" {
-                        let target_num = value.as_str().unwrap_or("");
-                        if !features.strings.iter().any(|s| s.contains(target_num)) {
-                            return false;
-                        }
-                    }
-                    // Fallback for unhandled property
-                    else {
-                        return false;
-                    }
-                }
-                true
+            // Supported count/offset/number features
+            Self::Number { number } | Self::Offset { offset: number } => {
+                features.strings.iter().any(|s| s.contains(number))
             }
+            Self::Count { condition, count } => match &**condition {
+                Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
+                    features.apis.iter().filter(|a| a.contains(api)).count() >= *count
+                }
+                Self::String { string } => {
+                    features
+                        .strings
+                        .iter()
+                        .filter(|s| s.contains(string))
+                        .count()
+                        >= *count
+                }
+                Self::Mnemonic { mnemonic } => {
+                    features
+                        .mnemonics
+                        .iter()
+                        .filter(|m| **m == *mnemonic)
+                        .count()
+                        >= *count
+                }
+                Self::Match { match_name } => {
+                    features
+                        .apis
+                        .iter()
+                        .chain(features.strings.iter())
+                        .filter(|s| s.contains(match_name))
+                        .count()
+                        >= *count
+                }
+                _ => false,
+            },
+            // this represents a catch all condition for the features
+            // that are currently unhandled or supported
+            Self::Other(_) => false,
             _ => false,
         }
     }
@@ -881,26 +913,19 @@ impl RuleCondition {
                 .lookup
                 .get(match_name)
                 .is_some_and(|id| insn.matched.contains(id)),
-            Self::Other(map) => {
-                for (key, value) in map {
-                    if key == "description" {
-                        continue;
-                    }
-                    if key == "number" || key == "offset" {
-                        let target_num = value.as_str().unwrap_or("");
-                        if let Some(id) = needle.lookup.get(target_num) {
-                            if !insn.matched.contains(id) {
-                                return false;
-                            }
-                        } else {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-                true
+            Self::Number { number } | Self::Offset { offset: number } => needle
+                .lookup
+                .get(number)
+                .is_some_and(|id| insn.matched.contains(id)),
+            Self::Count { condition, count } => {
+                let actual = if condition.matches_instruction(insn, needle) {
+                    1
+                } else {
+                    0
+                };
+                actual >= *count
             }
+            Self::Other(_) => false,
             _ => false,
         }
     }
@@ -949,55 +974,23 @@ impl RuleCondition {
                     .iter()
                     .all(|cond| cond.matches_instruction(insn, needle))
             }),
-            Self::Other(map) => {
-                for (key, value) in map {
-                    if key == "description" {
-                        continue;
-                    }
-                    if key == "number" || key == "offset" {
-                        let target_num = crate::utils::rules::parse_number_constant(value);
-                        if let Some(id) = needle.lookup.get(&target_num) {
-                            let matched = block
-                                .instructions
-                                .iter()
-                                .any(|insn| insn.matched.contains(id));
-                            if !matched {
-                                return false;
-                            }
-                        } else {
-                            return false;
-                        }
-                    } else if key.starts_with("count(") && key.ends_with(")") {
-                        let inner = &key[6..key.len() - 1];
-                        let target_str = if inner.starts_with("api(") && inner.ends_with(")") {
-                            &inner[4..inner.len() - 1]
-                        } else if inner.starts_with("string(") && inner.ends_with(")") {
-                            &inner[7..inner.len() - 1]
-                        } else if inner.starts_with("mnemonic(") && inner.ends_with(")") {
-                            &inner[9..inner.len() - 1]
-                        } else {
-                            ""
-                        };
-
-                        if let Some(id) = needle.lookup.get(&target_str.to_lowercase()) {
-                            let count = block
-                                .instructions
-                                .iter()
-                                .filter(|insn| insn.matched.contains(id))
-                                .count();
-                            let threshold = crate::utils::rules::parse_count_threshold(value);
-                            if count < threshold {
-                                return false;
-                            }
-                        } else {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-                true
+            Self::Number { number } | Self::Offset { offset: number } => {
+                needle.lookup.get(number).is_some_and(|id| {
+                    block
+                        .instructions
+                        .iter()
+                        .any(|insn| insn.matched.contains(id))
+                })
             }
+            Self::Count { condition, count } => {
+                let actual = block
+                    .instructions
+                    .iter()
+                    .filter(|insn| condition.matches_instruction(insn, needle))
+                    .count();
+                actual >= *count
+            }
+            Self::Other(_) => false,
             _ => false,
         }
     }
@@ -1026,23 +1019,12 @@ impl RuleCondition {
                 .lookup
                 .get(match_name)
                 .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed)),
-            Self::Other(map) => {
-                for (key, value) in map {
-                    if key == "number" || key == "offset" {
-                        let target_num = crate::utils::rules::parse_number_constant(value);
-                        if let Some(id) = needle.lookup.get(&target_num) {
-                            if !needle.present[id.as_usize()]
-                                .load(std::sync::atomic::Ordering::Relaxed)
-                            {
-                                return false;
-                            }
-                        } else {
-                            return false;
-                        }
-                    }
-                }
-                true
-            }
+            Self::Number { number } | Self::Offset { offset: number } => needle
+                .lookup
+                .get(number)
+                .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed)),
+            Self::Count { condition, .. } => condition.is_present(needle),
+            Self::Other(_) => true,
             _ => true,
         }
     }
@@ -1141,24 +1123,13 @@ impl NeedleIndex {
                     .iter()
                     .for_each(|c| Self::collect_patterns(c, patterns));
             }
-            RuleCondition::Other(map) => {
-                // Extract embedded patterns from count(...) assertions and numbers/offsets
-                for (key, value) in map {
-                    if key == "number" || key == "offset" {
-                        let target_num = crate::utils::rules::parse_number_constant(value);
-                        patterns.insert(target_num.to_lowercase());
-                    } else if key.starts_with("count(") && key.ends_with(")") {
-                        let inner = &key[6..key.len() - 1];
-                        if inner.starts_with("api(") && inner.ends_with(")") {
-                            patterns.insert(inner[4..inner.len() - 1].to_lowercase());
-                        } else if inner.starts_with("string(") && inner.ends_with(")") {
-                            patterns.insert(inner[7..inner.len() - 1].to_lowercase());
-                        } else if inner.starts_with("mnemonic(") && inner.ends_with(")") {
-                            patterns.insert(inner[9..inner.len() - 1].to_lowercase());
-                        }
-                    }
-                }
+            RuleCondition::Number { number } | RuleCondition::Offset { offset: number } => {
+                patterns.insert(number.to_lowercase());
             }
+            RuleCondition::Count { condition, .. } => {
+                Self::collect_patterns(condition, patterns);
+            }
+            RuleCondition::Other(_) => {}
             _ => {}
         }
     }
