@@ -13,6 +13,7 @@ use rbat::{
         AnalysisResult,
         analyzer::analyze_streaming,
         cli::{AnalyzeArgs, Cli, Commands, RulesAction, RulesArgs},
+        rule::Rule,
         tui::App,
         types::{AnalysisProgress, NeedleIndex},
     },
@@ -26,6 +27,7 @@ use rbat::{
     },
 };
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, sync::mpsc};
 use tui_banner::Banner;
@@ -104,9 +106,20 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         custom_flirt = Some(flirt);
     }
 
+    // load rules early for zero-allocation imports parsing
+    let mut rules = Rule::load_embedded();
+    if let Some(ref rules_dir) = args.rules {
+        let custom_rules = Rule::load_from_directory(rules_dir);
+        rules.extend(custom_rules);
+    }
+
+    // build global needle index for matching strings
+    let needle_index = Arc::new(NeedleIndex::build_from_rules(&rules));
+    let needle_clone = Arc::clone(&needle_index);
+
     let start_time = std::time::Instant::now();
     let analysis_thread = std::thread::spawn(move || {
-        analyze_streaming(&buffer, custom_flirt, move |event| {
+        analyze_streaming(&buffer, custom_flirt, needle_clone, move |event| {
             let _ = tx.send(event);
         })
     });
@@ -116,13 +129,11 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     // Event loop receiving real-time progress events
     for event in rx {
         match event {
-            AnalysisProgress::Disassembly((code_cave, blacklisted_mnemonics)) => {
+            AnalysisProgress::Disassembly(code_cave) => {
                 analysis_result.code_cave = code_cave.clone();
-                analysis_result.blacklisted_mnemonics = blacklisted_mnemonics.clone();
                 spinner.set_message(format!(
-                    "Disassembled section (code caves: {}, blacklisted mnemonics: {})",
-                    code_cave.len(),
-                    blacklisted_mnemonics.len()
+                    "Disassembled section (code caves: {})",
+                    code_cave.len()
                 ));
             }
             AnalysisProgress::Strings(string_values) => {
@@ -199,17 +210,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         }
     }
 
-    // load rules
-    let mut rules = rbat::core::Rule::load_embedded();
-    if let Some(ref rules_dir) = args.rules {
-        let custom_rules = rbat::core::Rule::load_from_directory(rules_dir);
-        rules.extend(custom_rules);
-    }
-
-    spinner.set_message(format!("Evaluating {} heuristics...", rules.len()));
-
-    // build global needle index for matching strings
-    let needle_index = NeedleIndex::build_from_rules(&rules);
+    spinner.set_message(format!(
+        "Evaluating binary against {} capa rules...",
+        rules.len()
+    ));
     if let Some(ref mut cfg) = analysis_result.cfg {
         needle_index.populate_cfg(cfg);
     }
