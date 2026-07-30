@@ -6,12 +6,19 @@
 
 use object::File;
 use rayon;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 use super::{AnalysisProgress, AnalysisResult, Result, RiskAssessment, parser::Parser};
 use crate::{
-    core::{AnalysisContext, ParsedBinaryContext, flirt::FlirtMatcher, traits::HeuristicPlugin},
+    core::{
+        AnalysisContext, ParsedBinaryContext, Rule,
+        disassembler::DisassemblerImpl,
+        features::FeatureSet,
+        flirt::FlirtMatcher,
+        traits::{Disassembler, HeuristicPlugin},
+        types::NeedleIndex,
+    },
     utils::{
         flirt::collect_function_entry_points, scoring::calculate_risk,
         section_offset::build_section_map, stream_error_helper::capture_error_and_cancel,
@@ -30,8 +37,11 @@ use crate::{
 /// # Example
 /// ```rust,no_run
 /// use rbat::core::analyzer::analyze_streaming;
+/// use std::sync::Arc;
+/// use rbat::core::types::NeedleIndex;
 ///
-/// analyze_streaming(b"some binary bytes", None, |progress| {
+/// let needle = Arc::new(NeedleIndex::build_from_rules(&[]));
+/// analyze_streaming(b"some binary bytes", None, needle, |progress| {
 ///     // Handle progress updates here
 /// }).unwrap();
 /// ```
@@ -41,6 +51,7 @@ use crate::{
 pub fn analyze_streaming<F>(
     buffer: &[u8],
     custom_flirt: Option<FlirtMatcher>,
+    needle: Arc<NeedleIndex>,
     on_progress: F,
 ) -> Result<()>
 where
@@ -61,8 +72,7 @@ where
         text_bytes,
     } = binary_data;
 
-    let factory = crate::core::disassembler::DisassemblerImpl::new(os, arch);
-    use crate::core::traits::Disassembler;
+    let factory = DisassemblerImpl::new(os, arch);
     let instructions = factory.disassemble(&text_bytes, entry_addr)?;
 
     // Run FLIRT signature matching (either with custom matcher or fallback to embedded)
@@ -90,6 +100,7 @@ where
         text_bytes: &text_bytes,
         entry_addr,
         instructions: &instructions,
+        needle,
     };
 
     let plugins: Vec<Box<dyn HeuristicPlugin>> = vec![
@@ -149,7 +160,12 @@ pub fn analyze_batch(
     let start_time = std::time::Instant::now();
     let (tx, rx) = std::sync::mpsc::channel();
 
-    analyze_streaming(buffer, custom_flirt, move |event| {
+    // build global needle index for matching strings
+    let rules = Rule::load_embedded();
+    let needle_index = Arc::new(NeedleIndex::build_from_rules(&rules));
+    let needle_clone = Arc::clone(&needle_index);
+
+    analyze_streaming(buffer, custom_flirt, needle_clone, move |event| {
         let _ = tx.send(event);
     })?;
 
@@ -157,9 +173,8 @@ pub fn analyze_batch(
 
     for event in rx {
         match event {
-            AnalysisProgress::Disassembly((code_cave, blacklisted_mnemonics)) => {
+            AnalysisProgress::Disassembly(code_cave) => {
                 analysis_result.code_cave = code_cave;
-                analysis_result.blacklisted_mnemonics = blacklisted_mnemonics;
             }
             AnalysisProgress::Strings(string_values) => {
                 analysis_result.string_values = string_values;
@@ -189,13 +204,11 @@ pub fn analyze_batch(
     }
 
     // Evaluate the rules
-    let rules = crate::core::Rule::load_embedded();
-    let needle_index = crate::core::types::NeedleIndex::build_from_rules(&rules);
     if let Some(ref mut cfg) = analysis_result.cfg {
         needle_index.populate_cfg(cfg);
     }
-    let features = crate::core::features::FeatureSet::from_analysis_result(&analysis_result);
-    let matched_rules = crate::core::Rule::evaluate(&features, &rules, &needle_index);
+    let features = FeatureSet::from_analysis_result(&analysis_result);
+    let matched_rules = Rule::evaluate(&features, &rules, &needle_index);
     let score = calculate_risk(&matched_rules);
 
     analysis_result.total_analysis_time_ms = start_time.elapsed().as_millis();
@@ -228,7 +241,8 @@ mod tests {
     #[test]
     fn test_analyze_streaming_err() {
         let buffer = b"invalid_binary_data_format".to_vec();
-        let result = analyze_streaming(&buffer, None, |_| {});
+        let needle = std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[]));
+        let result = analyze_streaming(&buffer, None, needle, |_| {});
         assert!(result.is_err());
     }
 }

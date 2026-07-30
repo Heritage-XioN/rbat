@@ -51,8 +51,7 @@ pub struct ParsedBinaryContext {
 /// Represents the progress updates emitted during static analysis.
 pub enum AnalysisProgress {
     /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
-    /// and blacklisted anti-analysis mnemonics.
-    Disassembly((HashMap<String, Vec<u64>>, HashMap<String, Vec<u64>>)),
+    Disassembly(HashMap<String, Vec<u64>>),
     /// Extracted strings matched by YARA rules.
     Strings(HashMap<String, Vec<YaraMatches>>),
     /// Packer and compiler signatures matched by YARA rules.
@@ -60,9 +59,9 @@ pub enum AnalysisProgress {
     /// Computed entropy score per binary section.
     Entropy(HashMap<String, f64>),
     /// Dynamically imported symbols and APIs.
-    Imports(HashSet<String>),
+    Imports(Vec<usize>),
     /// Exported symbols and functions.
-    Exports(HashSet<String>),
+    Exports(Vec<usize>),
     /// Extracted binary format metadata.
     BinaryMetadata(BinaryMetadata),
     /// Reconstructed Control Flow Graph.
@@ -98,12 +97,10 @@ pub struct AnalysisResult {
     pub metadata: BinaryMetadata,
     /// List of consecutive padding/cave virtual memory addresses.
     pub code_cave: HashMap<String, Vec<u64>>,
-    /// Count and location of blacklisted anti-analysis instructions.
-    pub blacklisted_mnemonics: HashMap<String, Vec<u64>>,
     /// Dynamically imported APIs and symbols.
-    pub imports: HashSet<String>,
+    pub imports: Vec<usize>,
     /// Exported symbols and functions.
-    pub exports: HashSet<String>,
+    pub exports: Vec<usize>,
     /// Entropy score per binary section.
     pub section_entropy: HashMap<String, f64>,
     /// String extraction YARA matches.
@@ -236,8 +233,10 @@ pub struct AnalysisContext<'a> {
     pub text_bytes: &'a [u8],
     /// Raw binary entry point.
     pub entry_addr: u64,
-    /// Pre-disassembled instructions made available to all plugins.
+    /// Parsed instruction list for the code section.
     pub instructions: &'a [InstructionInfo],
+    /// The global NeedleIndex automaton for pattern matching.
+    pub needle: std::sync::Arc<NeedleIndex>,
 }
 
 /// Cached mapping representing a binary section's file offset boundaries.
@@ -252,22 +251,22 @@ pub struct SectionRange {
 }
 
 /// A generic view over a disassembled instruction.
-#[cfg(feature = "backend-iced")]
+#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstructionInfo {
     pub inner: iced_x86::Instruction,
     pub os: BinaryOS,
     /// Pre-computed set of Aho-Corasick pattern IDs matched against this instruction's text.
-    pub matched: Vec<PatternID>,
+    pub matched: smallvec::SmallVec<[PatternID; 4]>,
 }
 
-#[cfg(feature = "backend-iced")]
+#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
 impl InstructionInfo {
     pub fn from_iced(inner: &iced_x86::Instruction, os: BinaryOS) -> Self {
         Self {
             inner: *inner,
             os,
-            matched: Vec::new(),
+            matched: smallvec::SmallVec::new(),
         }
     }
 
@@ -312,7 +311,7 @@ impl InstructionInfo {
     }
 }
 
-#[cfg(feature = "backend-iced")]
+#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
 impl serde::Serialize for InstructionInfo {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -327,7 +326,7 @@ impl serde::Serialize for InstructionInfo {
     }
 }
 
-#[cfg(feature = "backend-iced")]
+#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
 impl<'de> serde::Deserialize<'de> for InstructionInfo {
     fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
     where
@@ -353,7 +352,7 @@ pub struct InstructionInfo {
     pub op_str: std::sync::Arc<str>,
     /// The set of PatternIDs this instruction matched.
     #[serde(skip)]
-    pub matched: Vec<PatternID>,
+    pub matched: smallvec::SmallVec<[PatternID; 4]>,
 }
 
 #[cfg(feature = "backend-capstone")]
@@ -364,7 +363,7 @@ impl InstructionInfo {
             address: insn.address(),
             mnemonic: insn.mnemonic().unwrap_or("").into(),
             op_str: insn.op_str().unwrap_or("").into(),
-            matched: Vec::new(),
+            matched: smallvec::SmallVec::new(),
         }
     }
 
@@ -790,14 +789,23 @@ impl RuleCondition {
             Self::Or { or } => or.iter().any(|c| c.matches(features, needle)),
             Self::Not { not } => !not.matches(features, needle),
             // capa Supported Feature Assertions
-            Self::Api { api } => features.apis.iter().any(|a| a.contains(api)),
+            Self::Api { api } => {
+                if let Some(id) = needle.lookup.get(api) {
+                    features.apis.contains(id)
+                } else {
+                    false
+                }
+            }
             Self::String { string } => features.strings.iter().any(|s| s.contains(string)),
             Self::Mnemonic { mnemonic } => features.mnemonics.iter().any(|m| &**m == mnemonic),
-            Self::Match { match_name } => features
-                .apis
-                .iter()
-                .chain(features.strings.iter())
-                .any(|s| s.contains(match_name)),
+            Self::Match { match_name } => {
+                if let Some(id) = needle.lookup.get(match_name)
+                    && features.apis.contains(id)
+                {
+                    return true;
+                }
+                features.strings.iter().any(|s| s.contains(match_name))
+            }
             Self::Entropy { section, min } => features
                 .section_entropies
                 .get(section)
@@ -835,8 +843,20 @@ impl RuleCondition {
             // Minimally match OS and Arch if present
             Self::Os { os } => features.os.contains(os),
             Self::Arch { arch } => features.arch.contains(arch),
-            Self::Import { import } => features.apis.iter().any(|api| api.contains(import)),
-            Self::Export { export } => features.apis.iter().any(|api| api.contains(export)),
+            Self::Import { import } => {
+                if let Some(id) = needle.lookup.get(import) {
+                    features.apis.contains(id)
+                } else {
+                    false
+                }
+            }
+            Self::Export { export } => {
+                if let Some(id) = needle.lookup.get(export) {
+                    features.apis.contains(id)
+                } else {
+                    false
+                }
+            }
             Self::Section { section } => features.section_entropies.contains_key(section),
             Self::Characteristic { characteristic } if characteristic.contains("packed") => {
                 features.has_packer_sig
@@ -847,7 +867,15 @@ impl RuleCondition {
             }
             Self::Count { condition, count } => match &**condition {
                 Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
-                    features.apis.iter().filter(|a| a.contains(api)).count() >= *count
+                    if let Some(id) = needle.lookup.get(api) {
+                        if features.apis.contains(id) {
+                            1 >= *count
+                        } else {
+                            0 == *count
+                        }
+                    } else {
+                        false
+                    }
                 }
                 Self::String { string } => {
                     features
@@ -866,13 +894,18 @@ impl RuleCondition {
                         >= *count
                 }
                 Self::Match { match_name } => {
-                    features
-                        .apis
+                    let mut cnt = features
+                        .strings
                         .iter()
-                        .chain(features.strings.iter())
                         .filter(|s| s.contains(match_name))
-                        .count()
-                        >= *count
+                        .count();
+
+                    if let Some(id) = needle.lookup.get(match_name)
+                        && features.apis.contains(id)
+                    {
+                        cnt += 1;
+                    }
+                    cnt >= *count
                 }
                 _ => false,
             },
@@ -1047,8 +1080,8 @@ pub struct NeedleIndex {
 impl NeedleIndex {
     /// Builds an Aho-Corasick automaton from all string-bearing conditions
     /// found recursively inside the loaded rule set.
-    pub fn build_from_rules(rules: &[Rule]) -> Self {
-        let mut pattern_set = HashSet::new();
+    pub fn build_from_rules<'a>(rules: &'a [Rule]) -> Self {
+        let mut pattern_set: HashSet<&'a str> = HashSet::new();
 
         for r in rules {
             for cond in &r.rule.features {
@@ -1057,11 +1090,11 @@ impl NeedleIndex {
         }
 
         // Convert to a deterministic ordered vec so PatternID indices are stable
-        let patterns: Vec<String> = pattern_set.into_iter().collect();
+        let patterns: Vec<&'a str> = pattern_set.into_iter().collect();
 
         let mut lookup = HashMap::with_capacity(patterns.len());
-        for (idx, pat) in patterns.iter().enumerate() {
-            lookup.insert(pat.clone(), PatternID::must(idx));
+        for (idx, &pat) in patterns.iter().enumerate() {
+            lookup.insert(pat.to_string(), PatternID::must(idx));
         }
 
         let automaton = AhoCorasick::builder()
@@ -1081,26 +1114,26 @@ impl NeedleIndex {
     }
 
     /// Recursively walks a condition tree and collects all string patterns
-    /// (lowercased) that the rule engine needs to match against instruction text.
-    fn collect_patterns(cond: &RuleCondition, patterns: &mut HashSet<String>) {
+    /// that the rule engine needs to match against instruction text.
+    fn collect_patterns<'a>(cond: &'a RuleCondition, patterns: &mut HashSet<&'a str>) {
         match cond {
             RuleCondition::Api { api } => {
-                patterns.insert(api.to_lowercase());
+                patterns.insert(api.as_str());
             }
             RuleCondition::Import { import } => {
-                patterns.insert(import.to_lowercase());
+                patterns.insert(import.as_str());
             }
             RuleCondition::Export { export } => {
-                patterns.insert(export.to_lowercase());
+                patterns.insert(export.as_str());
             }
             RuleCondition::String { string } => {
-                patterns.insert(string.to_lowercase());
+                patterns.insert(string.as_str());
             }
             RuleCondition::Match { match_name } => {
-                patterns.insert(match_name.to_lowercase());
+                patterns.insert(match_name.as_str());
             }
             RuleCondition::Mnemonic { mnemonic } => {
-                patterns.insert(mnemonic.to_lowercase());
+                patterns.insert(mnemonic.as_str());
             }
             RuleCondition::And { and } => {
                 and.iter().for_each(|c| Self::collect_patterns(c, patterns));
@@ -1122,7 +1155,7 @@ impl NeedleIndex {
                     .for_each(|c| Self::collect_patterns(c, patterns));
             }
             RuleCondition::Number { number } | RuleCondition::Offset { offset: number } => {
-                patterns.insert(number.to_lowercase());
+                patterns.insert(number.as_str());
             }
             RuleCondition::Count { condition, .. } => {
                 Self::collect_patterns(condition, patterns);

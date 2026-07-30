@@ -15,12 +15,15 @@
 //! use rbat::core::{AnalysisContext, BinaryArch, BinaryOS, AnalysisProgress};
 //! use rbat::core::plugins::MetadataPlugin;
 //! use rbat::core::traits::HeuristicPlugin;
+//! use std::sync::Arc;
+//! use rbat::core::types::NeedleIndex;
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let buffer = vec![0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 62, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 56, 0, 1, 0, 64, 0, 0, 0, 0, 0];
 //! let obj = File::parse(buffer.as_slice())?;
 //! let section_ranges = vec![];
 //!
+//! let needle = Arc::new(NeedleIndex::build_from_rules(&[]));
 //! let ctx = AnalysisContext {
 //!     buffer: &buffer,
 //!     binary_object: &obj,
@@ -30,6 +33,7 @@
 //!     text_bytes: &buffer,
 //!     entry_addr: 0x1000,
 //!     instructions: &[],
+//!     needle: needle.clone(),
 //! };
 //!
 //! let progress = MetadataPlugin.run(&ctx)?;
@@ -59,12 +63,9 @@ impl HeuristicPlugin for DisassemblyPlugin {
     }
 
     fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
-        let (code_cave, blacklisted_mnemonics) =
-            disassemble_section(ctx.instructions, ctx.text_bytes, ctx.entry_addr)?;
-        Ok(AnalysisProgress::Disassembly((
-            code_cave,
-            blacklisted_mnemonics,
-        )))
+        let code_cave = disassemble_section(ctx.instructions, ctx.text_bytes, ctx.entry_addr)?;
+
+        Ok(AnalysisProgress::Disassembly(code_cave))
     }
 }
 
@@ -122,8 +123,15 @@ impl HeuristicPlugin for ImportsPlugin {
 
     fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
         let parser = Parser::new(ctx.binary_object);
-        let results = parser.extract_imports()?;
-        Ok(AnalysisProgress::Imports(results))
+        let mut matched = Vec::new();
+        if let Ok(imports) = parser.extract_imports() {
+            for raw_import in imports {
+                for mat in ctx.needle.automaton.find_overlapping_iter(raw_import) {
+                    matched.push(mat.pattern().as_usize());
+                }
+            }
+        }
+        Ok(AnalysisProgress::Imports(matched))
     }
 }
 
@@ -137,8 +145,15 @@ impl HeuristicPlugin for ExportsPlugin {
 
     fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
         let parser = Parser::new(ctx.binary_object);
-        let results = parser.extract_exports()?;
-        Ok(AnalysisProgress::Exports(results))
+        let mut matched = Vec::new();
+        if let Ok(exports) = parser.extract_exports() {
+            for raw_export in exports {
+                for mat in ctx.needle.automaton.find_overlapping_iter(raw_export) {
+                    matched.push(mat.pattern().as_usize());
+                }
+            }
+        }
+        Ok(AnalysisProgress::Exports(matched))
     }
 }
 
@@ -199,6 +214,7 @@ mod tests {
             text_bytes: &[],
             entry_addr: 0x1000,
             instructions: &[],
+            needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
         };
 
         let result = MetadataPlugin.run(&ctx).unwrap();
@@ -230,6 +246,7 @@ mod tests {
             text_bytes: &[],
             entry_addr: 0x1000,
             instructions: &[],
+            needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
         };
 
         let result = EntropyPlugin.run(&ctx).unwrap();
@@ -258,7 +275,7 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "nop".into(),
                 op_str: "".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             };
             128
         ];
@@ -272,12 +289,14 @@ mod tests {
             text_bytes: &text_bytes,
             entry_addr: 0x1000,
             instructions: &instructions,
+            needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
         };
 
         let result = DisassemblyPlugin.run(&ctx).unwrap();
         match result {
-            AnalysisProgress::Disassembly((code_cave, _)) => {
+            AnalysisProgress::Disassembly(code_cave) => {
                 assert!(code_cave.contains_key("nop_addr"));
+                assert_eq!(code_cave.get("nop_addr").unwrap().len(), 128);
             }
             _ => panic!("Expected Disassembly progress"),
         }

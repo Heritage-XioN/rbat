@@ -105,28 +105,6 @@ pub fn generate_pdf_report(
         });
     }
 
-    for (mnemonic, addresses) in &analysis_result.blacklisted_mnemonics {
-        let sample = if addresses.is_empty() {
-            "".to_string()
-        } else {
-            let limit = std::cmp::min(addresses.len(), 3);
-            let formatted_addrs: Vec<String> = addresses[..limit]
-                .iter()
-                .map(|addr| format!("0x{:X}", addr))
-                .collect();
-            format!(" (at {})", formatted_addrs.join(", "))
-        };
-        capabilities.push(TechnicalFinding {
-            category: "Suspicious Instructions".to_string(),
-            details: format!(
-                "Instruction '{}' used {} times{}",
-                mnemonic,
-                addresses.len(),
-                sample
-            ),
-        });
-    }
-
     // Map Signatures
     let mut signatures = Vec::new();
 

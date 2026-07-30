@@ -117,7 +117,7 @@ mod tests {
         section_entropies.insert(".text".to_owned(), 7.8);
 
         let features = FeatureSet {
-            apis: HashSet::from(["VirtualAlloc".to_string()]),
+            apis: HashSet::from([aho_corasick::PatternID::must(0)]),
             strings: HashSet::new(),
             mnemonics: HashSet::new(),
             section_entropies,
@@ -193,19 +193,19 @@ mod tests {
                     address: 0x1000,
                     mnemonic: "mov".into(),
                     op_str: "1 = HANDLE_FLAG_INHERIT".into(),
-                    matched: Vec::new(),
+                    matched: smallvec::SmallVec::new(),
                 },
                 InstructionInfo {
                     address: 0x1005,
                     mnemonic: "call".into(),
                     op_str: "SetHandleInformation".into(),
-                    matched: Vec::new(),
+                    matched: smallvec::SmallVec::new(),
                 },
                 InstructionInfo {
                     address: 0x1010,
                     mnemonic: "call".into(),
                     op_str: "SetHandleInformation".into(),
-                    matched: Vec::new(),
+                    matched: smallvec::SmallVec::new(),
                 },
             ],
         };

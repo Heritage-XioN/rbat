@@ -21,7 +21,7 @@
 
 use crate::{core::ParsedBinaryContext, utils::entropy::calculate_entropy};
 use object::{Architecture, BinaryFormat, File, Object, ObjectSection, ObjectSymbol, SectionKind};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::{BinaryArch, BinaryOS, RbatError, Result};
 
@@ -106,49 +106,47 @@ impl<'bin> Parser<'bin> {
     }
 
     /// Extracts all dynamically imported symbols.
-    pub fn extract_imports(&self) -> Result<HashSet<String>> {
-        let mut imports_set = HashSet::new();
+    pub fn extract_imports(&self) -> Result<Vec<&'bin [u8]>> {
+        let mut imports_list = Vec::new();
 
         if let Ok(imports) = self.binary_object.imports() {
             for import in imports {
-                let name = String::from_utf8_lossy(import.name()).into_owned();
-                imports_set.insert(name);
+                imports_list.push(import.name());
             }
         }
 
         // Also extract undefined dynamic symbols which act as imports
         for symbol in self.binary_object.dynamic_symbols() {
-            if let Ok(name) = symbol.name()
+            if let Ok(name) = symbol.name_bytes()
                 && symbol.is_undefined()
             {
-                imports_set.insert(name.to_string());
+                imports_list.push(name);
             }
         }
 
-        Ok(imports_set)
+        Ok(imports_list)
     }
 
     /// Extracts all exported symbols.
-    pub fn extract_exports(&self) -> Result<HashSet<String>> {
-        let mut exports_set = HashSet::new();
+    pub fn extract_exports(&self) -> Result<Vec<&'bin [u8]>> {
+        let mut exports_list = Vec::new();
 
         if let Ok(exports) = self.binary_object.exports() {
             for export in exports {
-                let name = String::from_utf8_lossy(export.name()).into_owned();
-                exports_set.insert(name);
+                exports_list.push(export.name());
             }
         }
 
         // Also extract defined dynamic symbols which act as exports
         for symbol in self.binary_object.dynamic_symbols() {
-            if let Ok(name) = symbol.name()
+            if let Ok(name) = symbol.name_bytes()
                 && !symbol.is_undefined()
             {
-                exports_set.insert(name.to_string());
+                exports_list.push(name);
             }
         }
 
-        Ok(exports_set)
+        Ok(exports_list)
     }
 }
 

@@ -148,13 +148,13 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "mov".into(),
                 op_str: "eax, 1".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "call".into(),
                 op_str: "0x2000".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
         ];
 
@@ -184,25 +184,25 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "push".into(),
                 op_str: "rbp".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "mov".into(),
                 op_str: "eax, 1".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100A,
                 mnemonic: "ret".into(),
                 op_str: "".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
                 mnemonic: "xor".into(),
                 op_str: "eax, eax".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
         ];
 
@@ -222,19 +222,19 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "push".into(),
                 op_str: "rbp".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "int3".into(),
                 op_str: "".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
                 mnemonic: "xor".into(),
                 op_str: "eax, eax".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
         ];
         let insns_no_ret: Vec<&InstructionInfo> = insns_no_ret_data.iter().collect();

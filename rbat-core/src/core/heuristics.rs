@@ -3,7 +3,7 @@
 //! This module implements core static disassembly heuristics using the Capstone disassembler
 //! to detect anti-analysis techniques, code caves, NOP sleds, and common signature matching rules.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::core::SectionRange;
@@ -13,10 +13,8 @@ use crate::utils::raw_padding::scan_raw_padding;
 
 static SUSPICIOUS_STRINGS_RULES: OnceLock<yara::Rules> = OnceLock::new();
 static PACKER_SIGNATURES_RULES: OnceLock<yara::Rules> = OnceLock::new();
-static BLACKLISTED_MNEMONICS: OnceLock<HashSet<String>> = OnceLock::new();
 
 type CodeCave = HashMap<String, Vec<u64>>;
-type BlacklistedMnemonics = HashMap<String, Vec<u64>>;
 
 /// Disassembles the executable section of a binary and scans for code caves and evasion mnemonics.
 ///
@@ -25,26 +23,16 @@ type BlacklistedMnemonics = HashMap<String, Vec<u64>>;
 /// - Runs of 128 or more consecutive `0x00` padding bytes (returned as `"null_addr"`).
 /// - Runs of 128 or more consecutive `0xCC` trap/INT3 bytes (returned as `"int3_addr"`).
 ///
-/// Also flags anti-VM or anti-debugging instructions present in the `blacklisted_mnemonics.txt` asset.
-///
 /// # Errors
 /// Returns `RbatError::DisassemblerError` if Capstone initialization or disassembly fails.
 pub fn disassemble_section(
     instructions: &[InstructionInfo],
     bytes: &[u8],
     entry_addr: u64,
-) -> Result<(CodeCave, BlacklistedMnemonics)> {
+) -> Result<CodeCave> {
     let mut code_cave: CodeCave = HashMap::new();
     let mut nop_addr: Vec<u64> = vec![];
     let mut counter: i32 = 0;
-
-    let mut blacklisted_mnemonics: BlacklistedMnemonics = HashMap::new();
-    let blacklist = BLACKLISTED_MNEMONICS.get_or_init(|| {
-        ["rdtsc", "int1", "rdpmc", "sidt", "sldt", "sgdt", "smsw"]
-            .iter()
-            .map(|&s| s.to_string())
-            .collect()
-    });
 
     let mut buf_m = String::new();
     for i in instructions {
@@ -63,13 +51,6 @@ pub fn disassemble_section(
             }
             counter = 0;
             nop_addr.clear();
-        }
-
-        if blacklist.contains(mnemonic) {
-            let entry = blacklisted_mnemonics
-                .entry(mnemonic.to_string())
-                .or_default();
-            entry.push(i.address());
         }
     }
 
@@ -95,7 +76,7 @@ pub fn disassemble_section(
         code_cave.insert("int3_addr".to_owned(), int3_caves);
     }
 
-    Ok((code_cave, blacklisted_mnemonics))
+    Ok(code_cave)
 }
 
 /// Helper function to perform YARA string detection.
@@ -146,22 +127,19 @@ mod tests {
                 address: addr as u64,
                 mnemonic: "nop".into(),
                 op_str: "".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             });
         }
         instructions.push(InstructionInfo {
             address: 0x1080,
             mnemonic: "rdtsc".into(),
             op_str: "".into(),
-            matched: Vec::new(),
+            matched: smallvec::SmallVec::new(),
         });
 
-        let (code_cave, blacklisted) = disassemble_section(&instructions, &[], 0x1000).unwrap();
+        let code_cave = disassemble_section(&instructions, &[], 0x1000).unwrap();
 
         assert!(code_cave.contains_key("nop_addr"));
         assert_eq!(code_cave.get("nop_addr").unwrap().len(), 128);
-
-        assert!(blacklisted.contains_key("rdtsc"));
-        assert_eq!(blacklisted.get("rdtsc"), Some(&vec![0x1080]));
     }
 }

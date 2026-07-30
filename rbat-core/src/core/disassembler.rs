@@ -66,10 +66,10 @@ mod capstone_backend {
     }
 }
 
-#[cfg(feature = "backend-iced")]
+#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
 pub use iced_backend::*;
 
-#[cfg(feature = "backend-iced")]
+#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
 mod iced_backend {
     use crate::core::{BinaryArch, BinaryOS};
 

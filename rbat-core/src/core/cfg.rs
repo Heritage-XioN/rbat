@@ -239,7 +239,7 @@ mod tests {
             address,
             mnemonic: mnemonic.into(),
             op_str: op_str.into(),
-            matched: Vec::new(),
+            matched: smallvec::SmallVec::new(),
         }
     }
 

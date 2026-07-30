@@ -3,17 +3,16 @@
 //! This module implements the `FeatureSet` structure which extracts and flattens
 //! binary analysis results into fast-lookup sets and maps for rule evaluation.
 
-use crate::core::{
-    AnalysisResult, BasicBlock, BinaryArch, EdgeType, InstructionClass, InstructionInfo,
-};
-use crate::utils::{cfg::classify_instruction, flirt::find_function_range};
+use crate::core::{AnalysisResult, BasicBlock, EdgeType, InstructionInfo};
+use crate::utils::flirt::find_function_range;
+use aho_corasick::PatternID;
 use std::collections::{HashMap, HashSet};
 
 /// Collected metrics and indicators extracted from the binary for rule evaluation.
 #[derive(Debug, Clone)]
 pub struct FeatureSet<'a> {
     /// Mapped API imports and suspicious dynamic symbol links.
-    pub apis: HashSet<String>,
+    pub apis: HashSet<PatternID>,
     /// Mapped string constants.
     pub strings: HashSet<String>,
     /// Blacklisted instruction mnemonics.
@@ -93,11 +92,11 @@ impl<'a> FeatureSet<'a> {
         let mut apis = HashSet::new();
         let mut strings = HashSet::new();
 
-        for api_name in &res.imports {
-            apis.insert(api_name.to_lowercase());
+        for &api_id in &res.imports {
+            apis.insert(PatternID::must(api_id));
         }
-        for api_name in &res.exports {
-            apis.insert(api_name.to_lowercase());
+        for &api_id in &res.exports {
+            apis.insert(PatternID::must(api_id));
         }
 
         for instances in res.string_values.values() {
@@ -105,18 +104,6 @@ impl<'a> FeatureSet<'a> {
                 if !is_lib_block(inst.offset as u64) {
                     strings.insert(inst.data.to_lowercase());
                 }
-            }
-        }
-
-        let mut mnemonics = HashSet::new();
-        for (m, addrs) in &res.blacklisted_mnemonics {
-            let filtered_addrs: Vec<u64> = addrs
-                .iter()
-                .copied()
-                .filter(|&addr| !is_lib_block(addr))
-                .collect();
-            if !filtered_addrs.is_empty() {
-                mnemonics.insert(m.as_str().into());
             }
         }
 
@@ -168,7 +155,7 @@ impl<'a> FeatureSet<'a> {
         Self {
             apis,
             strings,
-            mnemonics,
+            mnemonics: HashSet::new(),
             section_entropies: res.section_entropy.clone(),
             has_code_cave: !res.code_cave.is_empty(),
             has_packer_sig: !res.packer_signatures.is_empty(),
@@ -178,85 +165,6 @@ impl<'a> FeatureSet<'a> {
             has_loop,
             max_cyclomatic_complexity,
             blocks,
-        }
-    }
-
-    /// Extracts localized features from a single basic block.
-    pub fn from_basic_block(block: &BasicBlock, binary_os: &str, binary_arch: &str) -> Self {
-        let mut apis = HashSet::new();
-        let mut strings = HashSet::new();
-        let mut mnemonics = HashSet::new();
-
-        let mut buf_m = String::new();
-        let mut buf_o = String::new();
-
-        for insn in &block.instructions {
-            insn.format_mnemonic_into(&mut buf_m);
-            if !mnemonics.contains(&buf_m) {
-                mnemonics.insert(buf_m.clone());
-            }
-
-            // Capture API names from call targets
-            let class = classify_instruction(&buf_m, &BinaryArch::X64);
-
-            insn.format_operands_into(&mut buf_o);
-            if class == InstructionClass::Call && !apis.contains(&buf_o) {
-                apis.insert(buf_o.to_lowercase());
-            }
-
-            // Capture any numeric/constants/strings used as instruction arguments
-            if !strings.contains(&buf_o) {
-                strings.insert(buf_o.to_lowercase());
-            }
-        }
-
-        Self {
-            apis,
-            strings,
-            mnemonics,
-            section_entropies: HashMap::new(),
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: binary_os.to_string(),
-            arch: binary_arch.to_string(),
-            basic_blocks_count: 1,
-            has_loop: false,
-            max_cyclomatic_complexity: 1,
-            blocks: Vec::new(),
-        }
-    }
-
-    /// Extracts localized features from a single instruction.
-    pub fn from_instruction(insn: &InstructionInfo, binary_os: &str, binary_arch: &str) -> Self {
-        let mut apis = HashSet::new();
-        let mut strings = HashSet::new();
-        let mut mnemonics = HashSet::new();
-
-        let mut buf_m = String::new();
-        let mut buf_o = String::new();
-
-        insn.format_mnemonic_into(&mut buf_m);
-        mnemonics.insert(buf_m.clone());
-
-        insn.format_operands_into(&mut buf_o);
-        strings.insert(buf_o.to_lowercase());
-        if buf_m.to_lowercase() == "call" {
-            apis.insert(buf_o.to_lowercase());
-        }
-
-        Self {
-            apis,
-            strings,
-            mnemonics,
-            section_entropies: HashMap::new(),
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: binary_os.to_string(),
-            arch: binary_arch.to_string(),
-            basic_blocks_count: 0,
-            has_loop: false,
-            max_cyclomatic_complexity: 0,
-            blocks: Vec::new(),
         }
     }
 }
@@ -270,11 +178,9 @@ mod tests {
     fn test_feature_set_creation_populated() {
         let mut res = AnalysisResult::default();
 
-        // Setup API Hooking
-        res.imports.insert("VirtualAlloc".to_string());
-
-        // Setup Exports
-        res.exports.insert("WriteProcessMemory".to_string());
+        // Setup Imports & Exports
+        res.imports.push(10);
+        res.exports.push(20);
 
         // Setup Strings
         let yara_match = YaraMatches {
@@ -285,10 +191,6 @@ mod tests {
         };
         res.string_values
             .insert("url".to_string(), vec![yara_match]);
-
-        // Setup Mnemonics
-        res.blacklisted_mnemonics
-            .insert("cpuid".to_string(), vec![1000, 1004]);
 
         // Setup Section Entropies
         res.section_entropy.insert(".text".to_string(), 6.8);
@@ -303,17 +205,13 @@ mod tests {
         let fs = FeatureSet::from_analysis_result(&res);
 
         // Test APIs (both hooking and process injection should be merged)
-        assert!(fs.apis.contains("virtualalloc"));
-        assert!(fs.apis.contains("writeprocessmemory"));
+        assert!(fs.apis.contains(&PatternID::must(10)));
+        assert!(fs.apis.contains(&PatternID::must(20)));
         assert_eq!(fs.apis.len(), 2);
 
         // Test Strings
         assert!(fs.strings.contains("http://malicious.com"));
         assert_eq!(fs.strings.len(), 1);
-
-        // Test Mnemonics
-        assert!(fs.mnemonics.contains("cpuid"));
-        assert_eq!(fs.mnemonics.len(), 1);
 
         // Test Section Entropies
         assert_eq!(fs.section_entropies.get(".text"), Some(&6.8));
@@ -349,13 +247,13 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "mov".into(),
                 op_str: "1 = HANDLE_FLAG_INHERIT".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x2000,
                 mnemonic: "ret".into(),
                 op_str: "".into(),
-                matched: Vec::new(),
+                matched: smallvec::SmallVec::new(),
             },
         ];
 
@@ -365,9 +263,6 @@ mod tests {
         // Add library function at 0x2000
         res.library_functions.insert(0x2000, "strlen".to_string());
 
-        // Add blacklisted mnemonic and API call inside the library block (at 0x2000)
-        res.blacklisted_mnemonics
-            .insert("cpuid".to_string(), vec![0x2000]);
         let fs = FeatureSet::from_analysis_result(&res);
 
         // The user block at 0x1000 should be retained
@@ -376,8 +271,5 @@ mod tests {
         // The library block at 0x2000 should be excluded
         assert!(!fs.blocks.iter().any(|b| b.start_address == 0x2000));
         assert_eq!(fs.basic_blocks_count, 1);
-
-        // The blacklisted mnemonic from the library block should be excluded
-        assert!(fs.mnemonics.is_empty());
     }
 }
