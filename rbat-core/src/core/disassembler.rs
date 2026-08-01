@@ -7,8 +7,6 @@ use super::traits::*;
 use crate::core::InstructionInfo;
 use crate::core::Result;
 
-// Feature flagged disassembler implementations
-
 #[cfg(feature = "backend-capstone")]
 pub use capstone_backend::*;
 
