@@ -52,7 +52,7 @@ use rbat::core::analyzer::analyze_batch;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new("path/to/binary");
     let buffer = std::fs::read(path)?;
-    let (analysis_result, risk_assessment) = analyze_batch(&buffer, None, rbat::core::disassembler::DisassemblerBackend::Dynamic)?;
+    let (analysis_result, risk_assessment) = analyze_batch(&buffer, None)?;
 
     println!("Analysis complete for: {}", analysis_result.metadata.binary_type);
     println!("Architecture: {}", analysis_result.metadata.architecture_name());
@@ -80,7 +80,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new("path/to/binary");
     let buffer = std::fs::read(path)?;
 
-    analyze_streaming(&buffer, None, rbat::core::disassembler::DisassemblerBackend::Dynamic, |event| match event {
+    let needle = std::sync::Arc::new(rbat::core::types::NeedleIndex::build_from_rules(&[]));
+    analyze_streaming(&buffer, None, needle, |event| match event {
         AnalysisProgress::BinaryMetadata(meta) => {
             println!("Target platform: {} ({})", meta.binary_type, meta.architecture_name());
         }
@@ -116,16 +117,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = Path::new("./reports");
     std::fs::create_dir_all(out_dir)?;
 
-    let (result, score) = analyze_batch(&buffer, None, rbat::core::disassembler::DisassemblerBackend::Dynamic)?;
+    let (res, assessment) = analyze_batch(&buffer, None)?;
 
     // Executive Light-Mode PDF Report
-    generate_pdf_report(binary_path, &score, &result, &out_dir.join("report.pdf"))?;
+    generate_pdf_report(binary_path, &assessment, &res, &out_dir.join("report.pdf"))?;
 
     // SIEM-Ready CSV Report
-    generate_csv_report(binary_path, &score, &out_dir.join("report.csv"))?;
+    generate_csv_report(binary_path, &assessment, &out_dir.join("report.csv"))?;
 
     // Structured JSON Dump
-    generate_json_report(binary_path, &score, &result, &out_dir.join("report.json"))?;
+    generate_json_report(binary_path, &assessment, &res, &out_dir.join("report.json"))?;
 
     Ok(())
 }
