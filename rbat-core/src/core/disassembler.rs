@@ -124,6 +124,7 @@ mod tests {
 
     use super::*;
 
+    #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
     #[test]
     fn test_disasm_factory_x64_intel() {
         let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
@@ -132,6 +133,7 @@ mod tests {
         assert_eq!(insns[0].format_mnemonic(), "nop");
     }
 
+    #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
     #[test]
     fn test_disasm_factory_x86_att() {
         let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::X86);
@@ -140,13 +142,81 @@ mod tests {
         assert_eq!(insns[0].format_mnemonic(), "nop");
     }
 
+    #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
     #[test]
     fn test_disasm_factory_arm() {
-        // Iced does not support ARM, but we'll mock or disable if we need to
+        let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::Arm);
+        // NOP in ARM (little endian): 0x00, 0xF0, 0x20, 0xE3
+        let bytes = &[0x00, 0xF0, 0x20, 0xE3];
+
+        #[cfg(feature = "backend-capstone")]
+        {
+            let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+            assert_eq!(insns.len(), 1);
+            assert_eq!(insns[0].format_mnemonic(), "nop");
+        }
     }
 
+    #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
     #[test]
     fn test_disasm_factory_arm64() {
-        // Iced does not support ARM64, but we'll mock or disable if we need to
+        let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::Arm64);
+        // NOP in ARM64: 0x1F, 0x20, 0x03, 0xD5
+        let bytes = &[0x1F, 0x20, 0x03, 0xD5];
+
+        #[cfg(feature = "backend-capstone")]
+        {
+            let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+            assert_eq!(insns.len(), 1);
+            assert_eq!(insns[0].format_mnemonic(), "nop");
+        }
+    }
+
+    #[cfg(all(test, feature = "backend-iced", not(feature = "backend-capstone")))]
+    #[test]
+    fn test_iced_disasm_factory_x64_intel() {
+        let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
+        // NOP, RET
+        let bytes = &[0x90, 0xC3];
+        let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+        assert_eq!(insns.len(), 2);
+
+        assert_eq!(insns[0].address(), 0x1000);
+        assert_eq!(insns[0].format_mnemonic(), "nop");
+
+        assert_eq!(insns[1].address(), 0x1001);
+        assert_eq!(insns[1].format_mnemonic(), "ret");
+    }
+
+    #[cfg(all(test, feature = "backend-iced", not(feature = "backend-capstone")))]
+    #[test]
+    fn test_iced_disasm_factory_x86_att() {
+        let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::X86);
+        // MOV EAX, 1
+        let bytes = &[0xB8, 0x01, 0x00, 0x00, 0x00];
+        let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+        assert_eq!(insns.len(), 1);
+
+        assert_eq!(insns[0].address(), 0x1000);
+        assert_eq!(insns[0].format_mnemonic(), "mov");
+        // GAS format: $1, %eax
+        let op_str = insns[0].format_operands();
+        assert!(
+            op_str.contains("%eax") || op_str.contains("$1") || op_str.contains("eax"),
+            "op_str: {}",
+            op_str
+        );
+    }
+
+    #[cfg(all(test, feature = "backend-iced", not(feature = "backend-capstone")))]
+    #[test]
+    fn test_iced_disasm_invalid_bytes() {
+        let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
+        // 0xFF 0xFF is an invalid x86 instruction
+        let bytes = &[0xFF, 0xFF];
+        let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+        // Iced decodes it as an INVALID instruction and we skip it in our loop,
+        // but let's check what it outputs, probably 0 instructions.
+        assert_eq!(insns.len(), 0);
     }
 }

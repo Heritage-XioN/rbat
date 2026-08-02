@@ -4,3 +4,6 @@
 [submodule "rbat-core/assets/flirtdb"]
 	path = rbat-core/assets/flirtdb
 	url = https://github.com/Maktm/FLIRTDB
+[submodule "tests/capa-testfiles"]
+	path = rbat-core/tests/capa-testfiles
+	url = https://github.com/mandiant/capa-testfiles
