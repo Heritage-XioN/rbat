@@ -195,8 +195,7 @@ mod tests {
         res.section_entropy.insert(".text".to_string(), 6.8);
 
         // Setup Code Cave
-        res.code_cave
-            .insert("nop_addr".to_string(), vec![2000, 2001]);
+        res.code_cave.insert("nop_addr", vec![2000, 2001]);
 
         // simulate packer match
         res.packer_signatures.insert("UPX", vec![]);

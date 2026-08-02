@@ -14,8 +14,6 @@ use crate::utils::raw_padding::scan_raw_padding;
 static SUSPICIOUS_STRINGS_RULES: OnceLock<yara::Rules> = OnceLock::new();
 static PACKER_SIGNATURES_RULES: OnceLock<yara::Rules> = OnceLock::new();
 
-type CodeCave = HashMap<String, Vec<u64>>;
-
 /// Disassembles the executable section of a binary and scans for code caves and evasion mnemonics.
 ///
 /// Code caves are identified as:
@@ -25,12 +23,12 @@ type CodeCave = HashMap<String, Vec<u64>>;
 ///
 /// # Errors
 /// Returns `RbatError::DisassemblerError` if Capstone initialization or disassembly fails.
-pub fn disassemble_section(
+pub fn disassemble_section<'buf>(
     instructions: &[InstructionInfo],
     bytes: &[u8],
     entry_addr: u64,
-) -> Result<CodeCave> {
-    let mut code_cave: CodeCave = HashMap::new();
+) -> Result<HashMap<&'buf str, Vec<u64>>> {
+    let mut code_cave = HashMap::new();
     let mut nop_addr: Vec<u64> = vec![];
     let mut counter: i32 = 0;
 
@@ -45,9 +43,9 @@ pub fn disassemble_section(
             counter += 1;
         } else {
             if counter >= 128 {
-                let mut existing = code_cave.remove("nop_addr").unwrap_or_default();
+                let mut existing: Vec<u64> = code_cave.remove("nop_addr").unwrap_or_default();
                 existing.extend(&nop_addr);
-                code_cave.insert("nop_addr".to_owned(), existing);
+                code_cave.insert("nop_addr", existing);
             }
             counter = 0;
             nop_addr.clear();
@@ -57,7 +55,7 @@ pub fn disassemble_section(
     if counter >= 128 {
         let mut existing = code_cave.remove("nop_addr").unwrap_or_default();
         existing.extend(&nop_addr);
-        code_cave.insert("nop_addr".to_owned(), existing);
+        code_cave.insert("nop_addr", existing);
     }
 
     // Scan raw bytes for consecutive 0x00 runs, ignoring trailing alignment padding
@@ -67,13 +65,13 @@ pub fn disassemble_section(
     }
     let null_caves = scan_raw_padding(&bytes[..null_scan_len], 0x00, 128, entry_addr);
     if !null_caves.is_empty() {
-        code_cave.insert("null_addr".to_owned(), null_caves);
+        code_cave.insert("null_addr", null_caves);
     }
 
     // Scan raw bytes for consecutive 0xCC runs
     let int3_caves = scan_raw_padding(bytes, 0xCC, 128, entry_addr);
     if !int3_caves.is_empty() {
-        code_cave.insert("int3_addr".to_owned(), int3_caves);
+        code_cave.insert("int3_addr", int3_caves);
     }
 
     Ok(code_cave)

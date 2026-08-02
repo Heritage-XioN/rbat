@@ -53,7 +53,7 @@ pub struct ParsedBinaryContext {
 /// Represents the progress updates emitted during static analysis.
 pub enum AnalysisProgress<'buf> {
     /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
-    Disassembly(HashMap<String, Vec<u64>>),
+    Disassembly(HashMap<&'buf str, Vec<u64>>),
     /// Extracted strings matched by YARA rules.
     Strings(HashMap<&'buf str, Vec<YaraMatches<'buf>>>),
     /// Packer and compiler signatures matched by YARA rules.
@@ -100,7 +100,8 @@ pub struct AnalysisResult<'buf> {
     /// Extracted header and format metadata.
     pub metadata: BinaryMetadata,
     /// List of consecutive padding/cave virtual memory addresses.
-    pub code_cave: HashMap<String, Vec<u64>>,
+    #[serde(borrow)]
+    pub code_cave: HashMap<&'buf str, Vec<u64>>,
     /// Dynamically imported APIs and symbols.
     pub imports: Vec<usize>,
     /// Exported symbols and functions.
