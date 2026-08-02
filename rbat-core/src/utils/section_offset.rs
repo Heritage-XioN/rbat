@@ -16,19 +16,18 @@ use object::{Object, ObjectSection};
 ///
 /// # fn run(buffer: &[u8]) {
 /// let obj = File::parse(buffer).unwrap();
-/// let section_ranges = build_section_map(&obj, buffer).unwrap();
+/// let section_ranges = build_section_map(&obj).unwrap();
 /// # }
 /// ```
-pub fn build_section_map(
-    binary_object: &object::File,
-    _buffer: &[u8],
-) -> Result<Vec<SectionRange>> {
+pub fn build_section_map<'buf>(
+    binary_object: &object::File<'buf, &'buf [u8]>,
+) -> Result<Vec<SectionRange<'buf>>> {
     let mut ranges = Vec::new();
     for section in binary_object.sections() {
         if let Some((start, size)) = section.file_range() {
             let start = start as usize;
             let end = start.saturating_add(size as usize);
-            let name = section.name().unwrap_or("<unnamed>").to_string();
+            let name = section.name().unwrap_or("<unnamed>");
             ranges.push(SectionRange { start, end, name });
         }
     }
@@ -37,13 +36,13 @@ pub fn build_section_map(
 
 /// Finds the section name containing the given file offset.
 /// Returns `"<unknown>"` if no section bounds encompass the offset.
-pub fn get_section_for_offset(ranges: &[SectionRange], offset: usize) -> String {
+pub fn get_section_for_offset<'buf>(ranges: &[SectionRange<'buf>], offset: usize) -> &'buf str {
     for range in ranges {
         if offset >= range.start && offset < range.end {
-            return range.name.clone();
+            return range.name;
         }
     }
-    "<unknown>".to_string()
+    "<unknown>"
 }
 
 #[cfg(test)]
@@ -58,21 +57,20 @@ mod tests {
     fn test_get_section_for_offset_match() {
         let ranges = vec![
             SectionRange {
-                start: 0,
-                end: 100,
-                name: ".text".to_string(),
+                start: 0x1000,
+                end: 0x2000,
+                name: ".text",
             },
             SectionRange {
-                start: 100,
-                end: 200,
-                name: ".data".to_string(),
+                start: 0x2000,
+                end: 0x3000,
+                name: ".data",
             },
         ];
 
-        assert_eq!(get_section_for_offset(&ranges, 50), ".text");
-        assert_eq!(get_section_for_offset(&ranges, 100), ".data");
-        assert_eq!(get_section_for_offset(&ranges, 150), ".data");
-        assert_eq!(get_section_for_offset(&ranges, 250), "<unknown>");
+        assert_eq!(get_section_for_offset(&ranges, 0x1500), ".text");
+        assert_eq!(get_section_for_offset(&ranges, 0x2500), ".data");
+        assert_eq!(get_section_for_offset(&ranges, 0x4000), "<unknown>");
     }
 
     #[test]
@@ -84,7 +82,7 @@ mod tests {
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
 
-        let ranges = build_section_map(&obj, &buffer).unwrap();
+        let ranges = build_section_map(&obj).unwrap();
         assert!(!ranges.is_empty());
 
         let has_text = ranges.iter().any(|r| r.name == ".text");

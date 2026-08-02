@@ -14,7 +14,7 @@ use std::path::Path;
 pub fn generate_json_report(
     filename: &Path,
     assessment: &RiskAssessment,
-    analysis_result: &AnalysisResult,
+    analysis_result: &AnalysisResult<'_>,
     out_path: &Path,
 ) -> Result<()> {
     let report = serde_json::json!({

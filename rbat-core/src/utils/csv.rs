@@ -14,7 +14,7 @@ use std::path::Path;
 pub fn generate_csv_report(
     filename: &Path,
     assessment: &RiskAssessment,
-    analysis_result: &crate::core::AnalysisResult,
+    analysis_result: &crate::core::AnalysisResult<'_>,
     out_path: &Path,
 ) -> Result<()> {
     let mut wtr = Writer::from_path(out_path)?;

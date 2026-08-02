@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 /// Collected metrics and indicators extracted from the binary for rule evaluation.
 #[derive(Debug, Clone)]
-pub struct FeatureSet<'a> {
+pub struct FeatureSet<'buf> {
     /// Mapped API imports and suspicious dynamic symbol links.
     pub apis: HashSet<PatternID>,
     /// Mapped string constants.
@@ -35,12 +35,12 @@ pub struct FeatureSet<'a> {
     /// The maximum cyclomatic complexity across blocks.
     pub max_cyclomatic_complexity: usize,
     /// A list of references to the basic blocks.
-    pub blocks: Vec<&'a BasicBlock>,
+    pub blocks: Vec<&'buf BasicBlock>,
 }
 
-impl<'a> FeatureSet<'a> {
+impl<'buf> FeatureSet<'buf> {
     /// Populates a `FeatureSet` from the aggregate analysis findings.
-    pub fn from_analysis_result(res: &'a AnalysisResult) -> Self {
+    pub fn from_analysis_result(res: &'buf AnalysisResult<'buf>) -> Self {
         // Calculate library ranges if any library functions are matched
         let mut library_ranges = Vec::new();
         if let Some(ref cfg) = res.cfg {
@@ -113,7 +113,7 @@ impl<'a> FeatureSet<'a> {
         let mut blocks = Vec::new();
 
         if let Some(ref cfg) = res.cfg {
-            let filtered_blocks: Vec<&'a BasicBlock> = cfg
+            let filtered_blocks: Vec<&'buf BasicBlock> = cfg
                 .blocks
                 .values()
                 .filter(|block| !is_lib_block(block.start_address))
@@ -185,12 +185,11 @@ mod tests {
         // Setup Strings
         let yara_match = YaraMatches {
             offset: 0,
-            section: ".data".to_string(),
-            length: 4,
-            data: "http://malicious.com".to_string(),
+            section: ".data",
+            length: 10,
+            data: "http://malicious.com".into(),
         };
-        res.string_values
-            .insert("url".to_string(), vec![yara_match]);
+        res.string_values.insert("url", vec![yara_match]);
 
         // Setup Section Entropies
         res.section_entropy.insert(".text".to_string(), 6.8);
@@ -199,8 +198,8 @@ mod tests {
         res.code_cave
             .insert("nop_addr".to_string(), vec![2000, 2001]);
 
-        // Setup Packer Signatures
-        res.packer_signatures.insert("UPX".to_string(), vec![]);
+        // simulate packer match
+        res.packer_signatures.insert("UPX", vec![]);
 
         let fs = FeatureSet::from_analysis_result(&res);
 

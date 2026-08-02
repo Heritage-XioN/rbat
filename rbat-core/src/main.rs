@@ -118,73 +118,74 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let needle_clone = Arc::clone(&needle_index);
 
     let start_time = std::time::Instant::now();
-    let analysis_thread = std::thread::spawn(move || {
-        analyze_streaming(&buffer, custom_flirt, needle_clone, move |event| {
-            let _ = tx.send(event);
-        })
-    });
-
     let mut analysis_result = AnalysisResult::default();
 
-    // Event loop receiving real-time progress events
-    for event in rx {
-        match event {
-            AnalysisProgress::Disassembly(code_cave) => {
-                analysis_result.code_cave = code_cave.clone();
-                spinner.set_message(format!(
-                    "Disassembled section (code caves: {})",
-                    code_cave.len()
-                ));
-            }
-            AnalysisProgress::Strings(string_values) => {
-                analysis_result.string_values = string_values.clone();
-                spinner.set_message(format!(
-                    "Extracted {} suspicious string matches",
-                    string_values.len()
-                ));
-            }
-            AnalysisProgress::PackerSigs(packer_signatures) => {
-                analysis_result.packer_signatures = packer_signatures.clone();
-                spinner.set_message(format!(
-                    "Identified {} packer signatures",
-                    packer_signatures.len()
-                ));
-            }
-            AnalysisProgress::Entropy(section_entropy) => {
-                analysis_result.section_entropy = section_entropy.clone();
-                spinner.set_message(format!(
-                    "Calculated Shannon entropy for {} sections",
-                    section_entropy.len()
-                ));
-            }
-            AnalysisProgress::Imports(imports) => {
-                analysis_result.imports = imports.clone();
-                spinner.set_message(format!("Extracted {} imported symbols", imports.len()));
-            }
-            AnalysisProgress::Exports(exports) => {
-                analysis_result.exports = exports.clone();
-                spinner.set_message(format!("Extracted {} exported symbols", exports.len()));
-            }
-            AnalysisProgress::BinaryMetadata(metadata) => {
-                analysis_result.metadata = metadata;
-                spinner.set_message("Parsed binary headers & section bounds");
-            }
-            AnalysisProgress::CFG(cfg) => {
-                analysis_result.cfg = Some(cfg);
-                spinner.set_message("Reconstructed Control Flow Graph");
-            }
-            AnalysisProgress::LibraryFunctions(library_functions) => {
-                analysis_result.library_functions = library_functions.clone();
-                spinner.set_message(format!(
-                    "Matched {} library functions via FLIRT",
-                    library_functions.len()
-                ));
+    let buffer_ref = &buffer;
+    let analysis_res = std::thread::scope(|s| {
+        let handle = s.spawn(move || {
+            analyze_streaming(buffer_ref, custom_flirt, needle_clone, move |event| {
+                let _ = tx.send(event);
+            })
+        });
+
+        // Event loop receiving real-time progress events
+        for event in rx {
+            match event {
+                AnalysisProgress::Disassembly(code_cave) => {
+                    analysis_result.code_cave = code_cave.clone();
+                    spinner.set_message(format!(
+                        "Disassembled section (code caves: {})",
+                        code_cave.len()
+                    ));
+                }
+                AnalysisProgress::Strings(string_values) => {
+                    let len = string_values.len();
+                    analysis_result.string_values = string_values;
+                    spinner.set_message(format!("Extracted {} suspicious string matches", len));
+                }
+                AnalysisProgress::PackerSigs(packer_signatures) => {
+                    let len = packer_signatures.len();
+                    analysis_result.packer_signatures = packer_signatures;
+                    spinner.set_message(format!("Identified {} packer signatures", len));
+                }
+                AnalysisProgress::Entropy(section_entropy) => {
+                    analysis_result.section_entropy = section_entropy.clone();
+                    spinner.set_message(format!(
+                        "Calculated Shannon entropy for {} sections",
+                        section_entropy.len()
+                    ));
+                }
+                AnalysisProgress::Imports(imports) => {
+                    analysis_result.imports = imports.clone();
+                    spinner.set_message(format!("Extracted {} imported symbols", imports.len()));
+                }
+                AnalysisProgress::Exports(exports) => {
+                    analysis_result.exports = exports.clone();
+                    spinner.set_message(format!("Extracted {} exported symbols", exports.len()));
+                }
+                AnalysisProgress::BinaryMetadata(metadata) => {
+                    analysis_result.metadata = metadata;
+                    spinner.set_message("Parsed binary headers & section bounds");
+                }
+                AnalysisProgress::CFG(cfg) => {
+                    analysis_result.cfg = Some(cfg);
+                    spinner.set_message("Reconstructed Control Flow Graph");
+                }
+                AnalysisProgress::LibraryFunctions(library_functions) => {
+                    analysis_result.library_functions = library_functions.clone();
+                    spinner.set_message(format!(
+                        "Matched {} library functions via FLIRT",
+                        library_functions.len()
+                    ));
+                }
             }
         }
-    }
+
+        handle.join()
+    });
 
     // Check analysis thread result
-    match analysis_thread.join() {
+    match analysis_res {
         Ok(analysis_result_inner) => match analysis_result_inner {
             Ok(_) => {
                 spinner.set_message("Plugin analysis complete!");

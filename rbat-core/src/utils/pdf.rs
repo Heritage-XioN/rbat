@@ -62,7 +62,7 @@ const REPORT_CSS: &str = include_str!("../../templates/report.css");
 pub fn generate_pdf_report(
     filename: &Path,
     assessment: &RiskAssessment,
-    analysis_result: &AnalysisResult,
+    analysis_result: &AnalysisResult<'_>,
     out_path: &Path,
 ) -> Result<()> {
     let heatmap_svg_content = generate_entropy_heatmap(&analysis_result.section_entropy);

@@ -37,10 +37,8 @@ use crate::{
 /// # Example
 /// ```rust,no_run
 /// use rbat::core::analyzer::analyze_streaming;
-/// use std::sync::Arc;
-/// use rbat::core::types::NeedleIndex;
 ///
-/// let needle = Arc::new(NeedleIndex::build_from_rules(&[]));
+/// let needle = std::sync::Arc::new(rbat::core::types::NeedleIndex::build_from_rules(&[]));
 /// analyze_streaming(b"some binary bytes", None, needle, |progress| {
 ///     // Handle progress updates here
 /// }).unwrap();
@@ -48,20 +46,20 @@ use crate::{
 ///
 /// # Errors
 /// Returns `RbatError` if file operations, binary parsing, or plugin scanning fails.
-pub fn analyze_streaming<F>(
-    buffer: &[u8],
+pub fn analyze_streaming<'buf, F>(
+    buffer: &'buf [u8],
     custom_flirt: Option<FlirtMatcher>,
     needle: Arc<NeedleIndex>,
     on_progress: F,
 ) -> Result<()>
 where
-    F: Fn(AnalysisProgress) + Send + Sync,
+    F: Fn(AnalysisProgress<'buf>) + Send + Sync,
 {
     let error_state = Mutex::new(None);
     let cancel_flag = AtomicBool::new(false);
 
     let binary_object = File::parse(buffer)?;
-    let section_ranges = build_section_map(&binary_object, buffer)?;
+    let section_ranges = build_section_map(&binary_object)?;
     let parsed = Parser::new(&binary_object);
     let binary_data = parsed.parse_buffer()?;
 
@@ -80,9 +78,7 @@ where
         collect_function_entry_points(&binary_object, &instructions, &arch, entry_addr);
 
     let library_functions = match custom_flirt {
-        Some(ref matcher) => {
-            matcher.identify_library_functions(&entry_points, &text_bytes, entry_addr)
-        }
+        Some(matcher) => matcher.identify_library_functions(&entry_points, &text_bytes, entry_addr),
         None => {
             let embedded = crate::core::flirt::FlirtMatcher::load_embedded();
             embedded.identify_library_functions(&entry_points, &text_bytes, entry_addr)
@@ -153,10 +149,10 @@ where
 ///
 /// # Errors
 /// Returns `RbatError` if file reading, header parsing, or thread orchestration fails.
-pub fn analyze_batch(
-    buffer: &[u8],
+pub fn analyze_batch<'buf>(
+    buffer: &'buf [u8],
     custom_flirt: Option<FlirtMatcher>,
-) -> Result<(AnalysisResult, RiskAssessment)> {
+) -> Result<(AnalysisResult<'buf>, RiskAssessment)> {
     let start_time = std::time::Instant::now();
     let (tx, rx) = std::sync::mpsc::channel();
 

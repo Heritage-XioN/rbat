@@ -62,7 +62,7 @@ impl HeuristicPlugin for DisassemblyPlugin {
         "disassembly"
     }
 
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let code_cave = disassemble_section(ctx.instructions, ctx.text_bytes, ctx.entry_addr)?;
 
         Ok(AnalysisProgress::Disassembly(code_cave))
@@ -78,7 +78,7 @@ impl HeuristicPlugin for StringCheckPlugin {
         "string_check"
     }
 
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let results = string_check(ctx.buffer, ctx.section_ranges)?;
         Ok(AnalysisProgress::Strings(results))
     }
@@ -92,7 +92,7 @@ impl HeuristicPlugin for PackerSigCheckPlugin {
         "packer_sig_check"
     }
 
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let results = packer_sig_check(ctx.buffer, ctx.section_ranges)?;
         Ok(AnalysisProgress::PackerSigs(results))
     }
@@ -106,7 +106,7 @@ impl HeuristicPlugin for EntropyPlugin {
         "entropy"
     }
 
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let parser = Parser::new(ctx.binary_object);
         let results = parser.evaluate_section_entropy()?;
         Ok(AnalysisProgress::Entropy(results))
@@ -121,7 +121,7 @@ impl HeuristicPlugin for ImportsPlugin {
         "imports"
     }
 
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let parser = Parser::new(ctx.binary_object);
         let mut matched = Vec::new();
         if let Ok(imports) = parser.extract_imports() {
@@ -143,7 +143,7 @@ impl HeuristicPlugin for ExportsPlugin {
         "exports"
     }
 
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let parser = Parser::new(ctx.binary_object);
         let mut matched = Vec::new();
         if let Ok(exports) = parser.extract_exports() {
@@ -165,7 +165,7 @@ impl HeuristicPlugin for MetadataPlugin {
         "metadata"
     }
 
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let results = get_binary_metadata(ctx.binary_object)?;
         Ok(AnalysisProgress::BinaryMetadata(results))
     }
@@ -179,7 +179,7 @@ impl HeuristicPlugin for CfgPlugin {
         "cfg"
     }
 
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress> {
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let cfg = crate::core::cfg::ControlFlowGraph::new(ctx.instructions, &ctx.arch);
         Ok(AnalysisProgress::CFG(cfg))
     }
@@ -202,8 +202,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
-        let section_ranges =
-            crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
+        let section_ranges = crate::utils::section_offset::build_section_map(&obj).unwrap();
 
         let ctx = AnalysisContext {
             buffer: &buffer,
@@ -234,8 +233,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
-        let section_ranges =
-            crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
+        let section_ranges = crate::utils::section_offset::build_section_map(&obj).unwrap();
 
         let ctx = AnalysisContext {
             buffer: &buffer,
@@ -266,8 +264,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
-        let section_ranges =
-            crate::utils::section_offset::build_section_map(&obj, &buffer).unwrap();
+        let section_ranges = crate::utils::section_offset::build_section_map(&obj).unwrap();
 
         let text_bytes = vec![0x90; 128];
         let instructions = vec![

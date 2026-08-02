@@ -12,7 +12,9 @@ use aho_corasick::{AhoCorasick, PatternID};
 
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Supported target operating systems for assembly syntax style selection.
@@ -49,13 +51,13 @@ pub struct ParsedBinaryContext {
 }
 
 /// Represents the progress updates emitted during static analysis.
-pub enum AnalysisProgress {
+pub enum AnalysisProgress<'buf> {
     /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
     Disassembly(HashMap<String, Vec<u64>>),
     /// Extracted strings matched by YARA rules.
-    Strings(HashMap<String, Vec<YaraMatches>>),
+    Strings(HashMap<&'buf str, Vec<YaraMatches<'buf>>>),
     /// Packer and compiler signatures matched by YARA rules.
-    PackerSigs(HashMap<String, Vec<YaraMatches>>),
+    PackerSigs(HashMap<&'buf str, Vec<YaraMatches<'buf>>>),
     /// Computed entropy score per binary section.
     Entropy(HashMap<String, f64>),
     /// Dynamically imported symbols and APIs.
@@ -79,20 +81,22 @@ pub struct Asset;
 
 /// Details of a single YARA rule signature match within a binary section.
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
-pub struct YaraMatches {
+pub struct YaraMatches<'buf> {
     /// File offset where the match starts.
     pub offset: usize,
     /// Name of the binary section where the match was located.
-    pub section: String,
+    #[serde(borrow)]
+    pub section: &'buf str,
     /// Length of the matching byte sequence.
     pub length: usize,
     /// Human-readable representation of the matched data.
-    pub data: String,
+    #[serde(borrow)]
+    pub data: Cow<'buf, str>,
 }
 
 /// The accumulated results of all static analysis heuristics run on a binary.
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
-pub struct AnalysisResult {
+pub struct AnalysisResult<'buf> {
     /// Extracted header and format metadata.
     pub metadata: BinaryMetadata,
     /// List of consecutive padding/cave virtual memory addresses.
@@ -104,9 +108,11 @@ pub struct AnalysisResult {
     /// Entropy score per binary section.
     pub section_entropy: HashMap<String, f64>,
     /// String extraction YARA matches.
-    pub string_values: HashMap<String, Vec<YaraMatches>>,
+    #[serde(borrow)]
+    pub string_values: HashMap<&'buf str, Vec<YaraMatches<'buf>>>,
     /// Packer or crypter signature matches.
-    pub packer_signatures: HashMap<String, Vec<YaraMatches>>,
+    #[serde(borrow)]
+    pub packer_signatures: HashMap<&'buf str, Vec<YaraMatches<'buf>>>,
     /// Reconstructed Control Flow Graph.
     pub cfg: Option<ControlFlowGraph>,
     /// Matched library functions mapped by start virtual address.
@@ -218,36 +224,37 @@ impl BinaryMetadata {
 ///     instructions: &[],
 /// };
 /// ```
-pub struct AnalysisContext<'a> {
-    /// Raw byte buffer of the binary.
-    pub buffer: &'a [u8],
+pub struct AnalysisContext<'buf, 'ctx> {
+    /// Raw bytes of the target binary file.
+    pub buffer: &'buf [u8],
     /// Parsed representation of the executable headers and sections.
-    pub binary_object: &'a object::File<'a, &'a [u8]>,
+    pub binary_object: &'ctx object::File<'buf, &'buf [u8]>,
     /// Cached mappings of section offsets to names.
-    pub section_ranges: &'a [SectionRange],
+    pub section_ranges: &'ctx [SectionRange<'buf>],
     /// Target operating system preference.
     pub os: BinaryOS,
     /// Target CPU architecture.
     pub arch: BinaryArch,
     /// Raw instruction bytes extracted from the executable section.
-    pub text_bytes: &'a [u8],
+    pub text_bytes: &'ctx [u8],
     /// Raw binary entry point.
     pub entry_addr: u64,
     /// Parsed instruction list for the code section.
-    pub instructions: &'a [InstructionInfo],
+    pub instructions: &'ctx [InstructionInfo],
     /// The global NeedleIndex automaton for pattern matching.
-    pub needle: std::sync::Arc<NeedleIndex>,
+    pub needle: Arc<NeedleIndex>,
 }
 
 /// Cached mapping representing a binary section's file offset boundaries.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SectionRange {
+pub struct SectionRange<'buf> {
     /// Start byte offset in the binary file.
     pub start: usize,
     /// End byte offset in the binary file.
     pub end: usize,
     /// Name of the binary section (e.g. `".text"`, `"__TEXT"`).
-    pub name: String,
+    #[serde(borrow)]
+    pub name: &'buf str,
 }
 
 /// A generic view over a disassembled instruction.
@@ -1080,8 +1087,8 @@ pub struct NeedleIndex {
 impl NeedleIndex {
     /// Builds an Aho-Corasick automaton from all string-bearing conditions
     /// found recursively inside the loaded rule set.
-    pub fn build_from_rules<'a>(rules: &'a [Rule]) -> Self {
-        let mut pattern_set: HashSet<&'a str> = HashSet::new();
+    pub fn build_from_rules<'rule>(rules: &'rule [Rule]) -> Self {
+        let mut pattern_set: HashSet<&'rule str> = HashSet::new();
 
         for r in rules {
             for cond in &r.rule.features {
@@ -1090,7 +1097,7 @@ impl NeedleIndex {
         }
 
         // Convert to a deterministic ordered vec so PatternID indices are stable
-        let patterns: Vec<&'a str> = pattern_set.into_iter().collect();
+        let patterns: Vec<&'rule str> = pattern_set.into_iter().collect();
 
         let mut lookup = HashMap::with_capacity(patterns.len());
         for (idx, &pat) in patterns.iter().enumerate() {
@@ -1115,7 +1122,7 @@ impl NeedleIndex {
 
     /// Recursively walks a condition tree and collects all string patterns
     /// that the rule engine needs to match against instruction text.
-    fn collect_patterns<'a>(cond: &'a RuleCondition, patterns: &mut HashSet<&'a str>) {
+    fn collect_patterns<'rule>(cond: &'rule RuleCondition, patterns: &mut HashSet<&'rule str>) {
         match cond {
             RuleCondition::Api { api } => {
                 patterns.insert(api.as_str());

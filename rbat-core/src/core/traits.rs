@@ -23,6 +23,6 @@ pub trait HeuristicPlugin: Send + Sync {
     /// Returns the static, unique string identifier of the plugin.
     fn name(&self) -> &'static str;
 
-    /// Runs the static analysis heuristic on the provided [`AnalysisContext`] and returns the analysis progress.
-    fn run(&self, ctx: &AnalysisContext) -> Result<AnalysisProgress>;
+    /// Runs the heuristic logic using the provided analysis context.
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>>;
 }

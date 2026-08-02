@@ -83,10 +83,10 @@ pub fn disassemble_section(
 ///
 /// # Errors
 /// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if object fails to parse the file format.
-pub fn string_check(
-    buffer: &[u8],
-    section_ranges: &[SectionRange],
-) -> Result<HashMap<String, Vec<YaraMatches>>> {
+pub fn string_check<'buf>(
+    buffer: &'buf [u8],
+    section_ranges: &[SectionRange<'buf>],
+) -> Result<HashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
     let handler = YaraHandler::new("yara/suspicious_strings.yar".to_owned());
     let rules = SUSPICIOUS_STRINGS_RULES.get_or_init(|| {
         handler
@@ -101,10 +101,10 @@ pub fn string_check(
 ///
 /// # Errors
 /// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if object fails to parse the file format.
-pub fn packer_sig_check(
-    buffer: &[u8],
-    section_ranges: &[SectionRange],
-) -> Result<HashMap<String, Vec<YaraMatches>>> {
+pub fn packer_sig_check<'buf>(
+    buffer: &'buf [u8],
+    section_ranges: &[SectionRange<'buf>],
+) -> Result<HashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
     let handler = YaraHandler::new("yara/packer_signatures.yar".to_owned());
     let rules = PACKER_SIGNATURES_RULES.get_or_init(|| {
         handler

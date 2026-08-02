@@ -48,15 +48,15 @@ impl YaraHandler {
     ///
     /// # Errors
     /// Returns `RbatError::YaraIO` if the scan engine encounters a runtime scanning error.
-    pub fn scan_mem(
+    pub fn scan_mem<'buf>(
         &self,
-        compiled_rules: &Rules,
-        buffer: &[u8],
-        section_ranges: &[SectionRange],
-    ) -> Result<HashMap<String, Vec<YaraMatches>>> {
+        compiled_rules: &'buf Rules,
+        buffer: &'buf [u8],
+        section_ranges: &[SectionRange<'buf>],
+    ) -> Result<HashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
         let mut scanner = compiled_rules.scanner()?;
         let results = scanner.scan_mem(buffer)?;
-        let mut yara_result: HashMap<String, Vec<YaraMatches>> = HashMap::new();
+        let mut yara_result: HashMap<&'buf str, Vec<YaraMatches<'buf>>> = HashMap::new();
 
         if !results.is_empty() {
             for rule in results {
@@ -67,10 +67,11 @@ impl YaraHandler {
 
                     for m in yr_string.matches {
                         let section_name = get_section_for_offset(section_ranges, m.offset);
-                        let decoded_string = String::from_utf8_lossy(&m.data).to_string();
+                        let matched_bytes = &buffer[m.offset..m.offset + m.length];
+                        let decoded_string = String::from_utf8_lossy(matched_bytes);
 
                         yara_result
-                            .entry(yr_string.identifier.to_string())
+                            .entry(yr_string.identifier)
                             .or_default()
                             .push(YaraMatches {
                                 offset: m.offset,

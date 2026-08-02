@@ -28,14 +28,14 @@ use super::{BinaryArch, BinaryOS, RbatError, Result};
 /// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
 /// It holds the raw binary buffer and the parsed object from the `object` crate.
 #[derive(Debug)]
-pub struct Parser<'bin> {
+pub struct Parser<'obj> {
     /// The parsed object representation.
-    binary_object: &'bin File<'bin, &'bin [u8]>,
+    binary_object: &'obj File<'obj, &'obj [u8]>,
 }
 
-impl<'bin> Parser<'bin> {
+impl<'obj> Parser<'obj> {
     /// Creates a new `Parser` instance.
-    pub fn new(binary_object: &'bin File<'bin, &'bin [u8]>) -> Self {
+    pub fn new(binary_object: &'obj File<'obj, &'obj [u8]>) -> Self {
         Parser { binary_object }
     }
 
@@ -106,7 +106,7 @@ impl<'bin> Parser<'bin> {
     }
 
     /// Extracts all dynamically imported symbols.
-    pub fn extract_imports(&self) -> Result<Vec<&'bin [u8]>> {
+    pub fn extract_imports(&self) -> Result<Vec<&'obj [u8]>> {
         let mut imports_list = Vec::new();
 
         if let Ok(imports) = self.binary_object.imports() {
@@ -128,7 +128,7 @@ impl<'bin> Parser<'bin> {
     }
 
     /// Extracts all exported symbols.
-    pub fn extract_exports(&self) -> Result<Vec<&'bin [u8]>> {
+    pub fn extract_exports(&self) -> Result<Vec<&'obj [u8]>> {
         let mut exports_list = Vec::new();
 
         if let Ok(exports) = self.binary_object.exports() {

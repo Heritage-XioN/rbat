@@ -99,8 +99,8 @@ impl Tab {
 
 /// The stateful TUI application container.
 #[derive(Debug, Default)]
-pub struct App {
-    analysis_result: AnalysisResult,
+pub struct App<'buf> {
+    analysis_result: AnalysisResult<'buf>,
     assessment: RiskAssessment,
     current_tab: Tab,
     overview_state: ListState,
@@ -111,9 +111,9 @@ pub struct App {
     instr_state: TableState,
 }
 
-impl App {
+impl<'buf> App<'buf> {
     /// Creates a new App instance given the analysis results.
-    pub fn new(analysis_result: AnalysisResult, assessment: RiskAssessment) -> Self {
+    pub fn new(analysis_result: AnalysisResult<'buf>, assessment: RiskAssessment) -> Self {
         let mut overview_state = ListState::default();
         overview_state.select(Some(0));
         let mut security_state = ListState::default();
@@ -757,7 +757,7 @@ impl App {
     }
 }
 
-impl Widget for &App {
+impl<'buf> Widget for &App<'buf> {
     fn render(self, _area: Rect, _buf: &mut Buffer) {
         // Compatibility method
     }

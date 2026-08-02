@@ -58,7 +58,7 @@ const COLOR_SUCCESS_LIGHT: Color = Color::Rgb {
 /// Prints a stylized CLI summary report to stdout.
 pub fn print_terminal_report(
     file_path: &Path,
-    analysis_result: &AnalysisResult,
+    analysis_result: &AnalysisResult<'_>,
     assessment: &RiskAssessment,
     generated_reports: &[(&str, &Path)],
 ) {
