@@ -18,7 +18,7 @@ pub struct FeatureSet<'buf> {
     /// Blacklisted instruction mnemonics.
     pub mnemonics: HashSet<String>,
     /// Section Shannon entropies.
-    pub section_entropies: HashMap<String, f64>,
+    pub section_entropies: &'buf HashMap<&'buf str, f64>,
     /// Whether any code caves (NOP/zero/trap runs) were mapped.
     pub has_code_cave: bool,
     /// Whether any packer/crypter signature was matched.
@@ -156,7 +156,7 @@ impl<'buf> FeatureSet<'buf> {
             apis,
             strings,
             mnemonics: HashSet::new(),
-            section_entropies: res.section_entropy.clone(),
+            section_entropies: &res.section_entropy,
             has_code_cave: !res.code_cave.is_empty(),
             has_packer_sig: !res.packer_signatures.is_empty(),
             os: res.metadata.binary_type.to_lowercase(),
@@ -192,7 +192,7 @@ mod tests {
         res.string_values.insert("url", vec![yara_match]);
 
         // Setup Section Entropies
-        res.section_entropy.insert(".text".to_string(), 6.8);
+        res.section_entropy.insert(".text", 6.8);
 
         // Setup Code Cave
         res.code_cave.insert("nop_addr", vec![2000, 2001]);

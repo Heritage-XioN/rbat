@@ -28,29 +28,29 @@ use super::{BinaryArch, BinaryOS, RbatError, Result};
 /// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
 /// It holds the raw binary buffer and the parsed object from the `object` crate.
 #[derive(Debug)]
-pub struct Parser<'obj> {
+pub struct Parser<'data, 'obj> {
     /// The parsed object representation.
-    binary_object: &'obj File<'obj, &'obj [u8]>,
+    binary_object: &'obj File<'data, &'data [u8]>,
 }
 
-impl<'obj> Parser<'obj> {
+impl<'data, 'obj> Parser<'data, 'obj> {
     /// Creates a new `Parser` instance.
-    pub fn new(binary_object: &'obj File<'obj, &'obj [u8]>) -> Self {
+    pub fn new(binary_object: &'obj File<'data, &'data [u8]>) -> Self {
         Parser { binary_object }
     }
 
     /// Evaluates the Shannon entropy for each section of the binary.
     ///
     /// This is useful for identifying packed or encrypted sections where entropy is typically high (>= 7.5).
-    pub fn evaluate_section_entropy(&self) -> Result<HashMap<String, f64>> {
-        let mut section_entropy: HashMap<String, f64> = HashMap::new();
+    pub fn evaluate_section_entropy(&self) -> Result<HashMap<&'data str, f64>> {
+        let mut section_entropy: HashMap<&'data str, f64> = HashMap::new();
 
         for section in self.binary_object.sections() {
             if let Ok(name) = section.name()
                 && let Ok(data) = section.uncompressed_data()
                 && !data.is_empty()
             {
-                section_entropy.insert(name.to_string(), calculate_entropy(&data));
+                section_entropy.insert(name, calculate_entropy(&data));
             }
         }
 
@@ -106,7 +106,7 @@ impl<'obj> Parser<'obj> {
     }
 
     /// Extracts all dynamically imported symbols.
-    pub fn extract_imports(&self) -> Result<Vec<&'obj [u8]>> {
+    pub fn extract_imports(&self) -> Result<Vec<&'data [u8]>> {
         let mut imports_list = Vec::new();
 
         if let Ok(imports) = self.binary_object.imports() {
@@ -128,7 +128,7 @@ impl<'obj> Parser<'obj> {
     }
 
     /// Extracts all exported symbols.
-    pub fn extract_exports(&self) -> Result<Vec<&'obj [u8]>> {
+    pub fn extract_exports(&self) -> Result<Vec<&'data [u8]>> {
         let mut exports_list = Vec::new();
 
         if let Ok(exports) = self.binary_object.exports() {

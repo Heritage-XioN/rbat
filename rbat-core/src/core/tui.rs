@@ -501,7 +501,7 @@ impl<'buf> App<'buf> {
                     palette::SUCCESS
                 };
                 Row::new(vec![
-                    Cell::from(name.as_str()),
+                    Cell::from(*name),
                     Cell::from(format!("{:.2}", val)).style(Style::default().fg(color)),
                 ])
             })
@@ -696,7 +696,7 @@ impl<'buf> App<'buf> {
                 };
 
                 Row::new(vec![
-                    Cell::from(name.as_str()),
+                    Cell::from(*name),
                     Cell::from(format!("{:.4}", val)).style(Style::default().fg(color)),
                     Cell::from(status).style(Style::default().fg(color)),
                 ])

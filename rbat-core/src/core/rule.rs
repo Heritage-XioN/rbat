@@ -91,15 +91,16 @@ impl Rule {
     }
 
     /// Evaluates a set of rules against the feature set and returns matching rule metadata.
-    pub fn evaluate(
+    pub fn evaluate<'rule>(
         features: &FeatureSet,
-        rules: &[Self],
+        rules: &'rule [Self],
         needle: &crate::core::types::NeedleIndex,
-    ) -> Vec<RuleMeta> {
+    ) -> Vec<&'rule RuleMeta> {
         rules
             .par_iter()
+            .filter(|rule| !rule.rule.meta.lib.unwrap_or(false))
             .filter(|rule| rule.matches(features, needle))
-            .map(|rule| rule.rule.meta.clone())
+            .map(|rule| &rule.rule.meta)
             .collect()
     }
 }
@@ -114,13 +115,13 @@ mod tests {
     #[test]
     fn test_rule_evaluation() {
         let mut section_entropies = HashMap::new();
-        section_entropies.insert(".text".to_owned(), 7.8);
+        section_entropies.insert(".text", 7.8);
 
         let features = FeatureSet {
             apis: HashSet::from([aho_corasick::PatternID::must(0)]),
             strings: HashSet::new(),
             mnemonics: HashSet::new(),
-            section_entropies,
+            section_entropies: &section_entropies,
             has_code_cave: false,
             has_packer_sig: false,
             os: "linux".to_string(),
@@ -275,7 +276,7 @@ mod tests {
             apis: HashSet::new(),
             strings: HashSet::new(),
             mnemonics: HashSet::new(),
-            section_entropies: HashMap::new(),
+            section_entropies: &HashMap::new(),
             has_code_cave: false,
             has_packer_sig: false,
             os: "Windows".to_owned(),

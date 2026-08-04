@@ -9,9 +9,9 @@ use std::collections::HashMap;
 /// Each section is rendered as a colored cell where the color intensity
 /// represents the entropy value (0.0=blue/cool to 8.0=red/hot).
 /// Uses HTML Tables for maximum compatibility with the PDF engine's background rendering.
-pub fn generate_entropy_heatmap(data: &HashMap<String, f64>) -> String {
-    let mut sections: Vec<(String, f64)> = data.iter().map(|(k, v)| (k.clone(), *v)).collect();
-    sections.sort_by(|a, b| a.0.cmp(&b.0));
+pub fn generate_entropy_heatmap(data: &HashMap<&str, f64>) -> String {
+    let mut sections: Vec<(&str, f64)> = data.iter().map(|(k, v)| (*k, *v)).collect();
+    sections.sort_by(|a, b| a.0.cmp(b.0));
 
     if sections.is_empty() {
         return String::from(
@@ -120,8 +120,8 @@ mod tests {
     #[test]
     fn test_generate_entropy_heatmap_with_data() {
         let mut map = HashMap::new();
-        map.insert(".text".to_string(), 6.5);
-        map.insert(".data".to_string(), 2.1);
+        map.insert(".text", 6.5);
+        map.insert(".data", 2.1);
         let html = generate_entropy_heatmap(&map);
         assert!(html.contains(".text"));
         assert!(html.contains(".data"));

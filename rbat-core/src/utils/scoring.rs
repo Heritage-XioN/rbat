@@ -10,17 +10,18 @@
 //! use rbat::core::{RuleMeta};
 //! use rbat::utils::rules::StringOrVec;
 //!
-//! let matches = vec![
-//!     RuleMeta {
-//!         name: "Test".to_string(),
-//!         description: Some("Test rule".to_string()),
-//!         mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
-//!         severity: Some("High".to_string()),
-//!         category: Some("privilege_escalation".to_string()),
-//!         weight: Some(35),
-//!         ..Default::default()
-//!     },
-//! ];
+//! let rule = RuleMeta {
+//!     name: "Test".to_string(),
+//!     description: Some("Test rule".to_string()),
+//!     mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
+//!     severity: Some("High".to_string()),
+//!     category: Some("privilege_escalation".to_string()),
+//!     weight: Some(35),
+//!     ..Default::default()
+//! };
+//!
+//! let matches = vec![&rule];
+//!
 //! let assessment = calculate_risk(&matches);
 //! println!("Risk: {} ({})", assessment.score, assessment.severity);
 //! ```
@@ -51,7 +52,7 @@ fn category_cap(category: &str) -> u32 {
 /// category. Category contributions are individually capped to prevent
 /// double-counting within the same tactic. The final score is the sum of
 /// all capped category contributions.
-pub fn calculate_risk(matched_rules: &[RuleMeta]) -> RiskAssessment {
+pub fn calculate_risk(matched_rules: &[&RuleMeta]) -> RiskAssessment {
     let mut category_scores: HashMap<String, u32> = HashMap::new();
     let mut findings: Vec<Finding> = Vec::new();
 
@@ -144,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_calculate_risk_safe() {
-        let matches = vec![];
+        let matches: Vec<&RuleMeta> = vec![];
         let assessment = calculate_risk(&matches);
 
         assert_eq!(assessment.score, 0);
@@ -154,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_calculate_risk_single_category() {
-        let matches = vec![RuleMeta {
+        let rule = RuleMeta {
             name: "Rule 1".to_string(),
             description: Some("Desc 1".to_string()),
             mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
@@ -162,7 +163,8 @@ mod tests {
             category: Some("execution".to_string()),
             weight: Some(15),
             ..Default::default()
-        }];
+        };
+        let matches = vec![&rule];
 
         let assessment = calculate_risk(&matches);
         assert_eq!(assessment.score, 15);
@@ -172,26 +174,25 @@ mod tests {
 
     #[test]
     fn test_calculate_risk_same_category_capped() {
-        let matches = vec![
-            RuleMeta {
-                name: "Rule 1".to_string(),
-                description: Some("Desc 1".to_string()),
-                mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
-                severity: Some("High".to_string()),
-                category: Some("execution".to_string()),
-                weight: Some(20),
-                ..Default::default()
-            },
-            RuleMeta {
-                name: "Rule 2".to_string(),
-                description: Some("Desc 2".to_string()),
-                mitre_attack: Some(StringOrVec::Single("T1056".to_string())),
-                severity: Some("High".to_string()),
-                category: Some("execution".to_string()),
-                weight: Some(20),
-                ..Default::default()
-            },
-        ];
+        let r1 = RuleMeta {
+            name: "Rule 1".to_string(),
+            description: Some("Desc 1".to_string()),
+            mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
+            severity: Some("High".to_string()),
+            category: Some("execution".to_string()),
+            weight: Some(20),
+            ..Default::default()
+        };
+        let r2 = RuleMeta {
+            name: "Rule 2".to_string(),
+            description: Some("Desc 2".to_string()),
+            mitre_attack: Some(StringOrVec::Single("T1056".to_string())),
+            severity: Some("High".to_string()),
+            category: Some("execution".to_string()),
+            weight: Some(20),
+            ..Default::default()
+        };
+        let matches = vec![&r1, &r2];
 
         let assessment = calculate_risk(&matches);
         // "execution" cap is 25, 20 + 20 = 40, capped at 25
@@ -201,26 +202,25 @@ mod tests {
 
     #[test]
     fn test_calculate_risk_multiple_categories() {
-        let matches = vec![
-            RuleMeta {
-                name: "Rule 1".to_string(),
-                description: Some("Desc 1".to_string()),
-                mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
-                severity: Some("Critical".to_string()),
-                category: Some("privilege_escalation".to_string()),
-                weight: Some(30),
-                ..Default::default()
-            },
-            RuleMeta {
-                name: "Rule 2".to_string(),
-                description: Some("Desc 2".to_string()),
-                mitre_attack: Some(StringOrVec::Single("T1027".to_string())),
-                severity: Some("High".to_string()),
-                category: Some("defense_evasion".to_string()),
-                weight: Some(35),
-                ..Default::default()
-            },
-        ];
+        let r1 = RuleMeta {
+            name: "Rule 1".to_string(),
+            description: Some("Desc 1".to_string()),
+            mitre_attack: Some(StringOrVec::Single("T1055".to_string())),
+            severity: Some("Critical".to_string()),
+            category: Some("privilege_escalation".to_string()),
+            weight: Some(30),
+            ..Default::default()
+        };
+        let r2 = RuleMeta {
+            name: "Rule 2".to_string(),
+            description: Some("Desc 2".to_string()),
+            mitre_attack: Some(StringOrVec::Single("T1027".to_string())),
+            severity: Some("High".to_string()),
+            category: Some("defense_evasion".to_string()),
+            weight: Some(35),
+            ..Default::default()
+        };
+        let matches = vec![&r1, &r2];
 
         let assessment = calculate_risk(&matches);
         assert_eq!(assessment.score, 65);

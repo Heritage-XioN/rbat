@@ -59,7 +59,7 @@ pub enum AnalysisProgress<'buf> {
     /// Packer and compiler signatures matched by YARA rules.
     PackerSigs(HashMap<&'buf str, Vec<YaraMatches<'buf>>>),
     /// Computed entropy score per binary section.
-    Entropy(HashMap<String, f64>),
+    Entropy(HashMap<&'buf str, f64>),
     /// Dynamically imported symbols and APIs.
     Imports(Vec<usize>),
     /// Exported symbols and functions.
@@ -107,7 +107,8 @@ pub struct AnalysisResult<'buf> {
     /// Exported symbols and functions.
     pub exports: Vec<usize>,
     /// Entropy score per binary section.
-    pub section_entropy: HashMap<String, f64>,
+    #[serde(borrow)]
+    pub section_entropy: HashMap<&'buf str, f64>,
     /// String extraction YARA matches.
     #[serde(borrow)]
     pub string_values: HashMap<&'buf str, Vec<YaraMatches<'buf>>>,
@@ -816,7 +817,7 @@ impl RuleCondition {
             }
             Self::Entropy { section, min } => features
                 .section_entropies
-                .get(section)
+                .get(section.as_str())
                 .map(|&e| e >= *min)
                 .unwrap_or(false),
             // codebase heuristics checks
@@ -865,7 +866,7 @@ impl RuleCondition {
                     false
                 }
             }
-            Self::Section { section } => features.section_entropies.contains_key(section),
+            Self::Section { section } => features.section_entropies.contains_key(section.as_str()),
             Self::Characteristic { characteristic } if characteristic.contains("packed") => {
                 features.has_packer_sig
             }
