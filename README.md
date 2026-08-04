@@ -22,7 +22,7 @@ RBAT (Rust Binary Analysis Tool) is a modern, high-performance static analysis a
 
 The project is organized as a Cargo workspace consisting of three primary components:
 
-* **[rbat-core](rbat-core/README.md)**: The core static analysis engine. Written in Rust, it performs binary parsing (ELF, PE, Mach-O), entropy calculation, YARA rule matching, disassembling, CFG graph reconstruction, and threat scoring. Exposes the subcommand CLI (`analyze`, `rules`, `completions`).
+* **[rbat-core](rbat-core/README.md)**: The core static analysis engine. Written in Rust, it performs binary parsing (ELF, PE, Mach-O), entropy calculation, YARA rule matching, FLIRT signature matching, disassembling (via `backend-capstone` or `backend-iced` feature flags), CFG graph reconstruction, and threat scoring against MITRE ATT&CK categories using a native JSON & YAML CAPA-compatible rule engine. Exposes the subcommand CLI (`analyze`, `rules`, `completions`).
 * **[rbat-server](rbat-server/README.md)**: A high-performance gRPC server daemon wrapping the core engine to enable remote static analysis auditing services.
 * **[rbat-client](rbat-client/README.md)**: A modern Next.js web application frontend dashboard providing interactive visualizations of binary analysis findings, entropy maps, and reports.
 
