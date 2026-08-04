@@ -43,15 +43,17 @@ mod capstone_backend {
                         BinaryOS::Linux => x86.syntax(arch::x86::ArchSyntax::Att),
                         _ => x86.syntax(arch::x86::ArchSyntax::Intel),
                     };
-                    x86.build()?
+                    x86.detail(true).build()?
                 }
                 BinaryArch::Arm => Capstone::new()
                     .arm()
                     .mode(arch::arm::ArchMode::Arm)
+                    .detail(true)
                     .build()?,
                 BinaryArch::Arm64 => Capstone::new()
                     .arm64()
                     .mode(arch::arm64::ArchMode::Arm)
+                    .detail(true)
                     .build()?,
             };
 
