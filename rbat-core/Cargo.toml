@@ -35,7 +35,7 @@ csv = "1.4.0"
 chrono = { workspace = true }
 askama = "0.16.0"
 fullbleed = "0.6.11"
-smallvec = "1.13.0"
+smallvec = { version = "1.13.0", features = ["serde"] }
 lightningcss = "=1.0.0-alpha.70"
 rayon = { workspace = true }
 indicatif = { workspace = true }

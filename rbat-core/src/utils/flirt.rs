@@ -5,8 +5,6 @@
 
 use crate::core::InstructionInfo;
 use crate::core::types::InstructionClass;
-use crate::utils::cfg::classify_instruction;
-use crate::utils::cfg::parse_target_address;
 use object::{Object, ObjectSymbol};
 use std::collections::HashSet;
 
@@ -22,9 +20,8 @@ pub fn collect_function_entry_points(
 
     // Collect from call instructions
     for insn in instructions {
-        if crate::utils::cfg::classify_instruction(&insn.format_mnemonic(), arch)
-            == crate::core::types::InstructionClass::Call
-            && let Some(target) = parse_target_address(&insn.format_operands())
+        if insn.class(arch) == InstructionClass::Call
+            && let Some(target) = insn.branch_target()
         {
             entry_points.insert(target);
         }
@@ -74,8 +71,7 @@ pub fn find_function_range(
 
         end_addr = insn.address();
 
-        let class = classify_instruction(&insn.format_mnemonic(), arch);
-        if class == InstructionClass::Return {
+        if insn.class(arch) == InstructionClass::Return {
             break;
         }
     }

@@ -329,6 +329,29 @@ impl InstructionInfo {
         self.format_operands_into(&mut buf);
         buf
     }
+
+    /// Returns the branch target address if this is a near branch instruction, without
+    /// allocating a string. Returns `None` for non-branch or indirect branches.
+    pub fn branch_target(&self) -> Option<u64> {
+        let target = self.inner.near_branch_target();
+        if target != 0 {
+            Some(target)
+        } else {
+            None
+        }
+    }
+
+    /// Classifies this instruction's control-flow role without allocating a string.
+    pub fn class(&self, _arch: &crate::core::BinaryArch) -> InstructionClass {
+        use iced_x86::FlowControl;
+        match self.inner.flow_control() {
+            FlowControl::UnconditionalBranch => InstructionClass::UnconditionalJump,
+            FlowControl::ConditionalBranch => InstructionClass::ConditionalJump,
+            FlowControl::Call | FlowControl::IndirectCall => InstructionClass::Call,
+            FlowControl::Return => InstructionClass::Return,
+            _ => InstructionClass::Normal,
+        }
+    }
 }
 
 #[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
@@ -414,6 +437,18 @@ impl InstructionInfo {
     pub fn format_operands_into(&self, buf: &mut String) {
         buf.clear();
         buf.push_str(&self.op_str);
+    }
+
+    /// Returns the branch target address if this is a branch/call to a direct address.
+    /// Falls back to string parsing for capstone backend.
+    pub fn branch_target(&self) -> Option<u64> {
+        crate::utils::cfg::parse_target_address(&self.op_str)
+    }
+
+    /// Classifies this instruction's control-flow role.
+    /// Falls back to string-based mnemonic classification for capstone backend.
+    pub fn class(&self, arch: &crate::core::BinaryArch) -> InstructionClass {
+        crate::utils::cfg::classify_instruction(&self.mnemonic, arch)
     }
 }
 
