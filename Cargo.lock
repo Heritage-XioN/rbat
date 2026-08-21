@@ -54,6 +54,7 @@ dependencies = [
  "cfg-if",
  "getrandom 0.3.4",
  "once_cell",
+ "serde",
  "version_check",
  "zerocopy",
 ]
@@ -3843,6 +3844,7 @@ dependencies = [
 name = "rbat"
 version = "1.0.1"
 dependencies = [
+ "ahash 0.8.12",
  "aho-corasick",
  "askama",
  "assert_cmd",

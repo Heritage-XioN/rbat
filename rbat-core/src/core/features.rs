@@ -5,20 +5,21 @@
 
 use crate::core::{AnalysisResult, BasicBlock, EdgeType, InstructionInfo};
 use crate::utils::flirt::find_function_range;
+use ahash::{AHashMap, AHashSet};
 use aho_corasick::PatternID;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Collected metrics and indicators extracted from the binary for rule evaluation.
 #[derive(Debug, Clone)]
 pub struct FeatureSet<'buf> {
     /// Mapped API imports and suspicious dynamic symbol links.
-    pub apis: HashSet<PatternID>,
+    pub apis: FxHashSet<PatternID>,
     /// Mapped string constants.
-    pub strings: HashSet<String>,
+    pub strings: AHashSet<String>,
     /// Blacklisted instruction mnemonics.
-    pub mnemonics: HashSet<String>,
+    pub mnemonics: AHashSet<String>,
     /// Section Shannon entropies.
-    pub section_entropies: &'buf HashMap<&'buf str, f64>,
+    pub section_entropies: &'buf AHashMap<&'buf str, f64>,
     /// Whether any code caves (NOP/zero/trap runs) were mapped.
     pub has_code_cave: bool,
     /// Whether any packer/crypter signature was matched.
@@ -54,7 +55,7 @@ impl<'buf> FeatureSet<'buf> {
             all_instructions.dedup_by_key(|insn| insn.address());
 
             // Reconstruct all entry points (matched library functions + basic block starts)
-            let mut all_entry_points = HashSet::new();
+            let mut all_entry_points = FxHashSet::default();
             for &addr in res.library_functions.keys() {
                 all_entry_points.insert(addr);
             }
@@ -89,8 +90,8 @@ impl<'buf> FeatureSet<'buf> {
             false
         };
 
-        let mut apis = HashSet::new();
-        let mut strings = HashSet::new();
+        let mut apis = FxHashSet::default();
+        let mut strings = AHashSet::new();
 
         for &api_id in &res.imports {
             apis.insert(PatternID::must(api_id));
@@ -124,7 +125,7 @@ impl<'buf> FeatureSet<'buf> {
 
             // Reconstruct the petgraph containing only non-library blocks
             let mut graph = petgraph::graph::DiGraph::<u64, EdgeType>::new();
-            let mut indices = std::collections::HashMap::new();
+            let mut indices = FxHashMap::default();
 
             for block in &blocks {
                 let idx = graph.add_node(block.start_address);
@@ -155,7 +156,7 @@ impl<'buf> FeatureSet<'buf> {
         Self {
             apis,
             strings,
-            mnemonics: HashSet::new(),
+            mnemonics: AHashSet::new(),
             section_entropies: &res.section_entropy,
             has_code_cave: !res.code_cave.is_empty(),
             has_packer_sig: !res.packer_signatures.is_empty(),

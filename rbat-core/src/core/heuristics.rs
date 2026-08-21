@@ -3,7 +3,7 @@
 //! This module implements core static disassembly heuristics using the Capstone disassembler
 //! to detect anti-analysis techniques, code caves, NOP sleds, and common signature matching rules.
 
-use std::collections::HashMap;
+use ahash::AHashMap;
 use std::sync::OnceLock;
 
 use crate::core::SectionRange;
@@ -27,8 +27,8 @@ pub fn disassemble_section<'buf>(
     instructions: &[InstructionInfo],
     bytes: &[u8],
     entry_addr: u64,
-) -> Result<HashMap<&'buf str, Vec<u64>>> {
-    let mut code_cave = HashMap::new();
+) -> Result<AHashMap<&'buf str, Vec<u64>>> {
+    let mut code_cave = AHashMap::new();
     let mut nop_addr: Vec<u64> = vec![];
     let mut counter: i32 = 0;
 
@@ -84,7 +84,7 @@ pub fn disassemble_section<'buf>(
 pub fn string_check<'buf>(
     buffer: &'buf [u8],
     section_ranges: &[SectionRange<'buf>],
-) -> Result<HashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
+) -> Result<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
     let handler = YaraHandler::new("yara/suspicious_strings.yar".to_owned());
     let rules = SUSPICIOUS_STRINGS_RULES.get_or_init(|| {
         handler
@@ -102,7 +102,7 @@ pub fn string_check<'buf>(
 pub fn packer_sig_check<'buf>(
     buffer: &'buf [u8],
     section_ranges: &[SectionRange<'buf>],
-) -> Result<HashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
+) -> Result<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
     let handler = YaraHandler::new("yara/packer_signatures.yar".to_owned());
     let rules = PACKER_SIGNATURES_RULES.get_or_init(|| {
         handler

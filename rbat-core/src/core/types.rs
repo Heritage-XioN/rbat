@@ -8,13 +8,13 @@ use crate::{
     utils::rules::{StringOrVec, parse_number_constant},
 };
 
+use ahash::{AHashMap, AHashSet};
 use aho_corasick::{AhoCorasick, PatternID};
 
 use rust_embed::RustEmbed;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -58,13 +58,13 @@ pub struct ParsedBinaryContext {
 /// Represents the progress updates emitted during static analysis.
 pub enum AnalysisProgress<'buf> {
     /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
-    Disassembly(HashMap<&'buf str, Vec<u64>>),
+    Disassembly(AHashMap<&'buf str, Vec<u64>>),
     /// Extracted strings matched by YARA rules.
-    Strings(HashMap<&'buf str, Vec<YaraMatches<'buf>>>),
+    Strings(AHashMap<&'buf str, Vec<YaraMatches<'buf>>>),
     /// Packer and compiler signatures matched by YARA rules.
-    PackerSigs(HashMap<&'buf str, Vec<YaraMatches<'buf>>>),
+    PackerSigs(AHashMap<&'buf str, Vec<YaraMatches<'buf>>>),
     /// Computed entropy score per binary section.
-    Entropy(HashMap<&'buf str, f64>),
+    Entropy(AHashMap<&'buf str, f64>),
     /// Dynamically imported symbols and APIs.
     Imports(Vec<usize>),
     /// Exported symbols and functions.
@@ -74,7 +74,7 @@ pub enum AnalysisProgress<'buf> {
     /// Reconstructed Control Flow Graph.
     CFG(ControlFlowGraph),
     /// Matched library functions mapped by start virtual address.
-    LibraryFunctions(HashMap<u64, String>),
+    LibraryFunctions(FxHashMap<u64, String>),
 }
 
 /// Built-in binary assets embedded directly into the library compilation.
@@ -106,24 +106,24 @@ pub struct AnalysisResult<'buf> {
     pub metadata: BinaryMetadata,
     /// List of consecutive padding/cave virtual memory addresses.
     #[serde(borrow)]
-    pub code_cave: HashMap<&'buf str, Vec<u64>>,
+    pub code_cave: AHashMap<&'buf str, Vec<u64>>,
     /// Dynamically imported APIs and symbols.
     pub imports: Vec<usize>,
     /// Exported symbols and functions.
     pub exports: Vec<usize>,
     /// Entropy score per binary section.
     #[serde(borrow)]
-    pub section_entropy: HashMap<&'buf str, f64>,
+    pub section_entropy: AHashMap<&'buf str, f64>,
     /// String extraction YARA matches.
     #[serde(borrow)]
-    pub string_values: HashMap<&'buf str, Vec<YaraMatches<'buf>>>,
+    pub string_values: AHashMap<&'buf str, Vec<YaraMatches<'buf>>>,
     /// Packer or crypter signature matches.
     #[serde(borrow)]
-    pub packer_signatures: HashMap<&'buf str, Vec<YaraMatches<'buf>>>,
+    pub packer_signatures: AHashMap<&'buf str, Vec<YaraMatches<'buf>>>,
     /// Reconstructed Control Flow Graph.
     pub cfg: Option<ControlFlowGraph>,
     /// Matched library functions mapped by start virtual address.
-    pub library_functions: HashMap<u64, String>,
+    pub library_functions: FxHashMap<u64, String>,
     /// Total time taken for the full analysis pipeline in milliseconds.
     pub total_analysis_time_ms: u128,
 }
@@ -334,11 +334,7 @@ impl InstructionInfo {
     /// allocating a string. Returns `None` for non-branch or indirect branches.
     pub fn branch_target(&self) -> Option<u64> {
         let target = self.inner.near_branch_target();
-        if target != 0 {
-            Some(target)
-        } else {
-            None
-        }
+        if target != 0 { Some(target) } else { None }
     }
 
     /// Classifies this instruction's control-flow role without allocating a string.
@@ -507,7 +503,7 @@ pub struct RuleMeta {
     pub authors: Option<StringOrVec>,
     /// Rule evaluation scopes (e.g. `{ "static": "function" }`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scopes: Option<HashMap<String, String>>,
+    pub scopes: Option<AHashMap<String, String>>,
     /// Mapped MITRE ATT&CK technique list or ID (e.g. `["Execution::Windows Command Shell [T1059.003]"]` or `"T1055"`).
     #[serde(
         default,
@@ -708,7 +704,7 @@ pub enum RuleCondition {
     },
     // catch all variant for unhandled/unsupported rules
     /// A catch-all variant for unsupported or unknown CAPA rule types.
-    Other(std::collections::HashMap<String, serde_json::Value>),
+    Other(AHashMap<String, serde_json::Value>),
 }
 
 impl RuleCondition {
@@ -1129,7 +1125,7 @@ pub struct NeedleIndex {
     /// The compiled Aho-Corasick automaton.
     pub automaton: AhoCorasick,
     /// A mapping from a text string to its PatternID.
-    pub lookup: HashMap<String, PatternID>,
+    pub lookup: AHashMap<String, PatternID>,
     /// A bitmask array tracking which PatternIDs were found anywhere in the CFG.
     pub present: Vec<AtomicBool>,
 }
@@ -1138,7 +1134,7 @@ impl NeedleIndex {
     /// Builds an Aho-Corasick automaton from all string-bearing conditions
     /// found recursively inside the loaded rule set.
     pub fn build_from_rules<'rule>(rules: &'rule [Rule]) -> Self {
-        let mut pattern_set: HashSet<&'rule str> = HashSet::new();
+        let mut pattern_set: AHashSet<&'rule str> = AHashSet::new();
 
         for r in rules {
             for cond in &r.rule.features {
@@ -1149,7 +1145,7 @@ impl NeedleIndex {
         // Convert to a deterministic ordered vec so PatternID indices are stable
         let patterns: Vec<&'rule str> = pattern_set.into_iter().collect();
 
-        let mut lookup = HashMap::with_capacity(patterns.len());
+        let mut lookup = AHashMap::with_capacity(patterns.len());
         for (idx, &pat) in patterns.iter().enumerate() {
             lookup.insert(pat.to_string(), PatternID::must(idx));
         }
@@ -1172,7 +1168,7 @@ impl NeedleIndex {
 
     /// Recursively walks a condition tree and collects all string patterns
     /// that the rule engine needs to match against instruction text.
-    fn collect_patterns<'rule>(cond: &'rule RuleCondition, patterns: &mut HashSet<&'rule str>) {
+    fn collect_patterns<'rule>(cond: &'rule RuleCondition, patterns: &mut AHashSet<&'rule str>) {
         match cond {
             RuleCondition::Api { api } => {
                 patterns.insert(api.as_str());

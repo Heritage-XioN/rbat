@@ -23,12 +23,12 @@ use crate::{
     core::{IatMap, ParsedBinaryContext},
     utils::entropy::calculate_entropy,
 };
+use ahash::AHashMap;
 use object::{
     Architecture, BinaryFormat, File, LittleEndian, Object, ObjectSection, ObjectSymbol,
     SectionKind,
     pe::{ImageNtHeaders32, ImageNtHeaders64},
 };
-use std::collections::HashMap;
 
 use super::{BinaryArch, BinaryOS, RbatError, Result};
 
@@ -49,8 +49,8 @@ impl<'data, 'obj> Parser<'data, 'obj> {
     /// Evaluates the Shannon entropy for each section of the binary.
     ///
     /// This is useful for identifying packed or encrypted sections where entropy is typically high (>= 7.5).
-    pub fn evaluate_section_entropy(&self) -> Result<HashMap<&'data str, f64>> {
-        let mut section_entropy: HashMap<&'data str, f64> = HashMap::new();
+    pub fn evaluate_section_entropy(&self) -> Result<AHashMap<&'data str, f64>> {
+        let mut section_entropy: AHashMap<&'data str, f64> = AHashMap::new();
 
         for section in self.binary_object.sections() {
             if let Ok(name) = section.name()

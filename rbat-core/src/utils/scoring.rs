@@ -28,8 +28,8 @@
 
 use crate::core::RuleMeta;
 use crate::core::{Confidence, Finding, RiskAssessment};
+use ahash::AHashMap;
 use std::cmp;
-use std::collections::HashMap;
 
 /// Maximum contribution cap per MITRE ATT&CK tactic category.
 fn category_cap(category: &str) -> u32 {
@@ -53,7 +53,7 @@ fn category_cap(category: &str) -> u32 {
 /// double-counting within the same tactic. The final score is the sum of
 /// all capped category contributions.
 pub fn calculate_risk(matched_rules: &[&RuleMeta]) -> RiskAssessment {
-    let mut category_scores: HashMap<String, u32> = HashMap::new();
+    let mut category_scores: AHashMap<String, u32> = AHashMap::new();
     let mut findings: Vec<Finding> = Vec::new();
 
     for rule in matched_rules {

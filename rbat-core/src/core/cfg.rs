@@ -4,8 +4,8 @@
 //! model directed control flow transitions using graph topologies.
 
 use petgraph::graph::DiGraph;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 
 use crate::{
     core::{
@@ -19,7 +19,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlFlowGraph {
     /// Mapped basic blocks by start virtual address.
-    pub blocks: HashMap<u64, BasicBlock>,
+    pub blocks: FxHashMap<u64, BasicBlock>,
     /// Directed links representing control flow jumps.
     pub edges: Vec<(u64, u64, EdgeType)>,
 }
@@ -27,7 +27,7 @@ pub struct ControlFlowGraph {
 impl ControlFlowGraph {
     /// Analyzes an instruction list to partition basic blocks and map execution transitions.
     pub fn new(instructions: &[InstructionInfo], arch: &BinaryArch) -> Self {
-        let mut leaders = HashSet::new();
+        let mut leaders = FxHashSet::default();
         if !instructions.is_empty() {
             leaders.insert(instructions[0].address());
         }
@@ -58,7 +58,7 @@ impl ControlFlowGraph {
             }
         }
 
-        let mut addr_to_idx = HashMap::new();
+        let mut addr_to_idx = FxHashMap::default();
         for (idx, insn) in instructions.iter().enumerate() {
             addr_to_idx.insert(insn.address(), idx);
         }
@@ -66,7 +66,7 @@ impl ControlFlowGraph {
         let mut sorted_leaders: Vec<u64> = leaders.into_iter().collect();
         sorted_leaders.sort_unstable();
 
-        let mut blocks = HashMap::new();
+        let mut blocks = FxHashMap::default();
         let mut block_starts = vec![];
 
         for i in 0..sorted_leaders.len() {
@@ -211,7 +211,7 @@ impl ControlFlowGraph {
     /// Builds a `petgraph::graph::DiGraph` representation of the control flow graph.
     pub fn to_petgraph(&self) -> DiGraph<BasicBlock, EdgeType> {
         let mut graph = DiGraph::new();
-        let mut indices = HashMap::new();
+        let mut indices = FxHashMap::default();
 
         for (&addr, block) in &self.blocks {
             let idx = graph.add_node(block.clone());

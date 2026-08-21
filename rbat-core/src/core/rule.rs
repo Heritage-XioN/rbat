@@ -110,17 +110,18 @@ mod tests {
     use crate::core::{RuleCondition, RuleTag};
 
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use ahash::{AHashMap, AHashSet};
+    use rustc_hash::FxHashSet;
 
     #[test]
     fn test_rule_evaluation() {
-        let mut section_entropies = HashMap::new();
+        let mut section_entropies = AHashMap::new();
         section_entropies.insert(".text", 7.8);
 
         let features = FeatureSet {
-            apis: HashSet::from([aho_corasick::PatternID::must(0)]),
-            strings: HashSet::new(),
-            mnemonics: HashSet::new(),
+            apis: FxHashSet::from_iter([aho_corasick::PatternID::must(0)]),
+            strings: AHashSet::new(),
+            mnemonics: AHashSet::new(),
             section_entropies: &section_entropies,
             has_code_cave: false,
             has_packer_sig: false,
@@ -275,11 +276,12 @@ mod tests {
             }
         }
 
+        let empty_entropy = AHashMap::new();
         let features = FeatureSet {
-            apis: HashSet::new(),
-            strings: HashSet::new(),
-            mnemonics: HashSet::new(),
-            section_entropies: &HashMap::new(),
+            apis: FxHashSet::default(),
+            strings: AHashSet::new(),
+            mnemonics: AHashSet::new(),
+            section_entropies: &empty_entropy,
             has_code_cave: false,
             has_packer_sig: false,
             os: "Windows".to_owned(),

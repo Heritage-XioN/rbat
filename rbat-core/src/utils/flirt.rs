@@ -6,7 +6,7 @@
 use crate::core::InstructionInfo;
 use crate::core::types::InstructionClass;
 use object::{Object, ObjectSymbol};
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 /// Discovers potential function entry points from symbols, exports, and call destinations.
 pub fn collect_function_entry_points(
@@ -14,8 +14,8 @@ pub fn collect_function_entry_points(
     instructions: &[InstructionInfo],
     arch: &crate::core::BinaryArch,
     entry_addr: u64,
-) -> HashSet<u64> {
-    let mut entry_points = HashSet::new();
+) -> FxHashSet<u64> {
+    let mut entry_points = FxHashSet::default();
     entry_points.insert(entry_addr);
 
     // Collect from call instructions
@@ -53,7 +53,7 @@ pub fn collect_function_entry_points(
 pub fn find_function_range(
     start_addr: u64,
     instructions: &[&InstructionInfo],
-    all_entry_points: &HashSet<u64>,
+    all_entry_points: &FxHashSet<u64>,
     arch: &crate::core::BinaryArch,
 ) -> (u64, u64) {
     let start_idx = match instructions.binary_search_by_key(&start_addr, |insn| insn.address()) {
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn test_find_function_range() {
         use crate::core::{BinaryArch, InstructionInfo};
-        use std::collections::HashSet;
+        use rustc_hash::FxHashSet;
 
         let insns_data = &[
             InstructionInfo {
@@ -209,7 +209,7 @@ mod tests {
         ];
 
         let insns: Vec<&InstructionInfo> = insns_data.iter().collect();
-        let mut entries = HashSet::new();
+        let mut entries = FxHashSet::default();
         entries.insert(0x1000);
         entries.insert(0x100B);
 
