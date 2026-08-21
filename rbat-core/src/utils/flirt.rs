@@ -148,12 +148,14 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "mov".into(),
                 op_str: "eax, 1".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "call".into(),
                 op_str: "0x2000".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
         ];
@@ -184,24 +186,28 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "push".into(),
                 op_str: "rbp".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "mov".into(),
                 op_str: "eax, 1".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100A,
                 mnemonic: "ret".into(),
                 op_str: "".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
                 mnemonic: "xor".into(),
                 op_str: "eax, eax".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
         ];
@@ -222,18 +228,21 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "push".into(),
                 op_str: "rbp".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "int3".into(),
                 op_str: "".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
                 mnemonic: "xor".into(),
                 op_str: "eax, eax".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
         ];

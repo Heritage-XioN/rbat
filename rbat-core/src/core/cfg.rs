@@ -239,6 +239,7 @@ mod tests {
             address,
             mnemonic: mnemonic.into(),
             op_str: op_str.into(),
+            api_resolution: None,
             matched: smallvec::SmallVec::new(),
         }
     }

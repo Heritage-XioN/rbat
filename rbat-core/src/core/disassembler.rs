@@ -12,7 +12,7 @@ pub use capstone_backend::*;
 
 #[cfg(feature = "backend-capstone")]
 mod capstone_backend {
-    use crate::core::{BinaryArch, BinaryOS};
+    use crate::core::{BinaryArch, BinaryOS, IatMap};
 
     use super::*;
     use capstone::prelude::*;
@@ -30,7 +30,12 @@ mod capstone_backend {
     }
 
     impl Disassembler for DisassemblerImpl {
-        fn disassemble(&self, text_bytes: &[u8], entry_addr: u64) -> Result<Vec<InstructionInfo>> {
+        fn disassemble(
+            &self,
+            text_bytes: &[u8],
+            entry_addr: u64,
+            iat_map: &IatMap,
+        ) -> Result<Vec<InstructionInfo>> {
             let cs = match self.arch {
                 BinaryArch::X86 | BinaryArch::X64 => {
                     let mut x86 = Capstone::new().x86();
@@ -60,7 +65,32 @@ mod capstone_backend {
             let cs_insns = cs.disasm_all(text_bytes, entry_addr)?;
             Ok(cs_insns
                 .iter()
-                .map(|insn| InstructionInfo::from_capstone(insn))
+                .map(|insn| {
+                    let mut api_resolution = None;
+                    if let Ok(detail) = cs.insn_detail(insn) {
+                        let arch_detail = detail.arch_detail();
+                        if let Some(x86) = arch_detail.x86() {
+                            for op in x86.operands() {
+                                match op.op_type {
+                                    capstone::arch::x86::X86OperandType::Imm(imm) => {
+                                        if let Some(api) = iat_map.get(&(imm as u64)) {
+                                            api_resolution = Some(api.clone());
+                                            break;
+                                        }
+                                    }
+                                    capstone::arch::x86::X86OperandType::Mem(mem) => {
+                                        if let Some(api) = iat_map.get(&(mem.disp() as u64)) {
+                                            api_resolution = Some(api.clone());
+                                            break;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    InstructionInfo::from_capstone(insn, api_resolution)
+                })
                 .collect())
         }
     }
@@ -71,7 +101,7 @@ pub use iced_backend::*;
 
 #[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
 mod iced_backend {
-    use crate::core::{BinaryArch, BinaryOS};
+    use crate::core::{BinaryArch, BinaryOS, IatMap};
 
     use super::*;
     use iced_x86::{Code, Decoder, DecoderOptions};
@@ -89,7 +119,12 @@ mod iced_backend {
     }
 
     impl Disassembler for DisassemblerImpl {
-        fn disassemble(&self, text_bytes: &[u8], entry_addr: u64) -> Result<Vec<InstructionInfo>> {
+        fn disassemble(
+            &self,
+            text_bytes: &[u8],
+            entry_addr: u64,
+            iat_map: &IatMap,
+        ) -> Result<Vec<InstructionInfo>> {
             let bitness = match self.arch {
                 BinaryArch::X64 => 64,
                 BinaryArch::X86 => 32,
@@ -112,7 +147,23 @@ mod iced_backend {
                     continue;
                 }
 
-                instructions.push(InstructionInfo::from_iced(&instr, self.os));
+                let mut api_resolution = None;
+                let target = instr.near_branch64();
+                if target != 0
+                    && let Some(api) = iat_map.get(&target)
+                {
+                    api_resolution = Some(api.clone());
+                }
+                if api_resolution.is_none() {
+                    let disp = instr.memory_displacement64();
+                    if disp != 0
+                        && let Some(api) = iat_map.get(&disp)
+                    {
+                        api_resolution = Some(api.clone());
+                    }
+                }
+
+                instructions.push(InstructionInfo::from_iced(&instr, self.os, api_resolution));
             }
 
             Ok(instructions)
@@ -130,7 +181,8 @@ mod tests {
     #[test]
     fn test_disasm_factory_x64_intel() {
         let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
-        let insns = disasm.disassemble(&[0x90], 0x1000).unwrap();
+        let iat_map = crate::core::types::IatMap::default();
+        let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "nop");
     }
@@ -139,7 +191,8 @@ mod tests {
     #[test]
     fn test_disasm_factory_x86_att() {
         let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::X86);
-        let insns = disasm.disassemble(&[0x90], 0x1000).unwrap();
+        let iat_map = crate::core::types::IatMap::default();
+        let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "nop");
     }
@@ -153,7 +206,8 @@ mod tests {
 
         #[cfg(feature = "backend-capstone")]
         {
-            let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+            let iat_map = crate::core::types::IatMap::default();
+            let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
             assert_eq!(insns.len(), 1);
             assert_eq!(insns[0].format_mnemonic(), "nop");
         }
@@ -168,7 +222,8 @@ mod tests {
 
         #[cfg(feature = "backend-capstone")]
         {
-            let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+            let iat_map = crate::core::types::IatMap::default();
+            let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
             assert_eq!(insns.len(), 1);
             assert_eq!(insns[0].format_mnemonic(), "nop");
         }
@@ -180,7 +235,8 @@ mod tests {
         let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
         // NOP, RET
         let bytes = &[0x90, 0xC3];
-        let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+        let iat_map = crate::core::types::IatMap::default();
+        let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 2);
 
         assert_eq!(insns[0].address(), 0x1000);
@@ -196,7 +252,8 @@ mod tests {
         let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::X86);
         // MOV EAX, 1
         let bytes = &[0xB8, 0x01, 0x00, 0x00, 0x00];
-        let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+        let iat_map = crate::core::types::IatMap::default();
+        let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
 
         assert_eq!(insns[0].address(), 0x1000);
@@ -216,7 +273,8 @@ mod tests {
         let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
         // 0xFF 0xFF is an invalid x86 instruction
         let bytes = &[0xFF, 0xFF];
-        let insns = disasm.disassemble(bytes, 0x1000).unwrap();
+        let iat_map = crate::core::types::IatMap::default();
+        let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
         // Iced decodes it as an INVALID instruction and we skip it in our loop,
         // but let's check what it outputs, probably 0 instructions.
         assert_eq!(insns.len(), 0);

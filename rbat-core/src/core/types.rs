@@ -11,11 +11,15 @@ use crate::{
 use aho_corasick::{AhoCorasick, PatternID};
 
 use rust_embed::RustEmbed;
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Maps IAT virtual addresses to their resolved API names.
+pub type IatMap = FxHashMap<u64, Arc<str>>;
 
 /// Supported target operating systems for assembly syntax style selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +52,7 @@ pub struct ParsedBinaryContext {
     pub arch: BinaryArch,
     pub entry_addr: u64,
     pub text_bytes: Vec<u8>,
+    pub iat_map: IatMap,
 }
 
 /// Represents the progress updates emitted during static analysis.
@@ -265,16 +270,22 @@ pub struct SectionRange<'buf> {
 pub struct InstructionInfo {
     pub inner: iced_x86::Instruction,
     pub os: BinaryOS,
+    pub api_resolution: Option<Arc<str>>,
     /// Pre-computed set of Aho-Corasick pattern IDs matched against this instruction's text.
     pub matched: smallvec::SmallVec<[PatternID; 4]>,
 }
 
 #[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
 impl InstructionInfo {
-    pub fn from_iced(inner: &iced_x86::Instruction, os: BinaryOS) -> Self {
+    pub fn from_iced(
+        inner: &iced_x86::Instruction,
+        os: BinaryOS,
+        api_resolution: Option<Arc<str>>,
+    ) -> Self {
         Self {
             inner: *inner,
             os,
+            api_resolution,
             matched: smallvec::SmallVec::new(),
         }
     }
@@ -356,9 +367,10 @@ pub struct InstructionInfo {
     /// The memory address of the instruction.
     pub address: u64,
     /// The cached mnemonic string.
-    pub mnemonic: std::sync::Arc<str>,
+    pub mnemonic: Arc<str>,
     /// The cached operand string.
-    pub op_str: std::sync::Arc<str>,
+    pub op_str: Arc<str>,
+    pub api_resolution: Option<Arc<str>>,
     /// The set of PatternIDs this instruction matched.
     #[serde(skip)]
     pub matched: smallvec::SmallVec<[PatternID; 4]>,
@@ -367,11 +379,12 @@ pub struct InstructionInfo {
 #[cfg(feature = "backend-capstone")]
 impl InstructionInfo {
     /// Instantiates an `InstructionInfo` from a Capstone instruction.
-    pub fn from_capstone(insn: &capstone::Insn) -> Self {
+    pub fn from_capstone(insn: &capstone::Insn, api_resolution: Option<Arc<str>>) -> Self {
         Self {
             address: insn.address(),
             mnemonic: insn.mnemonic().unwrap_or("").into(),
             op_str: insn.op_str().unwrap_or("").into(),
+            api_resolution,
             matched: smallvec::SmallVec::new(),
         }
     }
@@ -1194,6 +1207,10 @@ impl NeedleIndex {
                 haystack.push_str(&buf_m);
                 haystack.push(' ');
                 haystack.push_str(&buf_o);
+                if let Some(ref api) = insn.api_resolution {
+                    haystack.push(' ');
+                    haystack.push_str(api);
+                }
 
                 for mat in self.automaton.find_iter(&haystack) {
                     let p = mat.pattern();

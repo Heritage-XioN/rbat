@@ -19,8 +19,15 @@
 //! # }
 //! ```
 
-use crate::{core::ParsedBinaryContext, utils::entropy::calculate_entropy};
-use object::{Architecture, BinaryFormat, File, Object, ObjectSection, ObjectSymbol, SectionKind};
+use crate::{
+    core::{IatMap, ParsedBinaryContext},
+    utils::entropy::calculate_entropy,
+};
+use object::{
+    Architecture, BinaryFormat, File, LittleEndian, Object, ObjectSection, ObjectSymbol,
+    SectionKind,
+    pe::{ImageNtHeaders32, ImageNtHeaders64},
+};
 use std::collections::HashMap;
 
 use super::{BinaryArch, BinaryOS, RbatError, Result};
@@ -97,12 +104,100 @@ impl<'data, 'obj> Parser<'data, 'obj> {
 
         let text_bytes = text_bytes.ok_or(RbatError::MissingExecutableSection)?;
 
+        let iat_map = self.build_iat_map();
+
         Ok(ParsedBinaryContext {
             os,
             arch,
             entry_addr,
             text_bytes,
+            iat_map,
         })
+    }
+
+    /// Builds a map of Absolute Address -> Imported API name (Arc<str>) for resolving thunks.
+    pub fn build_iat_map(&self) -> IatMap {
+        let mut map = IatMap::default();
+
+        match &self.binary_object {
+            object::File::Pe32(pe) => {
+                let image_base =
+                    pe.nt_headers().optional_header.image_base.get(LittleEndian) as u64;
+                if let Some(import_table) = pe.import_table().unwrap_or(None)
+                    && let Ok(mut iter) = import_table.descriptors()
+                {
+                    while let Ok(Some(desc)) = iter.next() {
+                        let first_thunk = desc.first_thunk.get(LittleEndian);
+                        let original_first_thunk = desc.original_first_thunk.get(LittleEndian);
+                        let thunk_rva = if original_first_thunk == 0 {
+                            first_thunk
+                        } else {
+                            original_first_thunk
+                        };
+
+                        if let Ok(mut thunks) = import_table.thunks(thunk_rva) {
+                            let mut i = 0;
+                            while let Ok(Some(thunk_data)) = thunks.next::<ImageNtHeaders32>() {
+                                if let Ok(object::read::pe::Import::Name(_, name)) =
+                                    import_table.import::<ImageNtHeaders32>(thunk_data)
+                                {
+                                    let iat_addr = image_base + (first_thunk + (i * 4)) as u64;
+                                    if let Ok(s) = std::str::from_utf8(name) {
+                                        map.insert(iat_addr, s.into());
+                                    }
+                                }
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            object::File::Pe64(pe) => {
+                let image_base = pe.nt_headers().optional_header.image_base.get(LittleEndian);
+                if let Some(import_table) = pe.import_table().unwrap_or(None)
+                    && let Ok(mut iter) = import_table.descriptors()
+                {
+                    while let Ok(Some(desc)) = iter.next() {
+                        let first_thunk = desc.first_thunk.get(LittleEndian);
+                        let original_first_thunk = desc.original_first_thunk.get(LittleEndian);
+                        let thunk_rva = if original_first_thunk == 0 {
+                            first_thunk
+                        } else {
+                            original_first_thunk
+                        };
+
+                        if let Ok(mut thunks) = import_table.thunks(thunk_rva) {
+                            let mut i = 0;
+                            while let Ok(Some(thunk_data)) = thunks.next::<ImageNtHeaders64>() {
+                                if let Ok(object::read::pe::Import::Name(_, name)) =
+                                    import_table.import::<ImageNtHeaders64>(thunk_data)
+                                {
+                                    let iat_addr = image_base + (first_thunk + (i * 8)) as u64;
+                                    if let Ok(s) = std::str::from_utf8(name) {
+                                        map.insert(iat_addr, s.into());
+                                    }
+                                }
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Fallback for ELF using dynamic relocations
+                if let Some(relocs) = self.binary_object.dynamic_relocations() {
+                    for (addr, reloc) in relocs {
+                        if let object::RelocationTarget::Symbol(idx) = reloc.target()
+                            && let Ok(sym) = self.binary_object.symbol_by_index(idx)
+                            && let Ok(name) = sym.name()
+                        {
+                            map.insert(addr, name.into());
+                        }
+                    }
+                }
+            }
+        }
+        map
     }
 
     /// Extracts all dynamically imported symbols.

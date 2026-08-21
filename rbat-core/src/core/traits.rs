@@ -3,6 +3,7 @@
 //! This module defines the common interfaces used for disassembling binaries
 //! and executing heuristic plugins.
 
+use crate::core::types::IatMap;
 use crate::core::{AnalysisContext, AnalysisProgress};
 
 use super::Result;
@@ -14,6 +15,7 @@ pub trait Disassembler {
         &self,
         text_bytes: &[u8],
         entry_addr: u64,
+        iat_map: &IatMap,
     ) -> Result<Vec<crate::core::InstructionInfo>>;
 }
 

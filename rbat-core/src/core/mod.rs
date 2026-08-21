@@ -28,9 +28,9 @@ pub use crate::core::{
     rule::Rule,
     types::{
         AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryArch,
-        BinaryMetadata, BinaryOS, Confidence, EdgeType, Finding, InstructionClass, InstructionInfo,
-        ParsedBinaryContext, RiskAssessment, RuleCondition, RuleInner, RuleMeta, RuleTag,
-        SectionRange, YaraMatches,
+        BinaryMetadata, BinaryOS, Confidence, EdgeType, Finding, IatMap, InstructionClass,
+        InstructionInfo, ParsedBinaryContext, RiskAssessment, RuleCondition, RuleInner, RuleMeta,
+        RuleTag, SectionRange, YaraMatches,
     },
 };
 

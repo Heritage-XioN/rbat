@@ -272,6 +272,7 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "nop".into(),
                 op_str: "".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             };
             128

@@ -125,6 +125,7 @@ mod tests {
                 address: addr as u64,
                 mnemonic: "nop".into(),
                 op_str: "".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             });
         }
@@ -132,6 +133,7 @@ mod tests {
             address: 0x1080,
             mnemonic: "rdtsc".into(),
             op_str: "".into(),
+            api_resolution: None,
             matched: smallvec::SmallVec::new(),
         });
 

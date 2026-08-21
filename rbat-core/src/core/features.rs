@@ -245,12 +245,14 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "mov".into(),
                 op_str: "1 = HANDLE_FLAG_INHERIT".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x2000,
                 mnemonic: "ret".into(),
                 op_str: "".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
         ];
