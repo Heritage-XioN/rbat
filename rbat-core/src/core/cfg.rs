@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{
-        BasicBlock, BinaryArch, EdgeType,
-        types::{InstructionClass, InstructionInfo},
+        BasicBlock, BinaryArch, EdgeType, disassembler::InstructionInfo, types::InstructionClass,
     },
     utils::cfg::{classify_instruction, parse_target_address},
 };
@@ -231,7 +230,7 @@ impl ControlFlowGraph {
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
-    use crate::core::{BinaryArch, EdgeType, types::InstructionInfo};
+    use crate::core::{BinaryArch, EdgeType, disassembler::InstructionInfo};
 
     /// Helper to build an `InstructionInfo` with minimal boilerplate.
     fn insn(address: u64, mnemonic: &str, op_str: &str) -> InstructionInfo {

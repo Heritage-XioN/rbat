@@ -6,7 +6,7 @@
 pub mod analyzer;
 pub mod cfg;
 pub mod cli;
-mod disassembler;
+pub mod disassembler;
 pub mod error;
 pub mod features;
 pub mod flirt;
@@ -29,8 +29,8 @@ pub use crate::core::{
     types::{
         AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryArch,
         BinaryMetadata, BinaryOS, Confidence, EdgeType, Finding, IatMap, InstructionClass,
-        InstructionInfo, ParsedBinaryContext, RiskAssessment, RuleCondition, RuleInner, RuleMeta,
-        RuleTag, SectionRange, YaraMatches,
+        ParsedBinaryContext, RiskAssessment, RuleCondition, RuleInner, RuleMeta, RuleTag,
+        SectionRange, YaraMatches,
     },
 };
 

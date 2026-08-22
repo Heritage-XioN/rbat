@@ -3,8 +3,7 @@
 //! Contains utilities for FLIRT (Fast Library Identification and Recognition Technology)
 //! symbol resolution, function entry point extraction, and demangling.
 
-use crate::core::InstructionInfo;
-use crate::core::types::InstructionClass;
+use crate::core::{disassembler::InstructionInfo, types::InstructionClass};
 use object::{Object, ObjectSymbol};
 use rustc_hash::FxHashSet;
 
@@ -115,7 +114,7 @@ pub fn normalize_symbol(name: &str) -> String {
 
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
-    use crate::utils::flirt::normalize_symbol;
+    use crate::{core::disassembler::InstructionInfo, utils::flirt::normalize_symbol};
 
     #[test]
     fn test_normalize_symbol_mangled() {
@@ -136,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_collect_function_entry_points() {
-        use crate::core::{BinaryArch, InstructionInfo};
+        use crate::core::BinaryArch;
         use object::File;
 
         let instructions = vec![
@@ -174,7 +173,7 @@ mod tests {
 
     #[test]
     fn test_find_function_range() {
-        use crate::core::{BinaryArch, InstructionInfo};
+        use crate::core::BinaryArch;
         use rustc_hash::FxHashSet;
 
         let insns_data = &[

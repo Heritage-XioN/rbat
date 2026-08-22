@@ -107,7 +107,7 @@ impl Rule {
 
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
-    use crate::core::{RuleCondition, RuleTag};
+    use crate::core::{RuleCondition, RuleTag, disassembler::InstructionInfo};
 
     use super::*;
     use ahash::{AHashMap, AHashSet};
@@ -121,7 +121,6 @@ mod tests {
         let features = FeatureSet {
             apis: FxHashSet::from_iter([aho_corasick::PatternID::must(0)]),
             strings: AHashSet::new(),
-            mnemonics: AHashSet::new(),
             section_entropies: &section_entropies,
             has_code_cave: false,
             has_packer_sig: false,
@@ -181,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_cfg_rules_matching() {
-        use crate::core::types::{BasicBlock, InstructionInfo};
+        use crate::core::types::BasicBlock;
 
         // Create instructions & block representing:
         // SetHandleInformation (call)
@@ -280,7 +279,6 @@ mod tests {
         let features = FeatureSet {
             apis: FxHashSet::default(),
             strings: AHashSet::new(),
-            mnemonics: AHashSet::new(),
             section_entropies: &empty_entropy,
             has_code_cave: false,
             has_packer_sig: false,

@@ -7,7 +7,8 @@ use ahash::AHashMap;
 use std::sync::OnceLock;
 
 use crate::core::SectionRange;
-use crate::core::{InstructionInfo, Result, YaraMatches, yarahandler::YaraHandler};
+use crate::core::disassembler::InstructionInfo;
+use crate::core::{Result, YaraMatches, yarahandler::YaraHandler};
 
 use crate::utils::raw_padding::scan_raw_padding;
 
