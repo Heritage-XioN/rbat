@@ -4,7 +4,7 @@
 //! used throughout the binary analysis pipeline, reporting, and scoring engines.
 
 use crate::{
-    core::{FeatureSet, Rule, cfg::ControlFlowGraph},
+    core::{FeatureSet, Rule, cfg::ControlFlowGraph, disassembler::InstructionInfo},
     utils::rules::{StringOrVec, parse_number_constant},
 };
 
@@ -262,190 +262,6 @@ pub struct SectionRange<'buf> {
     /// Name of the binary section (e.g. `".text"`, `"__TEXT"`).
     #[serde(borrow)]
     pub name: &'buf str,
-}
-
-/// A generic view over a disassembled instruction.
-#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstructionInfo {
-    pub inner: iced_x86::Instruction,
-    pub os: BinaryOS,
-    pub api_resolution: Option<Arc<str>>,
-    /// Pre-computed set of Aho-Corasick pattern IDs matched against this instruction's text.
-    pub matched: smallvec::SmallVec<[PatternID; 4]>,
-}
-
-#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
-impl InstructionInfo {
-    pub fn from_iced(
-        inner: &iced_x86::Instruction,
-        os: BinaryOS,
-        api_resolution: Option<Arc<str>>,
-    ) -> Self {
-        Self {
-            inner: *inner,
-            os,
-            api_resolution,
-            matched: smallvec::SmallVec::new(),
-        }
-    }
-
-    pub fn address(&self) -> u64 {
-        self.inner.ip()
-    }
-
-    pub fn format_mnemonic_into(&self, buf: &mut String) {
-        use std::fmt::Write;
-        buf.clear();
-        let _ = write!(buf, "{:?}", self.inner.mnemonic());
-        buf.make_ascii_lowercase();
-    }
-
-    pub fn format_mnemonic(&self) -> String {
-        let mut buf = String::new();
-        self.format_mnemonic_into(&mut buf);
-        buf
-    }
-
-    pub fn format_operands_into(&self, buf: &mut String) {
-        use iced_x86::Formatter;
-        use std::cell::RefCell;
-        thread_local! {
-            static INTEL_FMT: RefCell<iced_x86::IntelFormatter> = RefCell::new(iced_x86::IntelFormatter::new());
-            static GAS_FMT: RefCell<iced_x86::GasFormatter> = RefCell::new(iced_x86::GasFormatter::new());
-        }
-
-        buf.clear();
-        match self.os {
-            BinaryOS::Linux => {
-                GAS_FMT.with(|fmt| fmt.borrow_mut().format_all_operands(&self.inner, buf))
-            }
-            _ => INTEL_FMT.with(|fmt| fmt.borrow_mut().format_all_operands(&self.inner, buf)),
-        }
-    }
-
-    pub fn format_operands(&self) -> String {
-        let mut buf = String::new();
-        self.format_operands_into(&mut buf);
-        buf
-    }
-
-    /// Returns the branch target address if this is a near branch instruction, without
-    /// allocating a string. Returns `None` for non-branch or indirect branches.
-    pub fn branch_target(&self) -> Option<u64> {
-        let target = self.inner.near_branch_target();
-        if target != 0 { Some(target) } else { None }
-    }
-
-    /// Classifies this instruction's control-flow role without allocating a string.
-    pub fn class(&self, _arch: &crate::core::BinaryArch) -> InstructionClass {
-        use iced_x86::FlowControl;
-        match self.inner.flow_control() {
-            FlowControl::UnconditionalBranch => InstructionClass::UnconditionalJump,
-            FlowControl::ConditionalBranch => InstructionClass::ConditionalJump,
-            FlowControl::Call | FlowControl::IndirectCall => InstructionClass::Call,
-            FlowControl::Return => InstructionClass::Return,
-            _ => InstructionClass::Normal,
-        }
-    }
-}
-
-#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
-impl serde::Serialize for InstructionInfo {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("InstructionInfo", 3)?;
-        state.serialize_field("address", &self.address())?;
-        state.serialize_field("mnemonic", &self.format_mnemonic())?;
-        state.serialize_field("op_str", &self.format_operands())?;
-        state.end()
-    }
-}
-
-#[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
-impl<'de> serde::Deserialize<'de> for InstructionInfo {
-    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialization is a stub because we cannot easily recreate the raw iced_x86 instruction
-        // from formatted strings without the binary data.
-        Err(serde::de::Error::custom(
-            "Deserialize not supported for backend-iced InstructionInfo",
-        ))
-    }
-}
-
-/// Represents a single disassembled instruction with pre-computed optimization metadata.
-#[cfg(feature = "backend-capstone")]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InstructionInfo {
-    /// The memory address of the instruction.
-    pub address: u64,
-    /// The cached mnemonic string.
-    pub mnemonic: Arc<str>,
-    /// The cached operand string.
-    pub op_str: Arc<str>,
-    pub api_resolution: Option<Arc<str>>,
-    /// The set of PatternIDs this instruction matched.
-    #[serde(skip)]
-    pub matched: smallvec::SmallVec<[PatternID; 4]>,
-}
-
-#[cfg(feature = "backend-capstone")]
-impl InstructionInfo {
-    /// Instantiates an `InstructionInfo` from a Capstone instruction.
-    pub fn from_capstone(insn: &capstone::Insn, api_resolution: Option<Arc<str>>) -> Self {
-        Self {
-            address: insn.address(),
-            mnemonic: insn.mnemonic().unwrap_or("").into(),
-            op_str: insn.op_str().unwrap_or("").into(),
-            api_resolution,
-            matched: smallvec::SmallVec::new(),
-        }
-    }
-
-    /// Returns the address of the instruction.
-    pub fn address(&self) -> u64 {
-        self.address
-    }
-
-    /// Returns a new lowercase formatted mnemonic string.
-    pub fn format_mnemonic(&self) -> String {
-        self.mnemonic.to_string()
-    }
-
-    /// Returns a new lowercase formatted operand string.
-    pub fn format_operands(&self) -> String {
-        self.op_str.to_string()
-    }
-
-    /// Zero-allocation formatted mnemonic writer.
-    pub fn format_mnemonic_into(&self, buf: &mut String) {
-        buf.clear();
-        buf.push_str(&self.mnemonic);
-    }
-
-    /// Zero-allocation formatted operand writer.
-    pub fn format_operands_into(&self, buf: &mut String) {
-        buf.clear();
-        buf.push_str(&self.op_str);
-    }
-
-    /// Returns the branch target address if this is a branch/call to a direct address.
-    /// Falls back to string parsing for capstone backend.
-    pub fn branch_target(&self) -> Option<u64> {
-        crate::utils::cfg::parse_target_address(&self.op_str)
-    }
-
-    /// Classifies this instruction's control-flow role.
-    /// Falls back to string-based mnemonic classification for capstone backend.
-    pub fn class(&self, arch: &crate::core::BinaryArch) -> InstructionClass {
-        crate::utils::cfg::classify_instruction(&self.mnemonic, arch)
-    }
 }
 
 /// Represents a basic block: a straight-line sequence of execution with a single entry and exit.
@@ -850,7 +666,13 @@ impl RuleCondition {
                 }
             }
             Self::String { string } => features.strings.iter().any(|s| s.contains(string)),
-            Self::Mnemonic { mnemonic } => features.mnemonics.iter().any(|m| &**m == mnemonic),
+            Self::Mnemonic { mnemonic } => {
+                if let Some(id) = needle.lookup.get(mnemonic) {
+                    needle.present[id.as_usize()].load(Ordering::Relaxed)
+                } else {
+                    false
+                }
+            }
             Self::Match { match_name } => {
                 if let Some(id) = needle.lookup.get(match_name)
                     && features.apis.contains(id)
@@ -939,12 +761,20 @@ impl RuleCondition {
                         >= *count
                 }
                 Self::Mnemonic { mnemonic } => {
-                    features
-                        .mnemonics
-                        .iter()
-                        .filter(|m| **m == *mnemonic)
-                        .count()
-                        >= *count
+                    if let Some(id) = needle.lookup.get(mnemonic) {
+                        if !needle.present[id.as_usize()].load(Ordering::Relaxed) {
+                            return 0 == *count;
+                        }
+                        features
+                            .blocks
+                            .iter()
+                            .flat_map(|b| b.instructions.iter())
+                            .filter(|insn| insn.matched.contains(id))
+                            .count()
+                            >= *count
+                    } else {
+                        false
+                    }
                 }
                 Self::Match { match_name } => {
                     let mut cnt = features

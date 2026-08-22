@@ -3,7 +3,8 @@
 //! This module implements the `FeatureSet` structure which extracts and flattens
 //! binary analysis results into fast-lookup sets and maps for rule evaluation.
 
-use crate::core::{AnalysisResult, BasicBlock, EdgeType, InstructionInfo};
+use crate::core::disassembler::InstructionInfo;
+use crate::core::{AnalysisResult, BasicBlock, EdgeType};
 use crate::utils::flirt::find_function_range;
 use ahash::{AHashMap, AHashSet};
 use aho_corasick::PatternID;
@@ -16,8 +17,6 @@ pub struct FeatureSet<'buf> {
     pub apis: FxHashSet<PatternID>,
     /// Mapped string constants.
     pub strings: AHashSet<String>,
-    /// Blacklisted instruction mnemonics.
-    pub mnemonics: AHashSet<String>,
     /// Section Shannon entropies.
     pub section_entropies: &'buf AHashMap<&'buf str, f64>,
     /// Whether any code caves (NOP/zero/trap runs) were mapped.
@@ -59,10 +58,6 @@ impl<'buf> FeatureSet<'buf> {
             for &addr in res.library_functions.keys() {
                 all_entry_points.insert(addr);
             }
-            for block in cfg.blocks.values() {
-                all_entry_points.insert(block.start_address);
-            }
-
             let arch_enum = match res.metadata.architecture_name().as_str() {
                 "x86_64" => crate::core::BinaryArch::X64,
                 "x86" => crate::core::BinaryArch::X86,
@@ -70,14 +65,10 @@ impl<'buf> FeatureSet<'buf> {
                 _ => crate::core::BinaryArch::Arm64,
             };
 
-            for &start_addr in res.library_functions.keys() {
-                let range = find_function_range(
-                    start_addr,
-                    &all_instructions,
-                    &all_entry_points,
-                    &arch_enum,
-                );
-                library_ranges.push(range);
+            for &lib_addr in res.library_functions.keys() {
+                let (start, end) =
+                    find_function_range(lib_addr, &all_instructions, &all_entry_points, &arch_enum);
+                library_ranges.push((start, end));
             }
         }
 
@@ -156,7 +147,6 @@ impl<'buf> FeatureSet<'buf> {
         Self {
             apis,
             strings,
-            mnemonics: AHashSet::new(),
             section_entropies: &res.section_entropy,
             has_code_cave: !res.code_cave.is_empty(),
             has_packer_sig: !res.packer_signatures.is_empty(),
@@ -173,7 +163,10 @@ impl<'buf> FeatureSet<'buf> {
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
-    use crate::core::types::{AnalysisResult, YaraMatches};
+    use crate::core::{
+        disassembler::InstructionInfo,
+        types::{AnalysisResult, YaraMatches},
+    };
 
     #[test]
     fn test_feature_set_creation_populated() {
@@ -227,7 +220,6 @@ mod tests {
 
         assert!(fs.apis.is_empty());
         assert!(fs.strings.is_empty());
-        assert!(fs.mnemonics.is_empty());
         assert!(fs.section_entropies.is_empty());
         assert!(!fs.has_code_cave);
         assert!(!fs.has_packer_sig);
@@ -236,7 +228,6 @@ mod tests {
     #[test]
     fn test_feature_set_library_exclusion() {
         use crate::core::cfg::ControlFlowGraph;
-        use crate::core::types::InstructionInfo;
 
         let mut res = AnalysisResult::default();
         res.metadata.architecture = 62;

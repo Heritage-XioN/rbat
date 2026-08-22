@@ -64,7 +64,6 @@ impl HeuristicPlugin for DisassemblyPlugin {
 
     fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let code_cave = disassemble_section(ctx.instructions, ctx.text_bytes, ctx.entry_addr)?;
-
         Ok(AnalysisProgress::Disassembly(code_cave))
     }
 }
@@ -127,7 +126,9 @@ impl HeuristicPlugin for ImportsPlugin {
         if let Ok(imports) = parser.extract_imports() {
             for raw_import in imports {
                 for mat in ctx.needle.automaton.find_overlapping_iter(raw_import) {
-                    matched.push(mat.pattern().as_usize());
+                    let pat_idx = mat.pattern().as_usize();
+                    matched.push(pat_idx);
+                    ctx.needle.present[pat_idx].store(true, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         }
@@ -149,7 +150,9 @@ impl HeuristicPlugin for ExportsPlugin {
         if let Ok(exports) = parser.extract_exports() {
             for raw_export in exports {
                 for mat in ctx.needle.automaton.find_overlapping_iter(raw_export) {
-                    matched.push(mat.pattern().as_usize());
+                    let pat_idx = mat.pattern().as_usize();
+                    matched.push(pat_idx);
+                    ctx.needle.present[pat_idx].store(true, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         }
@@ -268,7 +271,7 @@ mod tests {
 
         let text_bytes = vec![0x90; 128];
         let instructions = vec![
-            crate::core::InstructionInfo {
+            crate::core::disassembler::InstructionInfo {
                 address: 0x1000,
                 mnemonic: "nop".into(),
                 op_str: "".into(),
