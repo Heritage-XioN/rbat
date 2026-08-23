@@ -3,22 +3,22 @@
 //! This module implements the `FeatureSet` structure which extracts and flattens
 //! binary analysis results into fast-lookup sets and maps for rule evaluation.
 
-use crate::core::{AnalysisResult, BasicBlock, EdgeType, InstructionInfo};
+use crate::core::disassembler::InstructionInfo;
+use crate::core::{AnalysisResult, BasicBlock, EdgeType};
 use crate::utils::flirt::find_function_range;
+use ahash::{AHashMap, AHashSet};
 use aho_corasick::PatternID;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Collected metrics and indicators extracted from the binary for rule evaluation.
 #[derive(Debug, Clone)]
 pub struct FeatureSet<'buf> {
     /// Mapped API imports and suspicious dynamic symbol links.
-    pub apis: HashSet<PatternID>,
+    pub apis: FxHashSet<PatternID>,
     /// Mapped string constants.
-    pub strings: HashSet<String>,
-    /// Blacklisted instruction mnemonics.
-    pub mnemonics: HashSet<String>,
+    pub strings: AHashSet<String>,
     /// Section Shannon entropies.
-    pub section_entropies: HashMap<String, f64>,
+    pub section_entropies: &'buf AHashMap<&'buf str, f64>,
     /// Whether any code caves (NOP/zero/trap runs) were mapped.
     pub has_code_cave: bool,
     /// Whether any packer/crypter signature was matched.
@@ -54,14 +54,10 @@ impl<'buf> FeatureSet<'buf> {
             all_instructions.dedup_by_key(|insn| insn.address());
 
             // Reconstruct all entry points (matched library functions + basic block starts)
-            let mut all_entry_points = HashSet::new();
+            let mut all_entry_points = FxHashSet::default();
             for &addr in res.library_functions.keys() {
                 all_entry_points.insert(addr);
             }
-            for block in cfg.blocks.values() {
-                all_entry_points.insert(block.start_address);
-            }
-
             let arch_enum = match res.metadata.architecture_name().as_str() {
                 "x86_64" => crate::core::BinaryArch::X64,
                 "x86" => crate::core::BinaryArch::X86,
@@ -69,14 +65,10 @@ impl<'buf> FeatureSet<'buf> {
                 _ => crate::core::BinaryArch::Arm64,
             };
 
-            for &start_addr in res.library_functions.keys() {
-                let range = find_function_range(
-                    start_addr,
-                    &all_instructions,
-                    &all_entry_points,
-                    &arch_enum,
-                );
-                library_ranges.push(range);
+            for &lib_addr in res.library_functions.keys() {
+                let (start, end) =
+                    find_function_range(lib_addr, &all_instructions, &all_entry_points, &arch_enum);
+                library_ranges.push((start, end));
             }
         }
 
@@ -89,8 +81,8 @@ impl<'buf> FeatureSet<'buf> {
             false
         };
 
-        let mut apis = HashSet::new();
-        let mut strings = HashSet::new();
+        let mut apis = FxHashSet::default();
+        let mut strings = AHashSet::new();
 
         for &api_id in &res.imports {
             apis.insert(PatternID::must(api_id));
@@ -124,7 +116,7 @@ impl<'buf> FeatureSet<'buf> {
 
             // Reconstruct the petgraph containing only non-library blocks
             let mut graph = petgraph::graph::DiGraph::<u64, EdgeType>::new();
-            let mut indices = std::collections::HashMap::new();
+            let mut indices = FxHashMap::default();
 
             for block in &blocks {
                 let idx = graph.add_node(block.start_address);
@@ -155,8 +147,7 @@ impl<'buf> FeatureSet<'buf> {
         Self {
             apis,
             strings,
-            mnemonics: HashSet::new(),
-            section_entropies: res.section_entropy.clone(),
+            section_entropies: &res.section_entropy,
             has_code_cave: !res.code_cave.is_empty(),
             has_packer_sig: !res.packer_signatures.is_empty(),
             os: res.metadata.binary_type.to_lowercase(),
@@ -172,7 +163,10 @@ impl<'buf> FeatureSet<'buf> {
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
-    use crate::core::types::{AnalysisResult, YaraMatches};
+    use crate::core::{
+        disassembler::InstructionInfo,
+        types::{AnalysisResult, YaraMatches},
+    };
 
     #[test]
     fn test_feature_set_creation_populated() {
@@ -192,7 +186,7 @@ mod tests {
         res.string_values.insert("url", vec![yara_match]);
 
         // Setup Section Entropies
-        res.section_entropy.insert(".text".to_string(), 6.8);
+        res.section_entropy.insert(".text", 6.8);
 
         // Setup Code Cave
         res.code_cave.insert("nop_addr", vec![2000, 2001]);
@@ -226,7 +220,6 @@ mod tests {
 
         assert!(fs.apis.is_empty());
         assert!(fs.strings.is_empty());
-        assert!(fs.mnemonics.is_empty());
         assert!(fs.section_entropies.is_empty());
         assert!(!fs.has_code_cave);
         assert!(!fs.has_packer_sig);
@@ -235,7 +228,6 @@ mod tests {
     #[test]
     fn test_feature_set_library_exclusion() {
         use crate::core::cfg::ControlFlowGraph;
-        use crate::core::types::InstructionInfo;
 
         let mut res = AnalysisResult::default();
         res.metadata.architecture = 62;
@@ -245,12 +237,14 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "mov".into(),
                 op_str: "1 = HANDLE_FLAG_INHERIT".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x2000,
                 mnemonic: "ret".into(),
                 op_str: "".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
         ];

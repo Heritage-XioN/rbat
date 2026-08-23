@@ -65,8 +65,7 @@ fn run_rules(args: RulesArgs) -> Result<()> {
 }
 
 fn run_analyze(args: AnalyzeArgs) -> Result<()> {
-    let mv_path = args.path.clone();
-    let buffer = fs::read(mv_path)?;
+    let buffer = fs::read(&args.path)?;
 
     // Display ASCII banner only when not emitting pure DOT graph syntax to stdout
     if !args.cfg {
@@ -132,10 +131,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         for event in rx {
             match event {
                 AnalysisProgress::Disassembly(code_cave) => {
-                    analysis_result.code_cave = code_cave.clone();
+                    analysis_result.code_cave = code_cave;
                     spinner.set_message(format!(
                         "Disassembled section (code caves: {})",
-                        code_cave.len()
+                        analysis_result.code_cave.len()
                     ));
                 }
                 AnalysisProgress::Strings(string_values) => {
@@ -149,19 +148,25 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
                     spinner.set_message(format!("Identified {} packer signatures", len));
                 }
                 AnalysisProgress::Entropy(section_entropy) => {
-                    analysis_result.section_entropy = section_entropy.clone();
+                    analysis_result.section_entropy = section_entropy;
                     spinner.set_message(format!(
                         "Calculated Shannon entropy for {} sections",
-                        section_entropy.len()
+                        analysis_result.section_entropy.len()
                     ));
                 }
                 AnalysisProgress::Imports(imports) => {
-                    analysis_result.imports = imports.clone();
-                    spinner.set_message(format!("Extracted {} imported symbols", imports.len()));
+                    analysis_result.imports = imports;
+                    spinner.set_message(format!(
+                        "Extracted {} imported symbols",
+                        analysis_result.imports.len()
+                    ));
                 }
                 AnalysisProgress::Exports(exports) => {
-                    analysis_result.exports = exports.clone();
-                    spinner.set_message(format!("Extracted {} exported symbols", exports.len()));
+                    analysis_result.exports = exports;
+                    spinner.set_message(format!(
+                        "Extracted {} exported symbols",
+                        analysis_result.exports.len()
+                    ));
                 }
                 AnalysisProgress::BinaryMetadata(metadata) => {
                     analysis_result.metadata = metadata;
@@ -172,10 +177,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
                     spinner.set_message("Reconstructed Control Flow Graph");
                 }
                 AnalysisProgress::LibraryFunctions(library_functions) => {
-                    analysis_result.library_functions = library_functions.clone();
+                    analysis_result.library_functions = library_functions;
                     spinner.set_message(format!(
                         "Matched {} library functions via FLIRT",
-                        library_functions.len()
+                        analysis_result.library_functions.len()
                     ));
                 }
             }
@@ -279,7 +284,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     }
 
     if args.tui {
-        ratatui::run(|terminal| App::new(analysis_result, risk_assessment.clone()).run(terminal))?;
+        ratatui::run(|terminal| App::new(analysis_result, risk_assessment).run(terminal))?;
     } else if args.dry_run {
         println!("[+] Dry run complete.");
     } else if !args.cfg {

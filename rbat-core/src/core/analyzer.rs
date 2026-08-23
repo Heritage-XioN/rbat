@@ -68,10 +68,11 @@ where
         arch,
         entry_addr,
         text_bytes,
+        iat_map,
     } = binary_data;
 
     let factory = DisassemblerImpl::new(os, arch);
-    let instructions = factory.disassemble(&text_bytes, entry_addr)?;
+    let instructions = factory.disassemble(&text_bytes, entry_addr, &iat_map)?;
 
     // Run FLIRT signature matching (either with custom matcher or fallback to embedded)
     let entry_points =

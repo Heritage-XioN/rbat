@@ -2,7 +2,7 @@
 
 use fast_flirt::{FlirtSet, Pattern, sig};
 use rust_embed::RustEmbed;
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use crate::utils::flirt::normalize_symbol;
@@ -77,11 +77,11 @@ impl FlirtMatcher {
     /// and returns a map of matched library function addresses to their names.
     pub fn identify_library_functions(
         &self,
-        entry_points: &std::collections::HashSet<u64>,
+        entry_points: &FxHashSet<u64>,
         text_bytes: &[u8],
         text_base: u64,
-    ) -> HashMap<u64, String> {
-        let mut library_functions = HashMap::new();
+    ) -> FxHashMap<u64, String> {
+        let mut library_functions = FxHashMap::default();
 
         for &addr in entry_points {
             if addr >= text_base {

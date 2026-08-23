@@ -3,12 +3,9 @@
 //! Contains utilities for FLIRT (Fast Library Identification and Recognition Technology)
 //! symbol resolution, function entry point extraction, and demangling.
 
-use crate::core::InstructionInfo;
-use crate::core::types::InstructionClass;
-use crate::utils::cfg::classify_instruction;
-use crate::utils::cfg::parse_target_address;
+use crate::core::{disassembler::InstructionInfo, types::InstructionClass};
 use object::{Object, ObjectSymbol};
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 /// Discovers potential function entry points from symbols, exports, and call destinations.
 pub fn collect_function_entry_points(
@@ -16,15 +13,14 @@ pub fn collect_function_entry_points(
     instructions: &[InstructionInfo],
     arch: &crate::core::BinaryArch,
     entry_addr: u64,
-) -> HashSet<u64> {
-    let mut entry_points = HashSet::new();
+) -> FxHashSet<u64> {
+    let mut entry_points = FxHashSet::default();
     entry_points.insert(entry_addr);
 
     // Collect from call instructions
     for insn in instructions {
-        if crate::utils::cfg::classify_instruction(&insn.format_mnemonic(), arch)
-            == crate::core::types::InstructionClass::Call
-            && let Some(target) = parse_target_address(&insn.format_operands())
+        if insn.class(arch) == InstructionClass::Call
+            && let Some(target) = insn.branch_target()
         {
             entry_points.insert(target);
         }
@@ -56,7 +52,7 @@ pub fn collect_function_entry_points(
 pub fn find_function_range(
     start_addr: u64,
     instructions: &[&InstructionInfo],
-    all_entry_points: &HashSet<u64>,
+    all_entry_points: &FxHashSet<u64>,
     arch: &crate::core::BinaryArch,
 ) -> (u64, u64) {
     let start_idx = match instructions.binary_search_by_key(&start_addr, |insn| insn.address()) {
@@ -74,8 +70,7 @@ pub fn find_function_range(
 
         end_addr = insn.address();
 
-        let class = classify_instruction(&insn.format_mnemonic(), arch);
-        if class == InstructionClass::Return {
+        if insn.class(arch) == InstructionClass::Return {
             break;
         }
     }
@@ -119,7 +114,7 @@ pub fn normalize_symbol(name: &str) -> String {
 
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
-    use crate::utils::flirt::normalize_symbol;
+    use crate::{core::disassembler::InstructionInfo, utils::flirt::normalize_symbol};
 
     #[test]
     fn test_normalize_symbol_mangled() {
@@ -140,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_collect_function_entry_points() {
-        use crate::core::{BinaryArch, InstructionInfo};
+        use crate::core::BinaryArch;
         use object::File;
 
         let instructions = vec![
@@ -148,12 +143,14 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "mov".into(),
                 op_str: "eax, 1".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "call".into(),
                 op_str: "0x2000".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
         ];
@@ -176,38 +173,42 @@ mod tests {
 
     #[test]
     fn test_find_function_range() {
-        use crate::core::{BinaryArch, InstructionInfo};
-        use std::collections::HashSet;
+        use crate::core::BinaryArch;
+        use rustc_hash::FxHashSet;
 
         let insns_data = &[
             InstructionInfo {
                 address: 0x1000,
                 mnemonic: "push".into(),
                 op_str: "rbp".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "mov".into(),
                 op_str: "eax, 1".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100A,
                 mnemonic: "ret".into(),
                 op_str: "".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
                 mnemonic: "xor".into(),
                 op_str: "eax, eax".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
         ];
 
         let insns: Vec<&InstructionInfo> = insns_data.iter().collect();
-        let mut entries = HashSet::new();
+        let mut entries = FxHashSet::default();
         entries.insert(0x1000);
         entries.insert(0x100B);
 
@@ -222,18 +223,21 @@ mod tests {
                 address: 0x1000,
                 mnemonic: "push".into(),
                 op_str: "rbp".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x1005,
                 mnemonic: "int3".into(),
                 op_str: "".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
                 mnemonic: "xor".into(),
                 op_str: "eax, eax".into(),
+                api_resolution: None,
                 matched: smallvec::SmallVec::new(),
             },
         ];

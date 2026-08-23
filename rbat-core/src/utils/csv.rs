@@ -18,8 +18,6 @@ pub fn generate_csv_report(
     out_path: &Path,
 ) -> Result<()> {
     let mut wtr = Writer::from_path(out_path)?;
-    let filename_str = filename.to_string_lossy().to_string();
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     // Standard headers expected by SOC tools
     wtr.write_record([
@@ -33,34 +31,34 @@ pub fn generate_csv_report(
         "Description",
     ])?;
 
-    let score = assessment.score.to_string();
     let severity = &assessment.severity;
-    let time_ms = analysis_result.total_analysis_time_ms.to_string();
+    let timestamp_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let filename_lossy = filename.to_string_lossy();
 
     // Flatten the assessment findings into individual rows, or write a clean summary row
     if assessment.findings.is_empty() {
-        wtr.write_record([
-            &timestamp,
-            &filename_str,
-            &time_ms,
-            &score,
+        wtr.serialize((
+            &timestamp_str,
+            &filename_lossy,
+            analysis_result.total_analysis_time_ms,
+            assessment.score,
             severity,
             "NO_FINDINGS",
             "N/A",
             "No security threats or anomalies detected.",
-        ])?;
+        ))?;
     } else {
         for finding in &assessment.findings {
-            wtr.write_record([
-                &timestamp,
-                &filename_str,
-                &time_ms,
-                &score,
+            wtr.serialize((
+                &timestamp_str,
+                &filename_lossy,
+                analysis_result.total_analysis_time_ms,
+                assessment.score,
                 severity,
                 &finding.indicator,
-                &format!("{:?}", finding.confidence),
+                &finding.confidence,
                 &finding.description,
-            ])?;
+            ))?;
         }
     }
 

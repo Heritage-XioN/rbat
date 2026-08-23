@@ -91,36 +91,37 @@ impl Rule {
     }
 
     /// Evaluates a set of rules against the feature set and returns matching rule metadata.
-    pub fn evaluate(
+    pub fn evaluate<'rule>(
         features: &FeatureSet,
-        rules: &[Self],
+        rules: &'rule [Self],
         needle: &crate::core::types::NeedleIndex,
-    ) -> Vec<RuleMeta> {
+    ) -> Vec<&'rule RuleMeta> {
         rules
             .par_iter()
+            .filter(|rule| !rule.rule.meta.lib.unwrap_or(false))
             .filter(|rule| rule.matches(features, needle))
-            .map(|rule| rule.rule.meta.clone())
+            .map(|rule| &rule.rule.meta)
             .collect()
     }
 }
 
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
-    use crate::core::{RuleCondition, RuleTag};
+    use crate::core::{RuleCondition, RuleTag, disassembler::InstructionInfo};
 
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use ahash::{AHashMap, AHashSet};
+    use rustc_hash::FxHashSet;
 
     #[test]
     fn test_rule_evaluation() {
-        let mut section_entropies = HashMap::new();
-        section_entropies.insert(".text".to_owned(), 7.8);
+        let mut section_entropies = AHashMap::new();
+        section_entropies.insert(".text", 7.8);
 
         let features = FeatureSet {
-            apis: HashSet::from([aho_corasick::PatternID::must(0)]),
-            strings: HashSet::new(),
-            mnemonics: HashSet::new(),
-            section_entropies,
+            apis: FxHashSet::from_iter([aho_corasick::PatternID::must(0)]),
+            strings: AHashSet::new(),
+            section_entropies: &section_entropies,
             has_code_cave: false,
             has_packer_sig: false,
             os: "linux".to_string(),
@@ -179,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_cfg_rules_matching() {
-        use crate::core::types::{BasicBlock, InstructionInfo};
+        use crate::core::types::BasicBlock;
 
         // Create instructions & block representing:
         // SetHandleInformation (call)
@@ -193,18 +194,21 @@ mod tests {
                     address: 0x1000,
                     mnemonic: "mov".into(),
                     op_str: "1 = HANDLE_FLAG_INHERIT".into(),
+                    api_resolution: None,
                     matched: smallvec::SmallVec::new(),
                 },
                 InstructionInfo {
                     address: 0x1005,
                     mnemonic: "call".into(),
                     op_str: "SetHandleInformation".into(),
+                    api_resolution: None,
                     matched: smallvec::SmallVec::new(),
                 },
                 InstructionInfo {
                     address: 0x1010,
                     mnemonic: "call".into(),
                     op_str: "SetHandleInformation".into(),
+                    api_resolution: None,
                     matched: smallvec::SmallVec::new(),
                 },
             ],
@@ -271,11 +275,11 @@ mod tests {
             }
         }
 
+        let empty_entropy = AHashMap::new();
         let features = FeatureSet {
-            apis: HashSet::new(),
-            strings: HashSet::new(),
-            mnemonics: HashSet::new(),
-            section_entropies: HashMap::new(),
+            apis: FxHashSet::default(),
+            strings: AHashSet::new(),
+            section_entropies: &empty_entropy,
             has_code_cave: false,
             has_packer_sig: false,
             os: "Windows".to_owned(),

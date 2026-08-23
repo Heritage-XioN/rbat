@@ -5,7 +5,7 @@
 
 use super::{Asset, RbatError, Result, YaraMatches};
 use crate::{core::SectionRange, utils::section_offset::get_section_for_offset};
-use std::collections::HashMap;
+use ahash::AHashMap;
 use yara::{Compiler, Rules};
 
 /// A handler for loading, compiling, and executing YARA rule scans against in-memory buffers.
@@ -53,10 +53,10 @@ impl YaraHandler {
         compiled_rules: &'buf Rules,
         buffer: &'buf [u8],
         section_ranges: &[SectionRange<'buf>],
-    ) -> Result<HashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
+    ) -> Result<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
         let mut scanner = compiled_rules.scanner()?;
         let results = scanner.scan_mem(buffer)?;
-        let mut yara_result: HashMap<&'buf str, Vec<YaraMatches<'buf>>> = HashMap::new();
+        let mut yara_result: AHashMap<&'buf str, Vec<YaraMatches<'buf>>> = AHashMap::new();
 
         if !results.is_empty() {
             for rule in results {
