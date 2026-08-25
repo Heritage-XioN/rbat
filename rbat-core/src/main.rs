@@ -22,7 +22,8 @@ use rbat::{
         json::generate_json_report,
         pdf::generate_pdf_report,
         rules_cli::{print_rule_example, print_rule_schema, validate_rules_directory},
-        scoring::calculate_risk,
+        scoring::calculate_risk_with,
+        severity::SeverityClassifier,
         terminal_report::print_terminal_report,
     },
 };
@@ -227,7 +228,15 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     // construct featureset and evaluate againsts loaded rules
     let features = rbat::core::features::FeatureSet::from_analysis_result(&analysis_result);
     let matched_rules = rbat::core::Rule::evaluate(&features, &rules, &needle_index);
-    let risk_assessment = calculate_risk(&matched_rules);
+
+    // Build the severity classifier (embedded defaults + optional user overrides)
+    let mut classifier = SeverityClassifier::embedded();
+    if let Some(ref overrides_path) = args.severity_overrides {
+        classifier
+            .merge_from_file(overrides_path)
+            .map_err(|e| color_eyre::eyre::eyre!(e))?;
+    }
+    let risk_assessment = calculate_risk_with(&matched_rules, &classifier);
 
     let elapsed = start_time.elapsed();
     analysis_result.total_analysis_time_ms = elapsed.as_millis();

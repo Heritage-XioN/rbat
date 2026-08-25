@@ -10,6 +10,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use super::{AnalysisProgress, AnalysisResult, Result, RiskAssessment, parser::Parser};
+use crate::utils::scoring::calculate_risk_with;
+use crate::utils::severity::SeverityClassifier;
 use crate::{
     core::{
         AnalysisContext, ParsedBinaryContext, Rule,
@@ -20,8 +22,8 @@ use crate::{
         types::NeedleIndex,
     },
     utils::{
-        flirt::collect_function_entry_points, scoring::calculate_risk,
-        section_offset::build_section_map, stream_error_helper::capture_error_and_cancel,
+        flirt::collect_function_entry_points, section_offset::build_section_map,
+        stream_error_helper::capture_error_and_cancel,
     },
 };
 
@@ -206,7 +208,8 @@ pub fn analyze_batch<'buf>(
     }
     let features = FeatureSet::from_analysis_result(&analysis_result);
     let matched_rules = Rule::evaluate(&features, &rules, &needle_index);
-    let score = calculate_risk(&matched_rules);
+    let classifier = SeverityClassifier::embedded();
+    let score = calculate_risk_with(&matched_rules, &classifier);
 
     analysis_result.total_analysis_time_ms = start_time.elapsed().as_millis();
 
