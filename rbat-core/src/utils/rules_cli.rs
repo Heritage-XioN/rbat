@@ -40,11 +40,9 @@ pub fn print_rule_example() {
     "meta": {
       "name": "privilege_escalation_process_injection",
       "description": "Flags classical process injection sequence: VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread",
-      "mitre_attack": "Privilege Escalation::Process Injection [T1055]",
-      "severity": "Critical",
-      "category": "privilege_escalation",
-      "weight": 80,
       "authors": "RBAT Security Team",
+      "severity": "Critical",
+      "att&ck": "Privilege Escalation::Process Injection [T1055]",
       "tags": ["injection", "process_memory", "remote_thread"]
     },
     "features": [
@@ -63,13 +61,11 @@ pub fn print_rule_example() {
   meta:
     name: privilege_escalation_process_injection
     description: Flags classical process injection sequence VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread
-    mitre_attack:
-      - Privilege Escalation::Process Injection [T1055]
-    severity: Critical
-    category: privilege_escalation
-    weight: 80
     authors:
       - RBAT Security Team
+    severity: Critical
+    att&ck:
+      - Privilege Escalation::Process Injection [T1055]
     tags:
       - injection
       - process_memory
@@ -146,10 +142,14 @@ pub fn print_rule_schema() {
             "description": { "type": "string" },
             "namespace": { "type": "string" },
             "authors": { "type": ["string", "array"] },
-            "mitre_attack": { "type": ["string", "array"] },
+            "scopes": { "type": "object" },
+            "att&ck": { "type": ["string", "array"] },
+            "mbc": { "type": ["string", "array"] },
             "severity": { "type": "string" },
-            "category": { "type": "string" },
-            "weight": { "type": "integer", "minimum": 0, "maximum": 100 }
+            "references": { "type": ["string", "array"] },
+            "tags": { "type": ["string", "array"] },
+            "examples": { "type": ["string", "array"] },
+            "lib": { "type": "boolean" }
           }
         },
         "features": {
@@ -299,10 +299,8 @@ mod tests {
     "meta": {
       "name": "test_rule",
       "description": "test",
-      "mitre_attack": "T1000",
       "severity": "Low",
-      "category": "test",
-      "weight": 10
+      "att&ck": "Defense Evasion::Debugger Evasion [T1622]"
     },
     "features": [
       "code_cave"
@@ -323,10 +321,8 @@ mod tests {
     "meta": {
       "name": "test_rule",
       "description": "test",
-      "mitre_attack": "T1000",
       "severity": "Low",
-      "category": "test",
-      "weight": 10,
+      "att&ck": "T1000",
       "unknown_typo_field": "invalid"
     },
     "features": [
@@ -348,10 +344,8 @@ rule:
   meta:
     name: "capa_process_injection"
     description: "Detects process injection API calls"
-    att&ck: "T1055"
+    att&ck: "Privilege Escalation::Process Injection [T1055]"
     severity: "High"
-    category: "privilege_escalation"
-    weight: 80
   features:
     - and:
         - api: VirtualAllocEx

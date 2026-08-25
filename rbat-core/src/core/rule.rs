@@ -44,7 +44,7 @@ impl Rule {
     pub fn load_embedded() -> Vec<Self> {
         Asset::iter()
             .filter(|p| {
-                (p.starts_with("rules/") || p.starts_with("capa-rules/"))
+                p.starts_with("capa-rules/")
                     && (p.ends_with(".json") || p.ends_with(".yaml") || p.ends_with(".yml"))
                     && !p.contains("/.")
             })
@@ -126,6 +126,7 @@ mod tests {
             has_packer_sig: false,
             os: "linux".to_string(),
             arch: "x86_64".to_string(),
+            binary_format: "elf".to_string(),
             basic_blocks_count: 0,
             has_loop: false,
             max_cyclomatic_complexity: 0,
@@ -140,8 +141,6 @@ mod tests {
                     description: Some("".to_owned()),
                     mitre_attack: Some(crate::utils::rules::StringOrVec::Single("".to_owned())),
                     severity: Some("".to_owned()),
-                    category: Some(String::new()),
-                    weight: Some(0),
                     ..Default::default()
                 },
                 features: vec![RuleCondition::Api {
@@ -158,8 +157,6 @@ mod tests {
                     description: Some("".to_owned()),
                     mitre_attack: Some(crate::utils::rules::StringOrVec::Single("".to_owned())),
                     severity: Some("".to_owned()),
-                    category: Some(String::new()),
-                    weight: Some(0),
                     ..Default::default()
                 },
                 features: vec![RuleCondition::Entropy {
@@ -220,8 +217,6 @@ mod tests {
                 meta: RuleMeta {
                     name: "CfgRule".to_owned(),
                     severity: Some("High".to_owned()),
-                    category: Some("defense_evasion".to_owned()),
-                    weight: Some(40),
                     ..Default::default()
                 },
                 features: vec![
@@ -237,8 +232,6 @@ mod tests {
                 meta: RuleMeta {
                     name: "ScopeRule".to_owned(),
                     severity: Some("Critical".to_owned()),
-                    category: Some("persistence".to_owned()),
-                    weight: Some(90),
                     ..Default::default()
                 },
                 features: vec![RuleCondition::BasicBlockScope {
@@ -284,6 +277,7 @@ mod tests {
             has_packer_sig: false,
             os: "Windows".to_owned(),
             arch: "x86_64".to_owned(),
+            binary_format: "pe".to_owned(),
             basic_blocks_count: 1,
             has_loop: true,
             max_cyclomatic_complexity: 5,
@@ -295,5 +289,35 @@ mod tests {
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].name, "CfgRule");
         assert_eq!(matches[1].name, "ScopeRule");
+    }
+
+    #[test]
+    fn test_format_condition_matching() {
+        let empty_entropy = AHashMap::new();
+        let features = FeatureSet {
+            apis: FxHashSet::default(),
+            strings: AHashSet::new(),
+            section_entropies: &empty_entropy,
+            has_code_cave: false,
+            has_packer_sig: false,
+            os: "windows pe".to_owned(),
+            arch: "x86".to_owned(),
+            binary_format: "pe".to_owned(),
+            basic_blocks_count: 0,
+            has_loop: false,
+            max_cyclomatic_complexity: 0,
+            blocks: Vec::new(),
+        };
+
+        let rule_pe = RuleCondition::Format {
+            format: "pe".to_owned(),
+        };
+        let rule_elf = RuleCondition::Format {
+            format: "elf".to_owned(),
+        };
+        let needle = crate::core::types::NeedleIndex::build_from_rules(&[]);
+
+        assert!(rule_pe.matches(&features, &needle));
+        assert!(!rule_elf.matches(&features, &needle));
     }
 }

@@ -27,6 +27,8 @@ pub struct FeatureSet<'buf> {
     pub os: String,
     /// Mapped CPU architecture string.
     pub arch: String,
+    /// Canonical binary format identifier (`pe`, `elf`, or `macho`).
+    pub binary_format: String,
     // CFG structural fields
     /// The total count of basic blocks.
     pub basic_blocks_count: usize,
@@ -144,14 +146,26 @@ impl<'buf> FeatureSet<'buf> {
             }
         }
 
+        let binary_type = res.metadata.binary_type.to_lowercase();
+        let binary_format = if binary_type.contains("mach") {
+            "macho"
+        } else if binary_type.contains("elf") {
+            "elf"
+        } else if binary_type.contains("pe") {
+            "pe"
+        } else {
+            "unknown"
+        };
+
         Self {
             apis,
             strings,
             section_entropies: &res.section_entropy,
             has_code_cave: !res.code_cave.is_empty(),
             has_packer_sig: !res.packer_signatures.is_empty(),
-            os: res.metadata.binary_type.to_lowercase(),
+            os: binary_type,
             arch: res.metadata.architecture_name().to_lowercase(),
+            binary_format: binary_format.to_string(),
             basic_blocks_count,
             has_loop,
             max_cyclomatic_complexity,

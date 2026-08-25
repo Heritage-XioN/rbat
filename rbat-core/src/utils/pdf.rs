@@ -4,7 +4,7 @@
 //! into a stylized HTML template (using `askama`) and generates a PDF using the `fullbleed` printing engine.
 
 use super::viz::generate_entropy_heatmap;
-use crate::core::{AnalysisResult, Confidence, RbatError, Result, RiskAssessment};
+use crate::core::{AnalysisResult, RbatError, Result, RiskAssessment, SeverityClass};
 use askama::Template;
 use chrono::Local;
 use std::fs;
@@ -40,8 +40,9 @@ struct TechnicalFinding {
 /// Contextual data for a specific security finding in the report.
 struct FindingContext {
     indicator: String,
-    confidence: String,
-    confidence_class: String,
+    class: String,
+    class_label: String,
+    mappings: String,
     description: String,
 }
 
@@ -79,17 +80,25 @@ pub fn generate_pdf_report(
         .findings
         .iter()
         .map(|f| {
-            let conf_str = format!("{:?}", f.confidence);
-            let confidence_class = match f.confidence {
-                Confidence::Critical => "critical",
-                Confidence::High => "high",
-                Confidence::Medium => "medium",
-                Confidence::Low => "low",
+            let class = match f.severity_class {
+                SeverityClass::Critical => "critical",
+                SeverityClass::High => "high",
+                SeverityClass::Medium => "medium",
+                SeverityClass::Low => "low",
+                SeverityClass::Capability => "capability",
+                SeverityClass::Informational => "informational",
             };
+            let mut mappings = f.attack_ids.clone();
+            mappings.extend(f.mbc_ids.iter().cloned());
             FindingContext {
                 indicator: f.indicator.clone(),
-                confidence: conf_str.to_uppercase(),
-                confidence_class: confidence_class.to_string(),
+                class: class.to_string(),
+                class_label: f.severity_class.label().to_string(),
+                mappings: if mappings.is_empty() {
+                    "—".to_string()
+                } else {
+                    mappings.join(", ")
+                },
                 description: f.description.clone(),
             }
         })

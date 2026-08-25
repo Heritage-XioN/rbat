@@ -10,7 +10,8 @@ use std::path::Path;
 /// Generates a SOC-ready CSV report of the analysis findings.
 ///
 /// This format is optimized for ingestion into SIEM or other security orchestration tools.
-/// Each finding is exported as an individual row with its associated risk score and severity.
+/// Each finding is exported as an individual row with its associated risk score, severity
+/// class, and ATT&CK/MBC mappings.
 pub fn generate_csv_report(
     filename: &Path,
     assessment: &RiskAssessment,
@@ -26,8 +27,11 @@ pub fn generate_csv_report(
         "Total_Time_ms",
         "Risk_Score",
         "Severity",
-        "Indicator_Type",
-        "Confidence",
+        "Class",
+        "Indicator",
+        "ATT&CK_IDs",
+        "MBC_IDs",
+        "Category",
         "Description",
     ])?;
 
@@ -37,28 +41,34 @@ pub fn generate_csv_report(
 
     // Flatten the assessment findings into individual rows, or write a clean summary row
     if assessment.findings.is_empty() {
-        wtr.serialize((
+        wtr.write_record([
             &timestamp_str,
-            &filename_lossy,
-            analysis_result.total_analysis_time_ms,
-            assessment.score,
-            severity,
+            filename_lossy.as_ref(),
+            &analysis_result.total_analysis_time_ms.to_string(),
+            &assessment.score.to_string(),
+            severity.as_str(),
             "NO_FINDINGS",
             "N/A",
+            "",
+            "",
+            "",
             "No security threats or anomalies detected.",
-        ))?;
+        ])?;
     } else {
         for finding in &assessment.findings {
-            wtr.serialize((
-                &timestamp_str,
-                &filename_lossy,
-                analysis_result.total_analysis_time_ms,
-                assessment.score,
-                severity,
-                &finding.indicator,
-                &finding.confidence,
-                &finding.description,
-            ))?;
+            wtr.write_record([
+                timestamp_str.as_str(),
+                filename_lossy.as_ref(),
+                analysis_result.total_analysis_time_ms.to_string().as_str(),
+                assessment.score.to_string().as_str(),
+                severity.as_str(),
+                finding.severity_class.label(),
+                finding.indicator.as_str(),
+                finding.attack_ids.join("|").as_str(),
+                finding.mbc_ids.join("|").as_str(),
+                finding.category.as_deref().unwrap_or(""),
+                finding.description.as_str(),
+            ])?;
         }
     }
 
@@ -71,6 +81,7 @@ pub fn generate_csv_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::types::SeverityClass;
     use tempfile::tempdir;
 
     #[test]
@@ -79,15 +90,29 @@ mod tests {
         let out_path = dir.path().join("test_report.csv");
 
         let assessment = RiskAssessment {
-            score: 85,
+            score: 44,
             severity: "Suspicious".to_string(),
-            findings: vec![],
+            findings: vec![crate::core::Finding {
+                indicator: "execute anti-debugging instructions".to_string(),
+                description: "Found anti-debug checks".to_string(),
+                severity_class: SeverityClass::High,
+                attack_ids: vec!["T1622".to_string()],
+                mbc_ids: vec![],
+                category: Some("discovery".to_string()),
+                namespace: None,
+            }],
             recommendations: vec![],
+            ..Default::default()
         };
 
         let analysis = crate::core::AnalysisResult::default();
         let result = generate_csv_report(Path::new("test_bin"), &assessment, &analysis, &out_path);
         assert!(result.is_ok());
         assert!(out_path.exists());
+
+        let contents = std::fs::read_to_string(&out_path).unwrap();
+        assert!(contents.contains("ATT&CK_IDs"));
+        assert!(contents.contains("HIGH"));
+        assert!(contents.contains("T1622"));
     }
 }
