@@ -15,6 +15,7 @@ pub mod rules;
 pub mod rules_cli;
 pub mod scoring;
 pub mod section_offset;
+pub mod severity;
 pub mod stream_error_helper;
 pub mod terminal_report;
 /// Module containing helper functions specifically used for unit testing.

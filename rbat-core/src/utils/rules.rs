@@ -24,25 +24,15 @@ impl StringOrVec {
         }
     }
 
-    /// Returns the first string or an empty string.
-    pub fn first_string(&self) -> String {
-        match self {
-            Self::Single(s) => s.clone(),
-            Self::List(v) => v.first().cloned().unwrap_or_default(),
-        }
-    }
-
-    /// Extracts MITRE ATT&CK technique ID (e.g. `"T1059.003"`) from formatted strings like
+    /// Extracts a MITRE ATT&CK technique ID from a single formatted string such as
     /// `"Execution::Command Shell [T1059.003]"` or raw `"T1059.003"`.
-    #[allow(clippy::collapsible_if)]
-    pub fn extract_mitre_id(&self) -> String {
-        let first = self.first_string();
-        if let Some(start) = first.find('[') {
-            if let Some(end) = first[start..].find(']') {
-                return first[start + 1..start + end].to_string();
-            }
+    pub fn extract_mitre_id_from(entry: &str) -> String {
+        if let Some(start) = entry.find('[')
+            && let Some(end) = entry[start..].find(']')
+        {
+            return entry[start + 1..start + end].to_string();
         }
-        first
+        entry.to_string()
     }
 }
 

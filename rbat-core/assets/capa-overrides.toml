@@ -1,0 +1,68 @@
+# RBAT Severity Classification Overrides
+#
+# This table controls how matched capa rules are classified for risk scoring and
+# reporting. It is embedded in the binary and consulted by the severity engine.
+#
+# Classification precedence (highest wins):
+#   1. Explicit `severity` field on the rule itself
+#   2. Per-rule entry under [overrides]        (exact rule-name match)
+#   3. Namespace root under [namespace_defaults]
+#   4. Built-in ATT&CK tactic / MBC objective inference
+#
+# Valid class values: informational, capability, low, medium, high, critical
+#   informational - build/compiler artifacts; never counted toward risk
+#   capability    - ordinary behavior common in benign software; never counted
+#   low..critical - genuine threat indicators weighted into the noisy-OR score
+
+[namespace_defaults]
+compiler = "informational"
+linker = "informational"
+runtime = "informational"
+source = "informational"
+
+[overrides]
+# Process / thread management
+"create thread" = "capability"
+"terminate process" = "capability"
+"check for thread debugger" = "medium"
+
+# Command line & console
+"accept command line arguments" = "capability"
+"execute command" = "capability"
+"set current directory" = "capability"
+"get current directory" = "capability"
+
+# File system operations
+"create directory" = "capability"
+"delete directory" = "capability"
+"delete file" = "capability"
+"move file" = "capability"
+"copy file" = "capability"
+"get common file path" = "capability"
+"get file attributes" = "capability"
+"set file attributes" = "capability"
+"read file" = "capability"
+"write file" = "capability"
+"check if file exists" = "capability"
+
+# Networking (client-side)
+"resolve DNS" = "capability"
+"connect socket" = "capability"
+"send data on socket" = "capability"
+"receive data on socket" = "capability"
+"create socket" = "capability"
+"set socket configuration" = "capability"
+"get local IPv4 addresses" = "capability"
+
+# System discovery
+"get hostname" = "capability"
+"get geographical location" = "capability"
+"get number of processors" = "capability"
+"get memory resource information" = "capability"
+"access the Windows event log" = "capability"
+"query or enumerate registry value" = "capability"
+"get user security identifier" = "capability"
+
+# Cryptography primitives
+"generate random numbers via RtlGenRandom" = "low"
+"contain a thread local storage (.tls) section" = "capability"
