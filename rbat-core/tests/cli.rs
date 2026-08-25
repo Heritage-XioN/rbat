@@ -55,7 +55,7 @@ fn test_cli_rules_schema() {
 #[test]
 fn test_cli_rules_validate() {
     let mut rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    rules_dir.push("assets/rules");
+    rules_dir.push("assets/capa-rules");
 
     let mut cmd = Command::cargo_bin("rbat").unwrap();
     cmd.arg("rules")

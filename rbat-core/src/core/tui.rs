@@ -3,7 +3,7 @@
 //! This module implements the ratatui-based Terminal User Interface (TUI) dashboard.
 //! It displays a multi-tab view showing general overview metadata, security findings, section entropy, and recommendations.
 
-use super::{AnalysisResult, Confidence, RiskAssessment};
+use super::{AnalysisResult, RiskAssessment, SeverityClass};
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
     DefaultTerminal, Frame,
@@ -40,13 +40,14 @@ mod palette {
     pub const ACCENT_DIM: Color = Color::Rgb(168, 85, 247); // chart-2 / purple-500 #a855f7
     pub const PINK: Color = Color::Rgb(244, 114, 182); // gradient endpoint #f472b6
 
-    // Status / severity
-    pub const DANGER: Color = Color::Rgb(239, 68, 68); // --rbat-high       #ef4444
-    pub const DANGER_LIGHT: Color = Color::Rgb(248, 113, 113); // red-400          #f87171
-    pub const WARNING: Color = Color::Rgb(245, 158, 11); // --rbat-medium     #f59e0b
-    pub const WARNING_LIGHT: Color = Color::Rgb(251, 191, 36); // amber-400       #fbbf24
+    // Status / severity (progressive scale: green -> amber -> orange -> red)
     pub const SUCCESS: Color = Color::Rgb(34, 197, 94); // --rbat-low        #22c55e
     pub const SUCCESS_LIGHT: Color = Color::Rgb(74, 222, 128); // green-400       #4ade80
+    pub const WARNING: Color = Color::Rgb(245, 158, 11); // --rbat-medium     #f59e0b
+    pub const WARNING_LIGHT: Color = Color::Rgb(251, 191, 36); // amber-400       #fbbf24
+    pub const ORANGE: Color = Color::Rgb(249, 115, 22); // orange-500        #f97316
+    pub const DANGER: Color = Color::Rgb(239, 68, 68); // --rbat-high       #ef4444
+    pub const DANGER_LIGHT: Color = Color::Rgb(248, 113, 113); // red-400          #f87171
 }
 
 /// Tabs representing the different dashboard views.
@@ -469,12 +470,10 @@ impl<'buf> App<'buf> {
             .render(left_chunks[0], buf);
 
         let score = self.assessment.score as f64 / 100.0;
-        let gauge_color = if score > 0.75 {
-            palette::DANGER
-        } else if score > 0.4 {
-            palette::WARNING
-        } else {
-            palette::SUCCESS
+        let gauge_color = match self.assessment.severity.as_str() {
+            "Safe" => palette::SUCCESS,
+            "Suspicious" => palette::WARNING,
+            _ => palette::DANGER,
         };
 
         Gauge::default()
@@ -521,19 +520,26 @@ impl<'buf> App<'buf> {
             .findings
             .iter()
             .map(|f| {
-                let color = match f.confidence {
-                    Confidence::Critical => palette::DANGER,
-                    Confidence::High => palette::DANGER_LIGHT,
-                    Confidence::Medium => palette::WARNING_LIGHT,
-                    Confidence::Low => palette::SUCCESS_LIGHT,
+                let color = match f.severity_class {
+                    SeverityClass::Critical => palette::DANGER,
+                    SeverityClass::High => palette::ORANGE,
+                    SeverityClass::Medium => palette::WARNING,
+                    SeverityClass::Low => palette::SUCCESS_LIGHT,
+                    SeverityClass::Capability => palette::TEXT_SECONDARY,
+                    SeverityClass::Informational => palette::MUTED,
                 };
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("[{:?}] ", f.confidence).to_uppercase(),
-                        Style::default().fg(color).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(&f.indicator),
-                ]))
+                let mut spans = vec![Span::styled(
+                    format!("[{}] ", f.severity_class.label()),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                )];
+                if let Some(attack_id) = f.attack_ids.first() {
+                    spans.push(Span::styled(
+                        format!("{attack_id} "),
+                        Style::default().fg(palette::ACCENT_DIM),
+                    ));
+                }
+                spans.push(Span::raw(&f.indicator));
+                ListItem::new(Line::from(spans))
             })
             .collect();
 

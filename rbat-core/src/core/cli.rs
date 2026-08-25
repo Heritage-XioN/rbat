@@ -94,6 +94,10 @@ pub struct AnalyzeArgs {
     /// Optional directory containing custom FLIRT signatures (.sig or .pat files).
     #[arg(short, long)]
     pub signatures: Option<PathBuf>,
+    /// Optional TOML file overriding severity classifications for rule names or
+    /// namespace roots (merged on top of the embedded `capa-overrides.toml`).
+    #[arg(long)]
+    pub severity_overrides: Option<PathBuf>,
     /// Output the Control Flow Graph (CFG) in Graphviz DOT format to stdout.
     #[arg(long)]
     pub cfg: bool,

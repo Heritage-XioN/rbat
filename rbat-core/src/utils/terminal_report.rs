@@ -3,57 +3,181 @@
 //! Formats and renders a high-contrast, colorized terminal summary report
 //! to stdout following the RBAT cyber-noir design system palette.
 
-use crate::core::{AnalysisResult, Confidence, RiskAssessment};
-use crossterm::style::{Color, Stylize};
+use crate::core::{AnalysisResult, RiskAssessment, SeverityClass};
+use chrono::Local;
+use comfy_table::{
+    Attribute, Cell, Color, ContentArrangement, Table, presets::UTF8_FULL_CONDENSED,
+};
+use crossterm::style::{Color as TermColor, Stylize};
 use std::path::Path;
 
 // Palette definitions aligned with Next.js client & TUI palette
-const COLOR_ACCENT: Color = Color::Rgb {
+const COLOR_ACCENT: TermColor = TermColor::Rgb {
     r: 192,
     g: 132,
     b: 252,
 }; // #c084fc
-const COLOR_MUTED: Color = Color::Rgb {
+const COLOR_MUTED: TermColor = TermColor::Rgb {
     r: 156,
     g: 163,
     b: 175,
 }; // #9ca3af
-const COLOR_BORDER: Color = Color::Rgb {
+const COLOR_BORDER: TermColor = TermColor::Rgb {
     r: 60,
     g: 64,
     b: 110,
 }; // Indigo border
 
-const COLOR_DANGER: Color = Color::Rgb {
+const COLOR_DANGER: TermColor = TermColor::Rgb {
     r: 239,
     g: 68,
     b: 68,
 }; // #ef4444
-const COLOR_DANGER_LIGHT: Color = Color::Rgb {
-    r: 248,
-    g: 113,
-    b: 113,
-}; // #f87171
-const COLOR_WARNING: Color = Color::Rgb {
+const COLOR_WARNING: TermColor = TermColor::Rgb {
     r: 245,
     g: 158,
     b: 11,
 }; // #f59e0b
-const COLOR_WARNING_LIGHT: Color = Color::Rgb {
+const COLOR_WARNING_LIGHT: TermColor = TermColor::Rgb {
     r: 251,
     g: 191,
     b: 36,
 }; // #fbbf24
-const COLOR_SUCCESS: Color = Color::Rgb {
+const COLOR_SUCCESS: TermColor = TermColor::Rgb {
     r: 34,
     g: 197,
     b: 94,
 }; // #22c55e
-const COLOR_SUCCESS_LIGHT: Color = Color::Rgb {
+const COLOR_SUCCESS_LIGHT: TermColor = TermColor::Rgb {
     r: 74,
     g: 222,
     b: 128,
 }; // #4ade80
+
+/// Maps a [`SeverityClass`] to its terminal badge color following the
+/// progressive scale: green (low) → amber (medium) → orange (high) → red (critical).
+fn class_color(class: SeverityClass) -> Color {
+    match class {
+        SeverityClass::Critical => Color::Rgb {
+            r: 239,
+            g: 68,
+            b: 68,
+        },
+        SeverityClass::High => Color::Rgb {
+            r: 249,
+            g: 115,
+            b: 22,
+        },
+        SeverityClass::Medium => Color::Rgb {
+            r: 245,
+            g: 158,
+            b: 11,
+        },
+        SeverityClass::Low => Color::Rgb {
+            r: 74,
+            g: 222,
+            b: 128,
+        },
+        SeverityClass::Capability => Color::Rgb {
+            r: 156,
+            g: 163,
+            b: 175,
+        },
+        SeverityClass::Informational => Color::Rgb {
+            r: 120,
+            g: 128,
+            b: 140,
+        },
+    }
+}
+
+/// Builds the colorized findings table (`CLASS | CAPABILITY | ATT&CK | MBC | NAMESPACE`).
+fn build_findings_table(assessment: &RiskAssessment) -> Table {
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL_CONDENSED)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("CLASS").fg(Color::Rgb {
+                r: 192,
+                g: 132,
+                b: 252,
+            }),
+            Cell::new("CAPABILITY").fg(Color::Rgb {
+                r: 192,
+                g: 132,
+                b: 252,
+            }),
+            Cell::new("ATT&CK").fg(Color::Rgb {
+                r: 192,
+                g: 132,
+                b: 252,
+            }),
+            Cell::new("MBC").fg(Color::Rgb {
+                r: 192,
+                g: 132,
+                b: 252,
+            }),
+            Cell::new("NAMESPACE").fg(Color::Rgb {
+                r: 192,
+                g: 132,
+                b: 252,
+            }),
+        ]);
+
+    for finding in &assessment.findings {
+        let class_cell = Cell::new(finding.severity_class.label())
+            .fg(class_color(finding.severity_class))
+            .add_attribute(Attribute::Bold);
+        let attack_ids = if finding.attack_ids.is_empty() {
+            "—".to_string()
+        } else {
+            finding.attack_ids.join(", ")
+        };
+        let mbc_ids = if finding.mbc_ids.is_empty() {
+            "—".to_string()
+        } else {
+            finding.mbc_ids.join(", ")
+        };
+        let namespace = finding.namespace.as_deref().unwrap_or("—").to_string();
+
+        table.add_row(vec![
+            class_cell,
+            Cell::new(&finding.indicator),
+            Cell::new(attack_ids),
+            Cell::new(mbc_ids),
+            Cell::new(namespace).fg(Color::Rgb {
+                r: 156,
+                g: 163,
+                b: 175,
+            }),
+        ]);
+    }
+
+    table
+}
+
+/// Renders a one-line per-class tally such as `2 high · 1 medium · 14 capabilities`.
+fn format_summary_line(counts: &crate::core::FindingCounts) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let push = |parts: &mut Vec<String>, n: u32, singular: &str, plural: &str| {
+        if n > 0 {
+            parts.push(format!("{n} {}", if n == 1 { singular } else { plural }));
+        }
+    };
+    let high_total = counts.critical + counts.high;
+    push(&mut parts, high_total, "high", "high");
+    push(&mut parts, counts.medium, "medium", "medium");
+    push(&mut parts, counts.low, "low", "low");
+    push(&mut parts, counts.capability, "capability", "capabilities");
+    push(
+        &mut parts,
+        counts.informational,
+        "informational",
+        "informational",
+    );
+    parts.join(" · ")
+}
 
 /// Prints a stylized CLI summary report to stdout.
 pub fn print_terminal_report(
@@ -108,12 +232,10 @@ pub fn print_terminal_report(
     let filled = ((score as usize) * bar_width) / 100;
     let empty = bar_width.saturating_sub(filled);
 
-    let (score_color, severity_badge) = if score >= 75 {
-        (COLOR_DANGER, "CRITICAL RISK".with(COLOR_DANGER).bold())
-    } else if score >= 40 {
-        (COLOR_WARNING, "MEDIUM RISK".with(COLOR_WARNING).bold())
-    } else {
-        (COLOR_SUCCESS, "LOW RISK".with(COLOR_SUCCESS).bold())
+    let (score_color, severity_badge) = match assessment.severity.as_str() {
+        "Safe" => (COLOR_SUCCESS, "SAFE".with(COLOR_SUCCESS).bold()),
+        "Suspicious" => (COLOR_WARNING, "SUSPICIOUS".with(COLOR_WARNING).bold()),
+        _ => (COLOR_DANGER, "MALICIOUS".with(COLOR_DANGER).bold()),
     };
 
     let progress_bar = format!(
@@ -132,10 +254,10 @@ pub fn print_terminal_report(
 
     println!("{}", line_sep);
 
-    // 3. Security Findings
+    // 3. Matched Rules & Capabilities table
     println!(
         " {}",
-        "MATCHED THREAT RULES & FINDINGS".with(COLOR_ACCENT).bold()
+        "MATCHED RULES & CAPABILITIES".with(COLOR_ACCENT).bold()
     );
 
     if assessment.findings.is_empty() {
@@ -144,20 +266,23 @@ pub fn print_terminal_report(
             "✔ No security threats or anomalies detected.".with(COLOR_SUCCESS_LIGHT)
         );
     } else {
-        for finding in &assessment.findings {
-            let (badge, badge_color) = match finding.confidence {
-                Confidence::Critical => ("[CRITICAL]", COLOR_DANGER),
-                Confidence::High => ("[HIGH]    ", COLOR_DANGER_LIGHT),
-                Confidence::Medium => ("[MEDIUM]  ", COLOR_WARNING_LIGHT),
-                Confidence::Low => ("[LOW]     ", COLOR_SUCCESS_LIGHT),
+        println!("{}", build_findings_table(assessment));
+        let summary = format_summary_line(&assessment.finding_counts);
+        if !summary.is_empty() {
+            let tinted = if assessment.finding_counts.indicator_count() > 0 {
+                summary.with(COLOR_WARNING_LIGHT)
+            } else {
+                summary.with(COLOR_SUCCESS_LIGHT)
             };
-
-            println!(
-                "  {} {}",
-                badge.with(badge_color).bold(),
-                finding.indicator.as_str().bold()
-            );
+            println!("  {}", tinted);
         }
+        let analyzed_at = Local::now().format("%Y-%m-%d %H:%M:%S");
+        println!(
+            "  {}",
+            format!("Analyzed {analyzed_at} · override classes via --severity-overrides")
+                .with(COLOR_MUTED)
+                .italic()
+        );
     }
 
     // 4. Generated Output Files (if any)
@@ -199,7 +324,7 @@ pub fn print_terminal_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{BinaryMetadata, Finding};
+    use crate::core::types::{BinaryMetadata, CategoryScore, Finding, FindingCounts};
 
     #[test]
     fn test_print_terminal_report_runs_without_panic() {
@@ -213,15 +338,41 @@ mod tests {
         };
 
         let assessment = RiskAssessment {
-            score: 85,
-            severity: "CRITICAL".to_string(),
-            findings: vec![Finding {
-                indicator: "Code cave detected".to_string(),
-                description: "Found sequence of NOPs".to_string(),
-                confidence: Confidence::Critical,
-                weight: 85,
+            score: 44,
+            severity: "Suspicious".to_string(),
+            findings: vec![
+                Finding {
+                    indicator: "execute anti-debugging instructions".to_string(),
+                    description: "Found anti-debug checks".to_string(),
+                    severity_class: SeverityClass::High,
+                    attack_ids: vec!["T1622".to_string()],
+                    mbc_ids: vec!["B0001.007".to_string()],
+                    category: Some("discovery".to_string()),
+                    namespace: Some("anti-analysis/anti-debugging".to_string()),
+                },
+                Finding {
+                    indicator: "create directory".to_string(),
+                    description: "Creates directories".to_string(),
+                    severity_class: SeverityClass::Capability,
+                    attack_ids: vec![],
+                    mbc_ids: vec![],
+                    category: None,
+                    namespace: Some("host-interaction/file-system".to_string()),
+                },
+            ],
+            recommendations: vec!["Flagged for manual review.".to_string()],
+            category_breakdown: vec![CategoryScore {
+                category: "discovery".to_string(),
+                score: 22,
             }],
-            recommendations: vec!["Isolate sample".to_string()],
+            finding_counts: FindingCounts {
+                critical: 0,
+                high: 1,
+                medium: 0,
+                low: 0,
+                capability: 1,
+                informational: 0,
+            },
         };
 
         let dummy_path = Path::new("test_sample.elf");
@@ -229,5 +380,23 @@ mod tests {
 
         // Ensure rendering does not panic
         print_terminal_report(dummy_path, &result, &assessment, &dummy_reports);
+    }
+
+    #[test]
+    fn test_summary_line_formatting() {
+        let counts = FindingCounts {
+            critical: 0,
+            high: 2,
+            medium: 0,
+            low: 1,
+            capability: 14,
+            informational: 3,
+        };
+        assert_eq!(
+            format_summary_line(&counts),
+            "2 high · 1 low · 14 capabilities · 3 informational"
+        );
+
+        assert_eq!(format_summary_line(&FindingCounts::default()), "");
     }
 }

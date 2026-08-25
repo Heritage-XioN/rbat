@@ -231,7 +231,7 @@ code {
     font-size: 12px;
 }
 
-/* Confidence Badges */
+/* Severity Class Badges */
 .badge {
     display: inline-block;
     padding: 3px 8px;
@@ -242,10 +242,16 @@ code {
     text-transform: uppercase;
 }
 
-.badge.critical, .badge.high {
+.badge.critical {
     background-color: #fef2f2;
     color: #dc2626;
     border: 1px solid #fca5a5;
+}
+
+.badge.high {
+    background-color: #fff7ed;
+    color: #ea580c;
+    border: 1px solid #fdba74;
 }
 
 .badge.medium {
@@ -258,4 +264,10 @@ code {
     background-color: #f0fdf4;
     color: #16a34a;
     border: 1px solid #86efac;
+}
+
+.badge.capability, .badge.informational {
+    background-color: #f8fafc;
+    color: #64748b;
+    border: 1px solid #cbd5e1;
 }
