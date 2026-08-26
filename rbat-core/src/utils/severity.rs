@@ -5,7 +5,9 @@
 //! 1. Explicit `severity` field on the rule (custom/user-authored rules win)
 //! 2. Per-rule overrides from the TOML table (`assets/capa-overrides.toml` or a user file)
 //! 3. Namespace-root defaults from the same table (e.g. `compiler/` → Informational)
-//! 4. Built-in ATT&CK tactic / MBC objective inference
+//! 4. Built-in ATT&CK tactic / MBC objective inference — with a demotion for pure
+//!    cryptographic primitives (`data-manipulation` namespace + `Cryptography`
+//!    MBC objectives only), whose presence is ubiquitous in benign software
 //!
 //! The TOML table ships embedded but can be extended at runtime via
 //! [`SeverityClassifier::merge_from_file`], letting operators retune classifications
@@ -53,6 +55,14 @@ const HIGH_THREAT_TACTICS: &[&str] = &[
 
 /// Tactics commonly exercised by legitimate software; only moderately indicative.
 const MEDIUM_THREAT_TACTICS: &[&str] = &["persistence", "command_and_control", "execution"];
+
+/// MBC objective prefixes describing neutral cryptographic primitives. Usage of
+/// hardware/SIMD crypto instructions (AES-NI, SHA extensions) is ubiquitous in
+/// benign software, so such rules are demoted unless paired with evasion context.
+const NEUTRAL_CRYPTO_OBJECTIVE: &str = "cryptography";
+
+/// Namespace root under which neutral cryptographic primitive rules live.
+const CRYPTO_NAMESPACE_ROOT: &str = "data-manipulation";
 
 /// Raw deserialized shape of the TOML override table.
 #[derive(Debug, Default, Deserialize)]
@@ -161,6 +171,27 @@ fn infer_from_mappings(rule: &RuleMeta) -> SeverityClass {
     }
 
     let tactics = attack_tactics(rule);
+
+    // Cryptographic primitives (encrypt/decrypt/hash via AES-NI, SHA extensions,
+    // generic implementations...) are ubiquitous in benign software. When the rule
+    // lives under `data-manipulation` and its MBC mapping is purely cryptographic,
+    // downgrade even if ATT&CK labels it Defense Evasion (T1027/T1140): primitive
+    // usage alone is weak evidence of hostile intent.
+    let objectives = mbc_objectives(rule);
+    let is_pure_crypto_primitive = namespace_root_is(rule, CRYPTO_NAMESPACE_ROOT)
+        && !objectives.is_empty()
+        && objectives
+            .iter()
+            .all(|o| o.starts_with(NEUTRAL_CRYPTO_OBJECTIVE))
+        // Defense Evasion alone (T1027/T1140-style obfuscation mappings) still
+        // qualifies for the demotion; any other threat tactic blocks it.
+        && tactics
+            .iter()
+            .all(|t| t == "defense_evasion");
+    if is_pure_crypto_primitive {
+        return SeverityClass::Low;
+    }
+
     if tactics
         .iter()
         .any(|t| HIGH_THREAT_TACTICS.contains(&t.as_str()))
@@ -369,6 +400,98 @@ mod tests {
         let classifier = SeverityClassifier::embedded();
         assert_eq!(classifier.classify(&high), SeverityClass::High);
         assert_eq!(classifier.classify(&med), SeverityClass::Medium);
+    }
+
+    fn crypto_primitive_rule(namespace: &str, mitre: &str) -> RuleMeta {
+        let mut r = rule("encrypt data using AES via x86 extensions", Some(namespace));
+        r.mbc = Some(StringOrVec::Single(
+            "Cryptography::Encrypt Data [C0027.001]".to_string(),
+        ));
+        r.mitre_attack = Some(StringOrVec::Single(mitre.to_string()));
+        r
+    }
+
+    #[test]
+    fn test_pure_crypto_primitive_demoted_to_low() {
+        // ffmpeg-style case: AES-NI usage mapped to Defense Evasion (T1027/T1140)
+        // is primitive usage, not evasion evidence.
+        let classifier = SeverityClassifier::embedded();
+        assert_eq!(
+            classifier.classify(&crypto_primitive_rule(
+                "data-manipulation/encryption/aes",
+                "Defense Evasion::Obfuscated Files or Information [T1027]"
+            )),
+            SeverityClass::Low
+        );
+        assert_eq!(
+            classifier.classify(&crypto_primitive_rule(
+                "data-manipulation/encryption/aes",
+                "Defense Evasion::Deobfuscate/Decode Files or Information [T1140]"
+            )),
+            SeverityClass::Low
+        );
+    }
+
+    #[test]
+    fn test_crypto_with_anti_analysis_context_stays_high() {
+        let mut r = crypto_primitive_rule(
+            "data-manipulation/encryption/aes",
+            "Defense Evasion::Obfuscated Files or Information [T1027]",
+        );
+        r.namespace = Some("data-manipulation/encryption/aes".to_string());
+        // Pairing with an anti-analysis objective overrides the demotion.
+        r.mbc = Some(StringOrVec::List(vec![
+            "Anti-Static Analysis::Executable Code Obfuscation [B0032]".to_string(),
+            "Cryptography::Encrypt Data [C0027.001]".to_string(),
+        ]));
+
+        assert_eq!(
+            SeverityClassifier::embedded().classify(&r),
+            SeverityClass::High
+        );
+    }
+
+    #[test]
+    fn test_crypto_outside_data_manipulation_namespace_unchanged() {
+        // Same mapping shape, but living under communication/c2 keeps the
+        // tactic-ladder verdict (High).
+        let classifier = SeverityClassifier::embedded();
+        assert_eq!(
+            classifier.classify(&crypto_primitive_rule(
+                "communication/c2/encryption",
+                "Defense Evasion::Obfuscated Files or Information [T1027]"
+            )),
+            SeverityClass::High
+        );
+    }
+
+    #[test]
+    fn test_crypto_with_high_threat_tactic_not_demoted() {
+        // Crypto mapped to Credential Access is exfiltration-adjacent, not a
+        // neutral primitive — ladder verdict stands.
+        let classifier = SeverityClassifier::embedded();
+        assert_eq!(
+            classifier.classify(&crypto_primitive_rule(
+                "data-manipulation/encryption/aes",
+                "Credential Access::Credentials from Password Stores [T1555]"
+            )),
+            SeverityClass::High
+        );
+    }
+
+    #[test]
+    fn test_crypto_without_mbc_mapping_not_demoted() {
+        // No explicit Cryptography objective → policy does not fire; bare
+        // defense_evasion tactic still yields High via the ladder.
+        let mut r = rule("obfuscate payload", Some("data-manipulation/encryption"));
+        r.mitre_attack = Some(StringOrVec::Single(
+            "Defense Evasion::Obfuscated Files or Information [T1027]".to_string(),
+        ));
+
+        assert_eq!(
+            SeverityClassifier::embedded().classify(&r),
+            SeverityClass::High
+        );
     }
 
     #[test]

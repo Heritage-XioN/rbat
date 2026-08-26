@@ -352,6 +352,73 @@ mod tests {
     }
 
     #[test]
+    fn test_iced_backend_ffmpeg_style_profile_is_suspicious_not_malicious() {
+        // Regression: the iced backend surfaces AES-NI + anti-debug instruction
+        // rules on ffmpeg. The crypto primitives must demote to Low, leaving a
+        // single High (rdtsc anti-debug) → ~31% Suspicious, never Malicious.
+        // Single High indicator: rdtsc-based anti-debugging. Classification runs
+        // through the full inference chain (anti-analysis MBC objective → High).
+        let high_rule = RuleMeta {
+            name: "execute anti-debugging instructions".to_string(),
+            namespace: Some("anti-analysis/anti-debugging/debugger-detection".to_string()),
+            mbc: Some(crate::utils::rules::StringOrVec::Single(
+                "Anti-Behavioral Analysis::Debugger Detection::Anti-debugging Instructions [B0001.034]"
+                    .to_string(),
+            )),
+            ..Default::default()
+        };
+
+        let aes_rule = |mitre: &str| {
+            let mut r = RuleMeta {
+                name: "AES via x86 extensions".to_string(),
+                namespace: Some("data-manipulation/encryption/aes".to_string()),
+                mbc: Some(crate::utils::rules::StringOrVec::Single(
+                    "Cryptography::Encrypt Data [C0027.001]".to_string(),
+                )),
+                ..Default::default()
+            };
+            r.mitre_attack = Some(crate::utils::rules::StringOrVec::Single(mitre.to_string()));
+            r
+        };
+
+        let ioctl = RuleMeta {
+            name: "interact with driver via IOCTL".to_string(),
+            ..Default::default()
+        };
+
+        let capabilities: Vec<RuleMeta> = [
+            "accept command line arguments",
+            "connect socket",
+            "send data on socket",
+            "receive data on socket",
+            "resolve DNS",
+        ]
+        .iter()
+        .map(|name| RuleMeta {
+            name: (*name).to_string(),
+            ..Default::default()
+        })
+        .collect();
+
+        let rules: Vec<RuleMeta> = std::iter::once(high_rule)
+            .chain([
+                aes_rule("Defense Evasion::Obfuscated Files or Information [T1027]"),
+                aes_rule("Defense Evasion::Deobfuscate/Decode Files or Information [T1140]"),
+                ioctl,
+            ])
+            .chain(capabilities)
+            .collect();
+        let refs: Vec<&RuleMeta> = rules.iter().collect();
+
+        let assessment = calculate_risk_with(&refs, &SeverityClassifier::embedded());
+        // 1 − 0.75 · 0.98³ ≈ 29.4% (anti-debug High + 3 Lows; capabilities free).
+        assert_eq!(assessment.score, 29);
+        assert_eq!(assessment.severity, "Suspicious");
+        assert_eq!(assessment.finding_counts.high, 1);
+        assert_eq!(assessment.finding_counts.low, 3);
+    }
+
+    #[test]
     fn test_multi_technique_rule_counts_once() {
         let single = rule(
             "Single",
