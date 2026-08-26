@@ -52,6 +52,22 @@ use crate::core::traits::HeuristicPlugin;
 use crate::core::{AnalysisContext, AnalysisProgress, Result, parser::Parser};
 use crate::core::{packer_sig_check, string_check};
 use crate::utils::get_metadata::get_binary_metadata;
+use crate::utils::hashing::compute_hashes;
+
+/// A plugin that computes cryptographic digests (MD5, SHA-1, SHA-256) and
+/// similarity hashes (SSDEEP, TLSH) over the raw binary buffer, producing the
+/// identifier set used by triage platforms (VirusTotal, MalwareBazaar).
+pub struct HashingPlugin;
+
+impl HeuristicPlugin for HashingPlugin {
+    fn name(&self) -> &'static str {
+        "hashing"
+    }
+
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+        Ok(AnalysisProgress::Hashes(compute_hashes(ctx.buffer)))
+    }
+}
 
 /// A plugin that performs instruction disassembly using Capstone.
 /// Detects code caves (NOP runs, zero/trap padding runs) and anti-analysis/evasion instruction mnemonics.

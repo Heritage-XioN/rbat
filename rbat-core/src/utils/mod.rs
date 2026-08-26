@@ -8,6 +8,7 @@ pub mod csv;
 pub mod entropy;
 pub mod flirt;
 pub mod get_metadata;
+pub mod hashing;
 pub mod json;
 pub mod pdf;
 pub mod raw_padding;

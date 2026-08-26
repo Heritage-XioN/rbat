@@ -431,6 +431,17 @@ impl<'buf> App<'buf> {
             .render(area, buf);
     }
 
+    /// Shortens a SHA-256 digest for width-constrained panels.
+    fn truncate_sha256(digest: &str) -> String {
+        const PREFIX_LEN: usize = 18;
+        if digest.len() <= PREFIX_LEN {
+            return digest.to_string();
+        }
+        let mut short = digest[..PREFIX_LEN].to_string();
+        short.push('…');
+        short
+    }
+
     fn render_overview(&mut self, area: Rect, buf: &mut Buffer) {
         let chunks = Layout::horizontal([
             Constraint::Percentage(30),
@@ -460,6 +471,13 @@ impl<'buf> App<'buf> {
                 Span::raw(" ENTRY: "),
                 Span::styled(
                     format!("0x{:X}", metadata.entry_point),
+                    Style::default().fg(palette::ACCENT),
+                ),
+            ])),
+            ListItem::new(Line::from(vec![
+                Span::raw(" SHA256: "),
+                Span::styled(
+                    Self::truncate_sha256(&self.analysis_result.hashes.sha256),
                     Style::default().fg(palette::ACCENT),
                 ),
             ])),

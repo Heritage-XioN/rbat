@@ -76,6 +76,7 @@ where
     let factory = DisassemblerImpl::new(os, arch);
     let instructions = factory.disassemble(&text_bytes, entry_addr, &iat_map)?;
 
+    // evaluate moving flirt matching to plugins
     // Run FLIRT signature matching (either with custom matcher or fallback to embedded)
     let entry_points =
         collect_function_entry_points(&binary_object, &instructions, &arch, entry_addr);
@@ -103,6 +104,7 @@ where
     };
 
     let plugins: Vec<Box<dyn HeuristicPlugin>> = vec![
+        Box::new(crate::core::plugins::HashingPlugin),
         Box::new(crate::core::plugins::DisassemblyPlugin),
         Box::new(crate::core::plugins::StringCheckPlugin),
         Box::new(crate::core::plugins::PackerSigCheckPlugin),
@@ -172,6 +174,9 @@ pub fn analyze_batch<'buf>(
 
     for event in rx {
         match event {
+            AnalysisProgress::Hashes(hashes) => {
+                analysis_result.hashes = hashes;
+            }
             AnalysisProgress::Disassembly(code_cave) => {
                 analysis_result.code_cave = code_cave;
             }

@@ -27,6 +27,7 @@ struct ReportTemplate {
     entry_point: String,
     architecture: String,
     total_analysis_time_ms: u128,
+    hashes: HashContext,
     capabilities: Vec<TechnicalFinding>,
     signatures: Vec<TechnicalFinding>,
 }
@@ -44,6 +45,15 @@ struct FindingContext {
     class_label: String,
     mappings: String,
     description: String,
+}
+
+/// Hash identifiers rendered in the Binary Metadata table.
+struct HashContext {
+    md5: String,
+    sha1: String,
+    sha256: String,
+    ssdeep: String,
+    tlsh: String,
 }
 
 /// CSS stylesheet for the PDF report, separated from the HTML body
@@ -161,6 +171,13 @@ pub fn generate_pdf_report(
         entry_point: format!("0x{:X}", analysis_result.metadata.entry_point),
         architecture: analysis_result.metadata.architecture_name(),
         total_analysis_time_ms: analysis_result.total_analysis_time_ms,
+        hashes: HashContext {
+            md5: analysis_result.hashes.md5.clone(),
+            sha1: analysis_result.hashes.sha1.clone(),
+            sha256: analysis_result.hashes.sha256.clone(),
+            ssdeep: analysis_result.hashes.ssdeep.clone(),
+            tlsh: analysis_result.hashes.tlsh.clone(),
+        },
         capabilities,
         signatures,
     };

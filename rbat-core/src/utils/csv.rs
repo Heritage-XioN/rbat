@@ -32,10 +32,16 @@ pub fn generate_csv_report(
         "ATT&CK_IDs",
         "MBC_IDs",
         "Category",
+        "Md5",
+        "Sha1",
+        "Sha256",
+        "Ssdeep",
+        "Tlsh",
         "Description",
     ])?;
 
     let severity = &assessment.severity;
+    let hashes = &analysis_result.hashes;
     let timestamp_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let filename_lossy = filename.to_string_lossy();
 
@@ -52,6 +58,11 @@ pub fn generate_csv_report(
             "",
             "",
             "",
+            &hashes.md5,
+            &hashes.sha1,
+            &hashes.sha256,
+            &hashes.ssdeep,
+            &hashes.tlsh,
             "No security threats or anomalies detected.",
         ])?;
     } else {
@@ -67,6 +78,11 @@ pub fn generate_csv_report(
                 finding.attack_ids.join("|").as_str(),
                 finding.mbc_ids.join("|").as_str(),
                 finding.category.as_deref().unwrap_or(""),
+                &hashes.md5,
+                &hashes.sha1,
+                &hashes.sha256,
+                &hashes.ssdeep,
+                &hashes.tlsh,
                 finding.description.as_str(),
             ])?;
         }

@@ -131,6 +131,10 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         // Event loop receiving real-time progress events
         for event in rx {
             match event {
+                AnalysisProgress::Hashes(hashes) => {
+                    analysis_result.hashes = hashes;
+                    spinner.set_message("Computed binary digests & fuzzy hashes");
+                }
                 AnalysisProgress::Disassembly(code_cave) => {
                     analysis_result.code_cave = code_cave;
                     spinner.set_message(format!(

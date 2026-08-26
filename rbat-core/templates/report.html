@@ -101,6 +101,32 @@
                     <td><strong>Total Analysis Time</strong></td>
                     <td><code>{{ total_analysis_time_ms }} ms</code></td>
                 </tr>
+                {% if hashes.sha256.len() > 0 %}
+                <tr>
+                    <td><strong>MD5</strong></td>
+                    <td><code>{{ hashes.md5 }}</code></td>
+                </tr>
+                <tr>
+                    <td><strong>SHA-1</strong></td>
+                    <td><code>{{ hashes.sha1 }}</code></td>
+                </tr>
+                <tr>
+                    <td><strong>SHA-256</strong></td>
+                    <td><code>{{ hashes.sha256 }}</code></td>
+                </tr>
+                {% endif %}
+                {% if hashes.ssdeep.len() > 0 %}
+                <tr>
+                    <td><strong>SSDEEP</strong></td>
+                    <td><code>{{ hashes.ssdeep }}</code></td>
+                </tr>
+                {% endif %}
+                {% if hashes.tlsh.len() > 0 %}
+                <tr>
+                    <td><strong>TLSH</strong></td>
+                    <td><code>{{ hashes.tlsh }}</code></td>
+                </tr>
+                {% endif %}
             </tbody>
         </table>
     </div>

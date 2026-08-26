@@ -224,6 +224,24 @@ pub fn print_terminal_report(
         format!("0x{:X}", analysis_result.metadata.entry_point).with(COLOR_ACCENT)
     );
 
+    // Triage identifier set (exact-match digests + similarity hashes)
+    let hashes = &analysis_result.hashes;
+    for (label, value) in [
+        ("MD5", hashes.md5.as_str()),
+        ("SHA-1", hashes.sha1.as_str()),
+        ("SHA-256", hashes.sha256.as_str()),
+        ("SSDEEP", hashes.ssdeep.as_str()),
+        ("TLSH", hashes.tlsh.as_str()),
+    ] {
+        if !value.is_empty() {
+            println!(
+                "  {:<15} : {}",
+                label.with(COLOR_MUTED),
+                value.with(COLOR_ACCENT)
+            );
+        }
+    }
+
     println!("{}", line_sep);
 
     // 2. Risk Assessment Gauge

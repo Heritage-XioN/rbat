@@ -67,6 +67,8 @@ pub struct ParsedBinaryContext {
 
 /// Represents the progress updates emitted during static analysis.
 pub enum AnalysisProgress<'buf> {
+    /// Digest and fuzzy hashes of the raw binary buffer.
+    Hashes(BinaryHashes),
     /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
     Disassembly(AHashMap<&'buf str, Vec<u64>>),
     /// Extracted strings matched by YARA rules.
@@ -109,11 +111,30 @@ pub struct YaraMatches<'buf> {
     pub data: Cow<'buf, str>,
 }
 
+/// Cryptographic digest and fuzzy hashes identifying the analyzed binary,
+/// matching the identifier set exposed by triage platforms (VirusTotal, MalwareBazaar).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, Eq)]
+pub struct BinaryHashes {
+    /// MD5 digest (lowercase hex).
+    pub md5: String,
+    /// SHA-1 digest (lowercase hex).
+    pub sha1: String,
+    /// SHA-256 digest (lowercase hex); the primary lookup key on triage platforms.
+    pub sha256: String,
+    /// SSDEEP context-triggered piecewise hash; empty when input is too small.
+    pub ssdeep: String,
+    /// TLSH locality-sensitive hash (uppercase, `T1`-prefixed); empty when
+    /// input is below the algorithm's minimum length (~50 bytes).
+    pub tlsh: String,
+}
+
 /// The accumulated results of all static analysis heuristics run on a binary.
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct AnalysisResult<'buf> {
     /// Extracted header and format metadata.
     pub metadata: BinaryMetadata,
+    /// Cryptographic and fuzzy hashes computed over the raw buffer.
+    pub hashes: BinaryHashes,
     /// List of consecutive padding/cave virtual memory addresses.
     #[serde(borrow)]
     pub code_cave: AHashMap<&'buf str, Vec<u64>>,
