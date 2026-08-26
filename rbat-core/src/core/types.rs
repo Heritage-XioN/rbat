@@ -4,7 +4,7 @@
 //! used throughout the binary analysis pipeline, reporting, and scoring engines.
 
 use crate::{
-    core::{FeatureSet, Rule, cfg::ControlFlowGraph, disassembler::InstructionInfo},
+    core::{FeatureSet, FlirtMatcher, Rule, cfg::ControlFlowGraph, disassembler::InstructionInfo},
     utils::rules::{StringOrVec, parse_number_constant},
 };
 
@@ -12,7 +12,7 @@ use ahash::{AHashMap, AHashSet};
 use aho_corasick::{AhoCorasick, PatternID};
 
 use rust_embed::RustEmbed;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -351,6 +351,10 @@ pub struct AnalysisContext<'buf, 'ctx> {
     pub binary_object: &'ctx object::File<'buf, &'buf [u8]>,
     /// Cached mappings of section offsets to names.
     pub section_ranges: &'ctx [SectionRange<'buf>],
+    /// collection of potential entry points in a binary
+    pub entry_points: FxHashSet<u64>,
+    /// Optional custom FLIRT signatures; borrows the analysis-scoped lifetime
+    pub custom_flirt: &'ctx Option<FlirtMatcher>,
     /// Target operating system preference.
     pub os: BinaryOS,
     /// Target CPU architecture.

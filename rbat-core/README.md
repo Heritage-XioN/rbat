@@ -16,8 +16,11 @@
 * **Control Flow Graph (CFG) Reconstruction**: Basic block disassembly and edge tracking outputting Graphviz DOT format (`--cfg`) and interactive TUI block navigation.
 * **Declarative JSON & YAML Rule Engine (CAPA Compatible)**: Native support for parsing Mandiant's CAPA YAML rules alongside strict JSON rule schemas. Supports nested `and`/`or`/`not` condition trees and MITRE ATT&CK technique tagging.
 * **Fast Library Identification and Recognition Technology (FLIRT)**: Automatically apply `.sig` and `.pat` FLIRT signatures to identify known compiler library functions and eliminate analysis noise.
-* **Backend Feature Flags**: Pluggable disassembly engines. Compile with `backend-capstone` (default, multi-architecture) or `backend-iced` (blazing fast, x86/x64 only).
-* **Dynamic Risk Scoring (MITRE ATT&CK)**: Heuristic-based risk assessment that buckets matched rules by MITRE ATT&CK tactic (derived from each rule's `att&ck` mapping) with per-tactic caps and severity-derived weights, calculating threat levels based on section entropy, suspicious imports, code caves, and behavior patterns.
+* **Backend Feature Flags**: Pluggable disassembly engines, **mutually exclusive** — compile with `backend-capstone` (default, multi-architecture) or `backend-iced` (blazing fast, x86/x64 only):
+  - `cargo build --release` → capstone backend
+  - `cargo build --release --no-default-features --features backend-iced` → iced backend
+  - Enabling both fails the build with a guidance error.
+* **Dynamic Risk Scoring (MITRE ATT&CK)**: Noisy-OR probabilistic aggregation over classified findings — rules are mapped to severity classes (`Informational`, `Capability`, `Low`, `Medium`, `High`, `Critical`) via an embedded TOML override table (`capa-overrides.toml`, tunable at runtime with `--severity-overrides`) combined with ATT&CK tactic / MBC objective inference. Ordinary capabilities carry zero weight; corroborating hostile indicators compound toward the ceiling.
 * **Rich TUI Dashboard**: An interactive terminal interface (`--tui`) for navigating disassembly blocks, entropy heatmaps, findings, and security recommendations.
 * **Multi-Format Reporting**: Export analysis results to Light-Mode Executive PDF reports (with heatmaps), SIEM-ready CSV logs, or JSON dumps for automated pipelines.
 * **Shell Auto-Completions**: Generator subcommand (`rbat completions`) for Bash, Zsh, Fish, PowerShell, and Elvish.

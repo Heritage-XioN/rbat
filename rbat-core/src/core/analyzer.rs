@@ -41,7 +41,7 @@ use crate::{
 /// use rbat::core::analyzer::analyze_streaming;
 ///
 /// let needle = std::sync::Arc::new(rbat::core::types::NeedleIndex::build_from_rules(&[]));
-/// analyze_streaming(b"some binary bytes", None, needle, |progress| {
+/// analyze_streaming(b"some binary bytes", &None, needle, |progress| {
 ///     // Handle progress updates here
 /// }).unwrap();
 /// ```
@@ -50,7 +50,7 @@ use crate::{
 /// Returns `RbatError` if file operations, binary parsing, or plugin scanning fails.
 pub fn analyze_streaming<'buf, F>(
     buffer: &'buf [u8],
-    custom_flirt: Option<FlirtMatcher>,
+    custom_flirt: &Option<FlirtMatcher>,
     needle: Arc<NeedleIndex>,
     on_progress: F,
 ) -> Result<()>
@@ -75,26 +75,15 @@ where
 
     let factory = DisassemblerImpl::new(os, arch);
     let instructions = factory.disassemble(&text_bytes, entry_addr, &iat_map)?;
-
-    // evaluate moving flirt matching to plugins
-    // Run FLIRT signature matching (either with custom matcher or fallback to embedded)
     let entry_points =
         collect_function_entry_points(&binary_object, &instructions, &arch, entry_addr);
-
-    let library_functions = match custom_flirt {
-        Some(matcher) => matcher.identify_library_functions(&entry_points, &text_bytes, entry_addr),
-        None => {
-            let embedded = crate::core::flirt::FlirtMatcher::load_embedded();
-            embedded.identify_library_functions(&entry_points, &text_bytes, entry_addr)
-        }
-    };
-
-    on_progress(AnalysisProgress::LibraryFunctions(library_functions));
 
     let ctx = AnalysisContext {
         buffer,
         binary_object: &binary_object,
         section_ranges: &section_ranges,
+        entry_points,
+        custom_flirt,
         os,
         arch,
         text_bytes: &text_bytes,
@@ -113,6 +102,7 @@ where
         Box::new(crate::core::plugins::ExportsPlugin),
         Box::new(crate::core::plugins::MetadataPlugin),
         Box::new(crate::core::plugins::CfgPlugin),
+        Box::new(crate::core::plugins::LibraryFunctionsPlugin),
     ];
 
     rayon::scope(|s| {
@@ -148,7 +138,7 @@ where
 /// ```rust,no_run
 /// use rbat::core::analyzer::analyze_batch;
 ///
-/// let (result, assessment) = analyze_batch(b"some binary bytes", None).unwrap();
+/// let (result, assessment) = analyze_batch(b"some binary bytes", &None).unwrap();
 /// println!("Risk Score: {}", assessment.score);
 /// ```
 ///
@@ -156,7 +146,7 @@ where
 /// Returns `RbatError` if file reading, header parsing, or thread orchestration fails.
 pub fn analyze_batch<'buf>(
     buffer: &'buf [u8],
-    custom_flirt: Option<FlirtMatcher>,
+    custom_flirt: &Option<FlirtMatcher>,
 ) -> Result<(AnalysisResult<'buf>, RiskAssessment)> {
     let start_time = std::time::Instant::now();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -235,7 +225,7 @@ mod tests {
         test_helpers::generate_elf(&path);
         let buffer = fs::read(&path).unwrap();
 
-        let result = analyze_batch(&buffer, None);
+        let result = analyze_batch(&buffer, &None);
         assert!(result.is_ok());
         let (analysis, assessment) = result.unwrap();
 
@@ -247,7 +237,7 @@ mod tests {
     fn test_analyze_streaming_err() {
         let buffer = b"invalid_binary_data_format".to_vec();
         let needle = std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[]));
-        let result = analyze_streaming(&buffer, None, needle, |_| {});
+        let result = analyze_streaming(&buffer, &None, needle, |_| {});
         assert!(result.is_err());
     }
 }

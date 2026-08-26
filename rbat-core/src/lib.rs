@@ -28,18 +28,18 @@
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let binary_path = Path::new("path/to/my_binary");
 //!     let buffer = std::fs::read(binary_path)?;
-//!     
+//!
 //!     // Perform batch analysis to retrieve findings and risk score
-//!     let (result, assessment) = analyze_batch(&buffer, None)?;
-//!     
+//!     let (result, assessment) = analyze_batch(&buffer, &None)?;
+//!
 //!     println!("Binary Architecture: {}", result.metadata.architecture);
 //!     println!("Calculated Risk Score: {}", assessment.score);
 //!     println!("Threat Severity: {}", assessment.severity);
-//!     
+//!
 //!     for finding in &assessment.findings {
 //!         println!("[-] Indicator: {} - {}", finding.indicator, finding.description);
 //!     }
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```

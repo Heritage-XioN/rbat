@@ -17,11 +17,13 @@
 //! use rbat::core::traits::HeuristicPlugin;
 //! use std::sync::Arc;
 //! use rbat::core::types::NeedleIndex;
+//! use rbat::utils::flirt::collect_function_entry_points;
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let buffer = vec![0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 62, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 56, 0, 1, 0, 64, 0, 0, 0, 0, 0];
 //! let obj = File::parse(buffer.as_slice())?;
 //! let section_ranges = vec![];
+//! let entry_points = collect_function_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
 //!
 //! let needle = Arc::new(NeedleIndex::build_from_rules(&[]));
 //! let ctx = AnalysisContext {
@@ -34,6 +36,8 @@
 //!     entry_addr: 0x1000,
 //!     instructions: &[],
 //!     needle: needle.clone(),
+//!     entry_points,
+//!     custom_flirt: &None,
 //! };
 //!
 //! let progress = MetadataPlugin.run(&ctx)?;
@@ -110,6 +114,30 @@ impl HeuristicPlugin for PackerSigCheckPlugin {
     fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
         let results = packer_sig_check(ctx.buffer, ctx.section_ranges)?;
         Ok(AnalysisProgress::PackerSigs(results))
+    }
+}
+
+/// A plugin for identifying library known functions within a binary.
+pub struct LibraryFunctionsPlugin;
+
+impl HeuristicPlugin for LibraryFunctionsPlugin {
+    fn name(&self) -> &'static str {
+        "library_functions"
+    }
+
+    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+        let library_functions =
+            match ctx.custom_flirt {
+                Some(matcher) => matcher.identify_library_functions(
+                    &ctx.entry_points,
+                    ctx.text_bytes,
+                    ctx.entry_addr,
+                ),
+                None => crate::core::flirt::FlirtMatcher::embedded_shared()
+                    .identify_library_functions(&ctx.entry_points, ctx.text_bytes, ctx.entry_addr),
+            };
+
+        Ok(AnalysisProgress::LibraryFunctions(library_functions))
     }
 }
 
@@ -208,6 +236,7 @@ impl HeuristicPlugin for CfgPlugin {
 mod tests {
     use super::*;
     use crate::core::{BinaryArch, BinaryOS};
+    use crate::utils::flirt::collect_function_entry_points;
     use crate::utils::test_helpers::test_helpers;
     use object::File;
     use std::fs;
@@ -222,6 +251,7 @@ mod tests {
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
         let section_ranges = crate::utils::section_offset::build_section_map(&obj).unwrap();
+        let entry_points = collect_function_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
 
         let ctx = AnalysisContext {
             buffer: &buffer,
@@ -233,6 +263,8 @@ mod tests {
             entry_addr: 0x1000,
             instructions: &[],
             needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
+            entry_points,
+            custom_flirt: &None,
         };
 
         let result = MetadataPlugin.run(&ctx).unwrap();
@@ -253,6 +285,7 @@ mod tests {
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
         let section_ranges = crate::utils::section_offset::build_section_map(&obj).unwrap();
+        let entry_points = collect_function_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
 
         let ctx = AnalysisContext {
             buffer: &buffer,
@@ -264,6 +297,8 @@ mod tests {
             entry_addr: 0x1000,
             instructions: &[],
             needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
+            entry_points,
+            custom_flirt: &None,
         };
 
         let result = EntropyPlugin.run(&ctx).unwrap();
@@ -297,6 +332,9 @@ mod tests {
             128
         ];
 
+        let entry_points =
+            collect_function_entry_points(&obj, &instructions, &BinaryArch::X64, 0x1000);
+
         let ctx = AnalysisContext {
             buffer: &buffer,
             binary_object: &obj,
@@ -307,6 +345,8 @@ mod tests {
             entry_addr: 0x1000,
             instructions: &instructions,
             needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
+            entry_points,
+            custom_flirt: &None,
         };
 
         let result = DisassemblyPlugin.run(&ctx).unwrap();

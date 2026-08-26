@@ -26,7 +26,7 @@ fn test_e2e_capa_al_khaser_api_matches() {
     let buffer = std::fs::read(&sample_path).expect("Failed to read al-khaser testfile");
 
     // Run the batch analysis (which automatically parses headers, disassembles, and evaluates embedded rules)
-    let (_, assessment) = analyze_batch(&buffer, None).expect("Failed to analyze al-khaser");
+    let (_, assessment) = analyze_batch(&buffer, &None).expect("Failed to analyze al-khaser");
 
     // We expect embedded CAPA behavior rules to trigger because Al-Khaser performs
     // command execution, process termination, and socket communication.
@@ -63,7 +63,7 @@ fn test_e2e_capa_mimikatz_entropy() {
 
     let buffer = std::fs::read(&sample_path).expect("Failed to read mimikatz testfile");
 
-    let (analysis_result, _) = analyze_batch(&buffer, None).expect("Failed to analyze mimikatz");
+    let (analysis_result, _) = analyze_batch(&buffer, &None).expect("Failed to analyze mimikatz");
 
     // We expect mimikatz to have a highly packed/encrypted or dense .text section (or similar).
     // Just verify that section_entropies were calculated and are reasonably high for some section.
@@ -82,7 +82,7 @@ fn test_e2e_capa_elf_microsocks_cfg_and_os() {
     }
 
     let buffer = std::fs::read(&sample_path).expect("Failed to read microsocks testfile");
-    let (analysis_result, _) = analyze_batch(&buffer, None).expect("Failed to analyze microsocks");
+    let (analysis_result, _) = analyze_batch(&buffer, &None).expect("Failed to analyze microsocks");
 
     // Verify OS and Arch
     assert!(
@@ -116,7 +116,7 @@ fn test_e2e_capa_pe_packed_upx() {
 
     let buffer = std::fs::read(&sample_path).expect("Failed to read packed testfile");
     let (analysis_result, assessment) =
-        analyze_batch(&buffer, None).expect("Failed to analyze UPX binary");
+        analyze_batch(&buffer, &None).expect("Failed to analyze UPX binary");
 
     // Verify UPX packer signature was extracted via YARA
     assert!(

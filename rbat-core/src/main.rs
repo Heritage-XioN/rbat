@@ -121,9 +121,11 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let mut analysis_result = AnalysisResult::default();
 
     let buffer_ref = &buffer;
+    let custom_flirt_ref = &custom_flirt;
+
     let analysis_res = std::thread::scope(|s| {
         let handle = s.spawn(move || {
-            analyze_streaming(buffer_ref, custom_flirt, needle_clone, move |event| {
+            analyze_streaming(buffer_ref, custom_flirt_ref, needle_clone, move |event| {
                 let _ = tx.send(event);
             })
         });

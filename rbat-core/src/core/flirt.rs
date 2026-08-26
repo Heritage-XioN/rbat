@@ -4,12 +4,16 @@ use fast_flirt::{FlirtSet, Pattern, sig};
 use rust_embed::RustEmbed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::utils::flirt::normalize_symbol;
 
 #[derive(RustEmbed)]
 #[folder = "assets/signatures_embedded/"]
 struct EmbeddedSignatures;
+
+/// Process-wide cache of the bundled signature database, parsed on first use.
+static EMBEDDED_FLIRT: OnceLock<FlirtMatcher> = OnceLock::new();
 
 /// FLIRT signature matcher for identifying statically-linked library functions.
 ///
@@ -20,6 +24,16 @@ pub struct FlirtMatcher {
 }
 
 impl FlirtMatcher {
+    /// Returns a process-wide shared reference to the bundled signature database.
+    ///
+    /// Parses and caches [`FlirtMatcher::load_embedded`] on first use so repeated
+    /// analysis from upstream consumers (e.g. rbat-server handling many uploads) don't re-parse the
+    /// signatures every call. Use [`FlirtMatcher::load_embedded`] directly when an
+    /// owned matcher is needed for [`FlirtMatcher::extend`].
+    pub fn embedded_shared() -> &'static Self {
+        EMBEDDED_FLIRT.get_or_init(Self::load_embedded)
+    }
+
     /// Loads the bundled FLIRT signatures compiled into the binary at build time.
     pub fn load_embedded() -> Self {
         let mut patterns: Vec<Pattern> = Vec::new();

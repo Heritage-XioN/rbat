@@ -186,7 +186,7 @@ pub fn print_terminal_report(
     assessment: &RiskAssessment,
     generated_reports: &[(&str, &Path)],
 ) {
-    let line_sep = "─".repeat(64).with(COLOR_BORDER);
+    let line_sep = "─".repeat(100).with(COLOR_BORDER);
 
     println!("\n{}", line_sep);
     println!(
