@@ -73,8 +73,8 @@ impl NeedleIndex {
             RuleCondition::String { string } => {
                 patterns.insert(string.as_str());
             }
-            RuleCondition::Match { match_name } => {
-                patterns.insert(match_name.as_str());
+            RuleCondition::Match { .. } => {
+                // Rule dependency matching is handled at rule level, not as instruction text patterns
             }
             RuleCondition::Mnemonic { mnemonic } => {
                 patterns.insert(mnemonic.as_str());
@@ -134,7 +134,7 @@ impl NeedleIndex {
                     haystack.push_str(api);
                 }
 
-                for mat in self.automaton.find_iter(&haystack) {
+                for mat in self.automaton.find_overlapping_iter(&haystack) {
                     let p = mat.pattern();
                     if !insn.matched.contains(&p) {
                         insn.matched.push(p);
