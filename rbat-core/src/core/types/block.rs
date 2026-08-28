@@ -30,9 +30,10 @@ pub enum EdgeType {
 }
 
 /// Categorizes an instruction into control flow classes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum InstructionClass {
     /// Normal sequential instruction.
+    #[default]
     Normal,
     /// Conditional branching instruction.
     ConditionalJump,

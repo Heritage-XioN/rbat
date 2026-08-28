@@ -193,6 +193,7 @@ mod tests {
                     op_str: "1 = HANDLE_FLAG_INHERIT".into(),
                     api_resolution: None,
                     matched: smallvec::SmallVec::new(),
+                    inst_class: Default::default(),
                 },
                 InstructionInfo {
                     address: 0x1005,
@@ -200,6 +201,7 @@ mod tests {
                     op_str: "SetHandleInformation".into(),
                     api_resolution: None,
                     matched: smallvec::SmallVec::new(),
+                    inst_class: Default::default(),
                 },
                 InstructionInfo {
                     address: 0x1010,
@@ -207,6 +209,7 @@ mod tests {
                     op_str: "SetHandleInformation".into(),
                     api_resolution: None,
                     matched: smallvec::SmallVec::new(),
+                    inst_class: Default::default(),
                 },
             ],
         };

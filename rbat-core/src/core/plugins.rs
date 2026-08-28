@@ -328,6 +328,7 @@ mod tests {
                 op_str: "".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             };
             128
         ];

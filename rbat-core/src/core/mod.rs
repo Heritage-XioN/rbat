@@ -29,8 +29,8 @@ pub use crate::core::{
     types::{
         AnalysisContext, AnalysisProgress, AnalysisResult, Asset, BasicBlock, BinaryArch,
         BinaryHashes, BinaryMetadata, BinaryOS, CategoryScore, EdgeType, Finding, FindingCounts,
-        IatMap, InstructionClass, ParsedBinaryContext, RiskAssessment, RuleCondition, RuleInner,
-        RuleMeta, RuleTag, SectionRange, SeverityClass, YaraMatches,
+        IatMap, InstructionClass, NeedleIndex, ParsedBinaryContext, RiskAssessment, RuleCondition,
+        RuleInner, RuleMeta, RuleTag, SectionRange, SeverityClass, YaraMatches,
     },
 };
 

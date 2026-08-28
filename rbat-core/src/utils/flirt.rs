@@ -114,7 +114,10 @@ pub fn normalize_symbol(name: &str) -> String {
 
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
-    use crate::{core::disassembler::InstructionInfo, utils::flirt::normalize_symbol};
+    use crate::{
+        core::{InstructionClass, disassembler::InstructionInfo},
+        utils::flirt::normalize_symbol,
+    };
 
     #[test]
     fn test_normalize_symbol_mangled() {
@@ -145,6 +148,7 @@ mod tests {
                 op_str: "eax, 1".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             },
             InstructionInfo {
                 address: 0x1005,
@@ -152,6 +156,7 @@ mod tests {
                 op_str: "0x2000".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: InstructionClass::Call,
             },
         ];
 
@@ -183,6 +188,7 @@ mod tests {
                 op_str: "rbp".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             },
             InstructionInfo {
                 address: 0x1005,
@@ -190,6 +196,7 @@ mod tests {
                 op_str: "eax, 1".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             },
             InstructionInfo {
                 address: 0x100A,
@@ -197,6 +204,7 @@ mod tests {
                 op_str: "".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: InstructionClass::Return,
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
@@ -204,6 +212,7 @@ mod tests {
                 op_str: "eax, eax".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             },
         ];
 
@@ -225,6 +234,7 @@ mod tests {
                 op_str: "rbp".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             },
             InstructionInfo {
                 address: 0x1005,
@@ -232,6 +242,7 @@ mod tests {
                 op_str: "".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             },
             InstructionInfo {
                 address: 0x100B, // new function starts here
@@ -239,6 +250,7 @@ mod tests {
                 op_str: "eax, eax".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             },
         ];
         let insns_no_ret: Vec<&InstructionInfo> = insns_no_ret_data.iter().collect();

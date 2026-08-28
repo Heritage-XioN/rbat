@@ -23,7 +23,7 @@ pub use capstone_backend::*;
 mod capstone_backend {
     use crate::core::InstructionClass;
     use crate::core::traits::Disassembler;
-    use crate::core::{BinaryArch, BinaryOS, IatMap};
+    use crate::core::{BinaryArch, IatMap};
     use aho_corasick::PatternID;
     use capstone::prelude::*;
     use serde::{Deserialize, Serialize};
@@ -42,17 +42,24 @@ mod capstone_backend {
         /// The set of PatternIDs this instruction matched.
         #[serde(skip)]
         pub matched: smallvec::SmallVec<[PatternID; 4]>,
+        /// Precise control-flow class resolved from Capstone instruction detail.
+        pub inst_class: InstructionClass,
     }
 
     impl InstructionInfo {
         /// Instantiates an `InstructionInfo` from a Capstone instruction.
-        pub fn from_capstone(insn: &capstone::Insn, api_resolution: Option<Arc<str>>) -> Self {
+        pub fn from_capstone(
+            insn: &capstone::Insn,
+            api_resolution: Option<Arc<str>>,
+            inst_class: InstructionClass,
+        ) -> Self {
             Self {
                 address: insn.address(),
                 mnemonic: insn.mnemonic().unwrap_or("").into(),
                 op_str: insn.op_str().unwrap_or("").into(),
                 api_resolution,
                 matched: smallvec::SmallVec::new(),
+                inst_class,
             }
         }
 
@@ -90,21 +97,54 @@ mod capstone_backend {
         }
 
         /// Classifies this instruction's control-flow role.
-        /// Falls back to string-based mnemonic classification for capstone backend.
-        pub fn class(&self, arch: &crate::core::BinaryArch) -> InstructionClass {
-            crate::utils::cfg::classify_instruction(&self.mnemonic, arch)
+        /// Uses the precise class resolved from Capstone detail when available,
+        /// otherwise falls back to the string-based mnemonic heuristic.
+        pub fn class(&self, _arch: &crate::core::BinaryArch) -> InstructionClass {
+            self.inst_class
+        }
+    }
+
+    /// A helper that resolves a precise `InstructionClass` from Capstone instruction detail
+    /// (control-flow groups), disambiguating unconditional vs conditional jumps.
+    /// Falls back to the mnemonic for x86 `loop*` instructions, which Capstone
+    /// does not always tag with a generic branch group.
+    fn instruction_class_from_detail(
+        insn: &capstone::Insn,
+        detail: &capstone::InsnDetail,
+    ) -> InstructionClass {
+        use capstone::InsnGroupType;
+        let grouped = |g: u8| detail.groups().iter().any(|x| x.0 == g);
+        if grouped(InsnGroupType::CS_GRP_CALL as u8) {
+            InstructionClass::Call
+        } else if grouped(InsnGroupType::CS_GRP_RET as u8)
+            || grouped(InsnGroupType::CS_GRP_IRET as u8)
+        {
+            InstructionClass::Return
+        } else if grouped(InsnGroupType::CS_GRP_JUMP as u8) {
+            // Capstone tags both conditional and unconditional jumps with the
+            // generic `Jump` group; only `jmp` is unconditional.
+            match insn.mnemonic() {
+                Some("jmp") => InstructionClass::UnconditionalJump,
+                _ => InstructionClass::ConditionalJump,
+            }
+        } else {
+            match insn.mnemonic() {
+                Some(m) if m == "loop" || m == "loope" || m == "loopne" => {
+                    InstructionClass::ConditionalJump
+                }
+                _ => InstructionClass::Normal,
+            }
         }
     }
 
     #[derive(Debug)]
     pub struct DisassemblerImpl {
-        os: BinaryOS,
         arch: BinaryArch,
     }
 
     impl DisassemblerImpl {
-        pub fn new(os: BinaryOS, arch: BinaryArch) -> Self {
-            Self { os, arch }
+        pub fn new(arch: BinaryArch) -> Self {
+            Self { arch }
         }
     }
 
@@ -115,7 +155,7 @@ mod capstone_backend {
             entry_addr: u64,
             iat_map: &IatMap,
         ) -> crate::core::Result<Vec<InstructionInfo>> {
-            let cs = match self.arch {
+            let mut cs = match self.arch {
                 BinaryArch::X86 | BinaryArch::X64 => {
                     let mut x86 = Capstone::new().x86();
                     if self.arch == BinaryArch::X64 {
@@ -123,10 +163,8 @@ mod capstone_backend {
                     } else {
                         x86 = x86.mode(arch::x86::ArchMode::Mode32);
                     }
-                    x86 = match self.os {
-                        BinaryOS::Linux => x86.syntax(arch::x86::ArchSyntax::Att),
-                        _ => x86.syntax(arch::x86::ArchSyntax::Intel),
-                    };
+                    // Intel syntax on every OS so mnemonic/operand text matches capa's ruleset
+                    x86 = x86.syntax(arch::x86::ArchSyntax::Intel);
                     x86.detail(true).build()?
                 }
                 BinaryArch::Arm => Capstone::new()
@@ -141,12 +179,17 @@ mod capstone_backend {
                     .build()?,
             };
 
+            // Continue past undecodable bytes (alignment padding, embedded data,
+            // jump tables) instead of truncating coverage at the first invalid one.
+            cs.set_skipdata(true)?;
+
             let cs_insns = cs.disasm_all(text_bytes, entry_addr)?;
             Ok(cs_insns
                 .iter()
                 .map(|insn| {
+                    let detail = cs.insn_detail(insn).ok();
                     let mut api_resolution = None;
-                    if let Ok(detail) = cs.insn_detail(insn) {
+                    if let Some(detail) = &detail {
                         let arch_detail = detail.arch_detail();
                         if let Some(x86) = arch_detail.x86() {
                             for op in x86.operands() {
@@ -168,7 +211,14 @@ mod capstone_backend {
                             }
                         }
                     }
-                    InstructionInfo::from_capstone(insn, api_resolution)
+                    let inst_class = match &detail {
+                        Some(d) => instruction_class_from_detail(insn, d),
+                        None => crate::utils::cfg::classify_instruction(
+                            insn.mnemonic().unwrap_or(""),
+                            &self.arch,
+                        ),
+                    };
+                    InstructionInfo::from_capstone(insn, api_resolution, inst_class)
                 })
                 .collect())
         }
@@ -182,7 +232,7 @@ pub use iced_backend::*;
 mod iced_backend {
     use crate::core::InstructionClass;
     use crate::core::traits::Disassembler;
-    use crate::core::{BinaryArch, BinaryOS, IatMap};
+    use crate::core::{BinaryArch, IatMap};
     use aho_corasick::PatternID;
     use iced_x86::{Code, Decoder, DecoderOptions};
     use std::sync::Arc;
@@ -191,24 +241,21 @@ mod iced_backend {
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct InstructionInfo {
         pub inner: iced_x86::Instruction,
-        pub os: BinaryOS,
         pub api_resolution: Option<Arc<str>>,
         /// Pre-computed set of Aho-Corasick pattern IDs matched against this instruction's text.
         pub matched: smallvec::SmallVec<[PatternID; 4]>,
+        /// Control-flow class resolved from Iced's precise `flow_control()`
+        pub inst_class: InstructionClass,
     }
 
     #[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
     impl InstructionInfo {
-        pub fn from_iced(
-            inner: &iced_x86::Instruction,
-            os: BinaryOS,
-            api_resolution: Option<Arc<str>>,
-        ) -> Self {
+        pub fn from_iced(inner: &iced_x86::Instruction, api_resolution: Option<Arc<str>>) -> Self {
             Self {
                 inner: *inner,
-                os,
                 api_resolution,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Self::classify_flow(inner.flow_control()),
             }
         }
 
@@ -234,16 +281,11 @@ mod iced_backend {
             use std::cell::RefCell;
             thread_local! {
                 static INTEL_FMT: RefCell<iced_x86::IntelFormatter> = RefCell::new(iced_x86::IntelFormatter::new());
-                static GAS_FMT: RefCell<iced_x86::GasFormatter> = RefCell::new(iced_x86::GasFormatter::new());
             }
 
             buf.clear();
-            match self.os {
-                BinaryOS::Linux => {
-                    GAS_FMT.with(|fmt| fmt.borrow_mut().format_all_operands(&self.inner, buf))
-                }
-                _ => INTEL_FMT.with(|fmt| fmt.borrow_mut().format_all_operands(&self.inner, buf)),
-            }
+            // Intel syntax on every OS so operand text matches capa's ruleset
+            INTEL_FMT.with(|fmt| fmt.borrow_mut().format_all_operands(&self.inner, buf))
         }
 
         pub fn format_operands(&self) -> String {
@@ -261,10 +303,13 @@ mod iced_backend {
 
         /// Classifies this instruction's control-flow role without allocating a string.
         pub fn class(&self, _arch: &crate::core::BinaryArch) -> InstructionClass {
-            use iced_x86::FlowControl;
+            self.inst_class
+        }
 
+        fn classify_flow(flow: iced_x86::FlowControl) -> InstructionClass {
             use crate::core::InstructionClass;
-            match self.inner.flow_control() {
+            use iced_x86::FlowControl;
+            match flow {
                 FlowControl::UnconditionalBranch => InstructionClass::UnconditionalJump,
                 FlowControl::ConditionalBranch => InstructionClass::ConditionalJump,
                 FlowControl::Call | FlowControl::IndirectCall => InstructionClass::Call,
@@ -304,13 +349,12 @@ mod iced_backend {
 
     #[derive(Debug)]
     pub struct DisassemblerImpl {
-        os: BinaryOS,
         arch: BinaryArch,
     }
 
     impl DisassemblerImpl {
-        pub fn new(os: BinaryOS, arch: BinaryArch) -> Self {
-            Self { os, arch }
+        pub fn new(arch: BinaryArch) -> Self {
+            Self { arch }
         }
     }
 
@@ -359,7 +403,7 @@ mod iced_backend {
                     }
                 }
 
-                instructions.push(InstructionInfo::from_iced(&instr, self.os, api_resolution));
+                instructions.push(InstructionInfo::from_iced(&instr, api_resolution));
             }
 
             Ok(instructions)
@@ -370,13 +414,13 @@ mod iced_backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::BinaryArch;
     use crate::core::traits::Disassembler;
-    use crate::core::{BinaryArch, BinaryOS};
 
     #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
     #[test]
     fn test_disasm_factory_x64_intel() {
-        let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
+        let disasm = DisassemblerImpl::new(BinaryArch::X64);
         let iat_map = crate::core::types::IatMap::default();
         let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
@@ -386,7 +430,7 @@ mod tests {
     #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
     #[test]
     fn test_disasm_factory_x86_att() {
-        let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::X86);
+        let disasm = DisassemblerImpl::new(BinaryArch::X86);
         let iat_map = crate::core::types::IatMap::default();
         let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
@@ -396,7 +440,7 @@ mod tests {
     #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
     #[test]
     fn test_disasm_factory_arm() {
-        let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::Arm);
+        let disasm = DisassemblerImpl::new(BinaryArch::Arm);
         // NOP in ARM (little endian): 0x00, 0xF0, 0x20, 0xE3
         let bytes = &[0x00, 0xF0, 0x20, 0xE3];
 
@@ -412,7 +456,7 @@ mod tests {
     #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
     #[test]
     fn test_disasm_factory_arm64() {
-        let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::Arm64);
+        let disasm = DisassemblerImpl::new(BinaryArch::Arm64);
         // NOP in ARM64: 0x1F, 0x20, 0x03, 0xD5
         let bytes = &[0x1F, 0x20, 0x03, 0xD5];
 
@@ -425,10 +469,63 @@ mod tests {
         }
     }
 
+    #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
+    #[test]
+    fn test_capstone_precise_control_flow_class() {
+        use crate::core::traits::Disassembler;
+        use crate::core::types::IatMap;
+        use crate::core::{BinaryArch, InstructionClass};
+        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let iat_map = IatMap::default();
+        // call rel32 ; ret ; jmp short ; je short ; rdtsc ; aesenc xmm0,xmm0
+        let bytes = [
+            0xe8, 0x00, 0x00, 0x00, 0x00, 0xc3, 0xeb, 0x00, 0x74, 0x00, 0x0f, 0x31, 0x66, 0x0f,
+            0x38, 0xdc, 0xc0,
+        ];
+        let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+        assert_eq!(insns.len(), 6);
+        let class: Vec<InstructionClass> =
+            insns.iter().map(|i| i.class(&BinaryArch::X64)).collect();
+        assert_eq!(class[0], InstructionClass::Call);
+        assert_eq!(class[1], InstructionClass::Return);
+        assert_eq!(class[2], InstructionClass::UnconditionalJump);
+        assert_eq!(class[3], InstructionClass::ConditionalJump);
+        // Crypto/anti-debug primitives are NOT branches.
+        assert_eq!(class[4], InstructionClass::Normal);
+        assert_eq!(class[5], InstructionClass::Normal);
+    }
+
+    #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
+    #[test]
+    fn test_capstone_resumes_after_invalid_bytes() {
+        use crate::core::types::IatMap;
+        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let iat_map = IatMap::default();
+        // nop ; 0x06 (invalid in long mode) ; rdtsc ; aesenc xmm0, xmm0
+        let bytes = [0x90, 0x06, 0x0f, 0x31, 0x66, 0x0f, 0x38, 0xdc, 0xc0];
+        let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+        // Without skipdata capstone truncates at the first invalid byte (only `nop`);
+        // with skipdata it decodes everything, so instructions past 0x06 survive.
+        assert!(
+            insns.len() >= 4,
+            "capstone stopped at the invalid byte; decoded {} instructions",
+            insns.len()
+        );
+        let mnems: Vec<String> = insns.iter().map(|i| i.format_mnemonic()).collect();
+        assert!(
+            mnems.iter().any(|m| m == "rdtsc"),
+            "missing rdtsc: {mnems:?}"
+        );
+        assert!(
+            mnems.iter().any(|m| m == "aesenc"),
+            "missing aesenc: {mnems:?}"
+        );
+    }
+
     #[cfg(all(test, feature = "backend-iced", not(feature = "backend-capstone")))]
     #[test]
     fn test_iced_disasm_factory_x64_intel() {
-        let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
+        let disasm = DisassemblerImpl::new(BinaryArch::X64);
         // NOP, RET
         let bytes = &[0x90, 0xC3];
         let iat_map = crate::core::types::IatMap::default();
@@ -445,7 +542,7 @@ mod tests {
     #[cfg(all(test, feature = "backend-iced", not(feature = "backend-capstone")))]
     #[test]
     fn test_iced_disasm_factory_x86_att() {
-        let disasm = DisassemblerImpl::new(BinaryOS::Linux, BinaryArch::X86);
+        let disasm = DisassemblerImpl::new(BinaryArch::X86);
         // MOV EAX, 1
         let bytes = &[0xB8, 0x01, 0x00, 0x00, 0x00];
         let iat_map = crate::core::types::IatMap::default();
@@ -466,7 +563,7 @@ mod tests {
     #[cfg(all(test, feature = "backend-iced", not(feature = "backend-capstone")))]
     #[test]
     fn test_iced_disasm_invalid_bytes() {
-        let disasm = DisassemblerImpl::new(BinaryOS::Win, BinaryArch::X64);
+        let disasm = DisassemblerImpl::new(BinaryArch::X64);
         // 0xFF 0xFF is an invalid x86 instruction
         let bytes = &[0xFF, 0xFF];
         let iat_map = crate::core::types::IatMap::default();

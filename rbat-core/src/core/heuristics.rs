@@ -128,6 +128,7 @@ mod tests {
                 op_str: "".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
             });
         }
         instructions.push(InstructionInfo {
@@ -136,6 +137,7 @@ mod tests {
             op_str: "".into(),
             api_resolution: None,
             matched: smallvec::SmallVec::new(),
+            inst_class: Default::default(),
         });
 
         let code_cave = disassemble_section(&instructions, &[], 0x1000).unwrap();

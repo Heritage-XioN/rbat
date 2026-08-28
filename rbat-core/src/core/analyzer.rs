@@ -73,7 +73,7 @@ where
         iat_map,
     } = binary_data;
 
-    let factory = DisassemblerImpl::new(os, arch);
+    let factory = DisassemblerImpl::new(arch);
     let instructions = factory.disassemble(&text_bytes, entry_addr, &iat_map)?;
     let entry_points =
         collect_function_entry_points(&binary_object, &instructions, &arch, entry_addr);
@@ -239,5 +239,38 @@ mod tests {
         let needle = std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[]));
         let result = analyze_streaming(&buffer, &None, needle, |_| {});
         assert!(result.is_err());
+    }
+
+    /// Regression: capstone backend must surface AES-NI capability rules (parity with iced).
+    /// The AES rules previously failed silently because generated rule data carried inline
+    /// ` = description` suffixes on mnemonic values; `RuleCondition::sanitize` now strips them.
+    #[test]
+    fn test_aes_capability_parity() {
+        let path = "tests/capa-testfiles/a6594d9550d56ddeaac8b3140821e698eefb7163ba29f0119c2ef19beb6040b0.exe_";
+        let buffer = fs::read(path).unwrap();
+        let (analysis, _assessment) = analyze_batch(&buffer, &None).unwrap();
+
+        let rules = crate::core::Rule::load_embedded();
+        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+        needle.populate_cfg(&mut analysis.cfg.clone().unwrap());
+        let features = crate::core::features::FeatureSet::from_analysis_result(&analysis);
+        let matched: Vec<&crate::core::RuleMeta> =
+            crate::core::Rule::evaluate(&features, &rules, &needle);
+
+        let names: Vec<&str> = matched.iter().map(|m| m.name.as_str()).collect();
+        assert!(
+            names
+                .iter()
+                .any(|n| *n == "encrypt data using AES via x86 extensions"),
+            "expected AES encrypt rule to match; matched={:?}",
+            names
+        );
+        assert!(
+            names
+                .iter()
+                .any(|n| *n == "decrypt data using AES via x86 extensions"),
+            "expected AES decrypt rule to match; matched={:?}",
+            names
+        );
     }
 }

@@ -7,11 +7,8 @@ use petgraph::graph::DiGraph;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    core::{
-        BasicBlock, BinaryArch, EdgeType, disassembler::InstructionInfo, types::InstructionClass,
-    },
-    utils::cfg::{classify_instruction, parse_target_address},
+use crate::core::{
+    BasicBlock, BinaryArch, EdgeType, disassembler::InstructionInfo, types::InstructionClass,
 };
 
 /// A serialized and queryable model of a binary's Control Flow Graph.
@@ -31,19 +28,14 @@ impl ControlFlowGraph {
             leaders.insert(instructions[0].address());
         }
 
-        let mut buf_m = String::new();
-        let mut buf_o = String::new();
-
         for (idx, insn) in instructions.iter().enumerate() {
-            insn.format_mnemonic_into(&mut buf_m);
-            let class = classify_instruction(&buf_m, arch);
+            let class = insn.class(arch);
 
             match class {
                 InstructionClass::ConditionalJump
                 | InstructionClass::UnconditionalJump
                 | InstructionClass::Call => {
-                    insn.format_operands_into(&mut buf_o);
-                    if let Some(target) = parse_target_address(&buf_o) {
+                    if let Some(target) = insn.branch_target() {
                         leaders.insert(target);
                     }
                     if idx + 1 < instructions.len() {
@@ -113,10 +105,8 @@ impl ControlFlowGraph {
                 None => continue,
             };
 
-            last_insn.format_mnemonic_into(&mut buf_m);
-            let class = classify_instruction(&buf_m, arch);
-            last_insn.format_operands_into(&mut buf_o);
-            let target = parse_target_address(&buf_o);
+            let class = last_insn.class(arch);
+            let target = last_insn.branch_target();
             let next_block_addr = if idx + 1 < block_starts.len() {
                 Some(block_starts[idx + 1])
             } else {
@@ -233,14 +223,20 @@ mod tests {
     use crate::core::{BinaryArch, EdgeType, disassembler::InstructionInfo};
 
     /// Helper to build an `InstructionInfo` with minimal boilerplate.
-    fn insn(address: u64, mnemonic: &str, op_str: &str) -> InstructionInfo {
+    fn insn_arch(address: u64, mnemonic: &str, op_str: &str, arch: &BinaryArch) -> InstructionInfo {
+        let inst_class = crate::utils::cfg::classify_instruction(mnemonic, arch);
         InstructionInfo {
             address,
             mnemonic: mnemonic.into(),
             op_str: op_str.into(),
             api_resolution: None,
             matched: smallvec::SmallVec::new(),
+            inst_class,
         }
+    }
+
+    fn insn(address: u64, mnemonic: &str, op_str: &str) -> InstructionInfo {
+        insn_arch(address, mnemonic, op_str, &BinaryArch::X64)
     }
 
     #[test]
@@ -435,13 +431,14 @@ mod tests {
 
     #[test]
     fn test_arm64_conditional_branch() {
+        let arch = BinaryArch::Arm64;
         let instructions = vec![
-            insn(0x400, "cmp", "w0, #0"),
-            insn(0x404, "b.eq", "0x40c"),
-            insn(0x408, "mov", "w0, #1"),
-            insn(0x40c, "ret", ""),
+            insn_arch(0x400, "cmp", "w0, #0", &arch),
+            insn_arch(0x404, "b.eq", "0x40c", &arch),
+            insn_arch(0x408, "mov", "w0, #1", &arch),
+            insn_arch(0x40c, "ret", "", &arch),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::Arm64);
+        let cfg = ControlFlowGraph::new(&instructions, &arch);
 
         assert!(
             cfg.edges
