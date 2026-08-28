@@ -59,8 +59,8 @@ pub fn calculate_risk_with(
     let mut counts = FindingCounts::default();
     // Noisy-OR survival product: Π(1 − pᵢ) over weighted indicators.
     let mut survival: f64 = 1.0;
-    // Per-tactic probability sums powering the dimensional breakdown.
-    let mut category_probabilities: AHashMap<String, f64> = AHashMap::new();
+    // Per-tactic Noisy-OR survival products powering the dimensional breakdown.
+    let mut category_survivals: AHashMap<String, f64> = AHashMap::new();
 
     for rule in matched_rules {
         let severity_class = classifier.classify(rule);
@@ -86,9 +86,8 @@ pub fn calculate_risk_with(
 
         survival *= 1.0 - severity_class.probability();
         if let Some(category) = &category {
-            *category_probabilities
-                .entry(category.clone())
-                .or_insert(0.0) += severity_class.probability();
+            *category_survivals.entry(category.clone()).or_insert(1.0) *=
+                1.0 - severity_class.probability();
         }
 
         findings.push(Finding {
@@ -110,11 +109,11 @@ pub fn calculate_risk_with(
 
     let score = (((1.0 - survival) * 100.0).round() as u32).min(100);
 
-    let mut category_breakdown: Vec<CategoryScore> = category_probabilities
+    let mut category_breakdown: Vec<CategoryScore> = category_survivals
         .into_iter()
-        .map(|(category, probability)| CategoryScore {
+        .map(|(category, survival)| CategoryScore {
             category,
-            score: saturating_percentage(probability),
+            score: (((1.0 - survival) * 100.0).round() as u8).min(100),
         })
         .collect();
     category_breakdown.sort_by(|a, b| {
@@ -145,12 +144,6 @@ fn verdict_band(score: u32) -> String {
         "Malicious"
     }
     .to_string()
-}
-
-/// Saturating percentage conversion: `100 · (1 − e^(−Σp))`, rounded and clamped.
-fn saturating_percentage(probability_sum: f64) -> u8 {
-    let pct = (1.0 - (-probability_sum).exp()) * 100.0;
-    pct.round().clamp(0.0, 100.0) as u8
 }
 
 /// Extracts deduplicated bracketed identifiers (`[T1059.003]`, `[C0029]`) from a
@@ -505,8 +498,8 @@ mod tests {
         assert_eq!(assessment.category_breakdown.len(), 1);
         let entry = &assessment.category_breakdown[0];
         assert_eq!(entry.category, "defense_evasion");
-        // Σp = 0.5 → 1 − e^(−0.5) ≈ 39.3% → 39.
-        assert_eq!(entry.score, 39);
+        // Noisy-OR: 1 − (1−0.25)² = 1 − 0.5625 = 0.4375 → 44.
+        assert_eq!(entry.score, 44);
     }
 
     #[test]
