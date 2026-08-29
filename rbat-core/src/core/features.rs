@@ -125,24 +125,49 @@ impl<'buf> FeatureSet<'buf> {
                 indices.insert(block.start_address, idx);
             }
 
-            let mut filtered_edges_count = 0;
             for &(src, dst, edge_type) in &cfg.edges {
                 if let (Some(&src_idx), Some(&dst_idx)) = (indices.get(&src), indices.get(&dst)) {
                     graph.add_edge(src_idx, dst_idx, edge_type);
-                    filtered_edges_count += 1;
                 }
             }
 
             // Cycle/Loop detection via petgraph on user code only
             has_loop = petgraph::algo::toposort(&graph, None).is_err();
 
-            // McCabe complexity on user code only
+            // McCabe complexity per connected component (subgraph/function) on user code only
             if basic_blocks_count > 0 {
-                max_cyclomatic_complexity = if filtered_edges_count >= basic_blocks_count {
-                    filtered_edges_count - basic_blocks_count + 2
-                } else {
-                    1
-                };
+                let mut uf = petgraph::unionfind::UnionFind::new(graph.node_count());
+                for edge in graph.edge_indices() {
+                    let (src, dst) = graph.edge_endpoints(edge).unwrap();
+                    uf.union(src.index(), dst.index());
+                }
+
+                let mut component_nodes = FxHashMap::default();
+                let mut component_edges = FxHashMap::default();
+
+                for node in graph.node_indices() {
+                    let root = uf.find(node.index());
+                    *component_nodes.entry(root).or_insert(0) += 1;
+                }
+
+                for edge in graph.edge_indices() {
+                    let (src, _dst) = graph.edge_endpoints(edge).unwrap();
+                    let root = uf.find(src.index());
+                    *component_edges.entry(root).or_insert(0) += 1;
+                }
+
+                max_cyclomatic_complexity = component_nodes
+                    .into_iter()
+                    .map(|(root, n)| {
+                        let e = component_edges.get(&root).copied().unwrap_or(0);
+                        if e >= n {
+                            e - n + 2
+                        } else {
+                            1
+                        }
+                    })
+                    .max()
+                    .unwrap_or(1);
             }
         }
 
@@ -279,5 +304,74 @@ mod tests {
         // The library block at 0x2000 should be excluded
         assert!(!fs.blocks.iter().any(|b| b.start_address == 0x2000));
         assert_eq!(fs.basic_blocks_count, 1);
+    }
+
+    #[test]
+    fn test_cyclomatic_complexity_per_component() {
+        use crate::core::cfg::ControlFlowGraph;
+
+        let mut res = AnalysisResult::default();
+        res.metadata.architecture = 62;
+
+        // Function 1 at 0x1000: single straight-line block (complexity 1)
+        // Function 2 at 0x2000: conditional jump splitting into 3 blocks, 3 edges (complexity 3 - 3 + 2 = 2)
+        let insns = vec![
+            // Function 1
+            InstructionInfo {
+                address: 0x1000,
+                mnemonic: "mov".into(),
+                op_str: "eax, 1".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
+            },
+            InstructionInfo {
+                address: 0x1005,
+                mnemonic: "ret".into(),
+                op_str: "".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: crate::core::InstructionClass::Return,
+            },
+            // Function 2
+            InstructionInfo {
+                address: 0x2000,
+                mnemonic: "cmp".into(),
+                op_str: "eax, 0".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
+            },
+            InstructionInfo {
+                address: 0x2002,
+                mnemonic: "je".into(),
+                op_str: "0x2006".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: crate::core::InstructionClass::ConditionalJump,
+            },
+            InstructionInfo {
+                address: 0x2004,
+                mnemonic: "nop".into(),
+                op_str: "".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
+            },
+            InstructionInfo {
+                address: 0x2006,
+                mnemonic: "ret".into(),
+                op_str: "".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: crate::core::InstructionClass::Return,
+            },
+        ];
+
+        let cfg = ControlFlowGraph::new(&insns, &crate::core::BinaryArch::X64);
+        res.cfg = Some(cfg);
+
+        let fs = FeatureSet::from_analysis_result(&res);
+        assert_eq!(fs.max_cyclomatic_complexity, 2);
     }
 }
