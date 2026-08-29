@@ -124,9 +124,9 @@ impl BinaryMetadata {
             (_, 8) => "MIPS".to_string(),
             // PowerPC
             (_, 20) | (_, 21) => "PowerPC".to_string(),
-            // Mach-O Machine Codes (cputype & 0xFFFF)
-            ("Mach-O", 7) | ("Mach-O (Fat)", 7) => "x86_64".to_string(),
-            ("Mach-O", 12) | ("Mach-O (Fat)", 12) => "ARM64".to_string(),
+            // Mach-O Machine Codes (cputype & 0xFFFF: 7 is 32-bit x86, 12 is 32-bit ARM)
+            ("Mach-O", 7) | ("Mach-O (Fat)", 7) => "x86".to_string(),
+            ("Mach-O", 12) | ("Mach-O (Fat)", 12) => "ARM".to_string(),
             // Unknown Machine Code Fallback
             _ => format!("Unknown (0x{:04X})", self.architecture),
         }
@@ -193,4 +193,40 @@ pub struct SectionRange<'buf> {
     /// Name of the binary section (e.g. `".text"`, `"__TEXT"`).
     #[serde(borrow)]
     pub name: &'buf str,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_binary_metadata_architecture_names() {
+        let meta_x64 = BinaryMetadata {
+            binary_type: "Linux ELF".to_string(),
+            entry_point: 0x1000,
+            architecture: 62,
+        };
+        assert_eq!(meta_x64.architecture_name(), "x86_64");
+
+        let meta_macho_x86 = BinaryMetadata {
+            binary_type: "Mach-O".to_string(),
+            entry_point: 0x1000,
+            architecture: 7,
+        };
+        assert_eq!(meta_macho_x86.architecture_name(), "x86");
+
+        let meta_macho_arm = BinaryMetadata {
+            binary_type: "Mach-O".to_string(),
+            entry_point: 0x1000,
+            architecture: 12,
+        };
+        assert_eq!(meta_macho_arm.architecture_name(), "ARM");
+
+        let meta_arm64 = BinaryMetadata {
+            binary_type: "Linux ELF".to_string(),
+            entry_point: 0x1000,
+            architecture: 183,
+        };
+        assert_eq!(meta_arm64.architecture_name(), "ARM64");
+    }
 }
