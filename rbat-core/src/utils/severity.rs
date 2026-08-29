@@ -99,7 +99,13 @@ impl SeverityClassifier {
         let map_entries = |entries: BTreeMap<String, String>| {
             entries
                 .into_iter()
-                .filter_map(|(key, class)| parse_class(&class).map(|c| (key.to_lowercase(), c)))
+                .filter_map(|(key, class)| match parse_class(&class) {
+                    Some(c) => Some((key.to_lowercase(), c)),
+                    None => {
+                        eprintln!("warning: unrecognized severity class '{class}' for '{key}'");
+                        None
+                    }
+                })
                 .collect()
         };
         Self {
@@ -122,11 +128,21 @@ impl SeverityClassifier {
         for (key, class) in table.namespace_defaults {
             if let Some(c) = parse_class(&class) {
                 self.namespace_defaults.insert(key.to_lowercase(), c);
+            } else {
+                eprintln!(
+                    "warning: unrecognized severity class '{class}' for namespace '{key}' in {}",
+                    path.display()
+                );
             }
         }
         for (key, class) in table.overrides {
             if let Some(c) = parse_class(&class) {
                 self.rule_overrides.insert(key.to_lowercase(), c);
+            } else {
+                eprintln!(
+                    "warning: unrecognized severity class '{class}' for rule '{key}' in {}",
+                    path.display()
+                );
             }
         }
         Ok(())
