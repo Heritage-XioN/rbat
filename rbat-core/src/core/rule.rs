@@ -32,12 +32,17 @@ impl Rule {
         Ok(rule_var)
     }
 
-    /// Evaluates if the feature set matches this rule's conditions.
-    pub fn matches(&self, features: &FeatureSet, needle: &crate::core::types::NeedleIndex) -> bool {
+    /// Evaluates if the feature set matches this rule's conditions given previously matched rule dependencies.
+    pub fn matches(
+        &self,
+        features: &FeatureSet,
+        needle: &crate::core::types::NeedleIndex,
+        matched_rules: &ahash::AHashSet<&str>,
+    ) -> bool {
         self.rule
             .features
             .iter()
-            .all(|c| c.matches(features, needle))
+            .all(|c| c.matches(features, needle, matched_rules))
     }
 
     /// Loads all embedded JSON and YAML rules from assets.
@@ -91,16 +96,41 @@ impl Rule {
     }
 
     /// Evaluates a set of rules against the feature set and returns matching rule metadata.
+    /// Uses iterative multi-pass evaluation to support rule dependencies (`match:` conditions)
+    /// and library rules (`lib: true`).
     pub fn evaluate<'rule>(
         features: &FeatureSet,
         rules: &'rule [Self],
         needle: &crate::core::types::NeedleIndex,
     ) -> Vec<&'rule RuleMeta> {
+        let mut matched_names: ahash::AHashSet<&str> = ahash::AHashSet::new();
+        let mut matched_indices: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
+
+        // Iteratively evaluate until fixpoint (no new rules match in an iteration)
+        loop {
+            let new_matches: Vec<(usize, &'rule str)> = rules
+                .par_iter()
+                .enumerate()
+                .filter(|(i, _)| !matched_indices.contains(i))
+                .filter(|(_, rule)| rule.matches(features, needle, &matched_names))
+                .map(|(i, rule)| (i, rule.rule.meta.name.as_str()))
+                .collect();
+
+            if new_matches.is_empty() {
+                break;
+            }
+
+            for (idx, name) in new_matches {
+                matched_indices.insert(idx);
+                matched_names.insert(name);
+            }
+        }
+
         rules
-            .par_iter()
-            .filter(|rule| !rule.rule.meta.lib.unwrap_or(false))
-            .filter(|rule| rule.matches(features, needle))
-            .map(|rule| &rule.rule.meta)
+            .iter()
+            .enumerate()
+            .filter(|(i, rule)| matched_indices.contains(i) && !rule.rule.meta.lib.unwrap_or(false))
+            .map(|(_, rule)| &rule.rule.meta)
             .collect()
     }
 }
@@ -320,7 +350,207 @@ mod tests {
         };
         let needle = crate::core::types::NeedleIndex::build_from_rules(&[]);
 
-        assert!(rule_pe.matches(&features, &needle));
-        assert!(!rule_elf.matches(&features, &needle));
+        let empty_set = ahash::AHashSet::new();
+        assert!(rule_pe.matches(&features, &needle, &empty_set));
+        assert!(!rule_elf.matches(&features, &needle, &empty_set));
+    }
+
+    #[test]
+    fn test_rule_dependency_chaining_with_match() {
+        // Lib rule that matches on VirtualAlloc API
+        let lib_rule = Rule {
+            rule: RuleInner {
+                meta: RuleMeta {
+                    name: "allocate memory".to_owned(),
+                    lib: Some(true),
+                    ..Default::default()
+                },
+                features: vec![RuleCondition::Api {
+                    api: "VirtualAlloc".to_owned(),
+                }],
+            },
+        };
+
+        // Consumer rule that matches on the lib rule dependency via match:
+        let consumer_rule = Rule {
+            rule: RuleInner {
+                meta: RuleMeta {
+                    name: "allocate executable memory".to_owned(),
+                    ..Default::default()
+                },
+                features: vec![
+                    RuleCondition::Match {
+                        match_name: "allocate memory".to_owned(),
+                    },
+                    RuleCondition::Format {
+                        format: "pe".to_owned(),
+                    },
+                ],
+            },
+        };
+
+        let rules = vec![consumer_rule, lib_rule];
+        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+
+        let empty_entropy = AHashMap::new();
+        let mut api_pattern = None;
+        if let Some(&id) = needle.lookup.get("VirtualAlloc") {
+            api_pattern = Some(id);
+        }
+
+        let mut apis = FxHashSet::default();
+        if let Some(id) = api_pattern {
+            apis.insert(id);
+        }
+
+        let features = FeatureSet {
+            apis,
+            strings: AHashSet::new(),
+            section_entropies: &empty_entropy,
+            has_code_cave: false,
+            has_packer_sig: false,
+            os: "windows pe".to_owned(),
+            arch: "x86_64".to_owned(),
+            binary_format: "pe".to_owned(),
+            basic_blocks_count: 0,
+            has_loop: false,
+            max_cyclomatic_complexity: 0,
+            blocks: Vec::new(),
+        };
+
+        let matched = Rule::evaluate(&features, &rules, &needle);
+        // Only the consumer rule should be returned (lib rules are filtered from final results)
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].name, "allocate executable memory");
+    }
+
+    #[test]
+    fn test_count_api_multiple_occurrences() {
+        use crate::core::types::BasicBlock;
+
+        let rule_count = Rule {
+            rule: RuleInner {
+                meta: RuleMeta {
+                    name: "MultipleAllocations".to_owned(),
+                    ..Default::default()
+                },
+                features: vec![RuleCondition::Count {
+                    condition: Box::new(RuleCondition::Api {
+                        api: "VirtualAlloc".to_owned(),
+                    }),
+                    count: 2,
+                }],
+            },
+        };
+
+        let rules = vec![rule_count];
+        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+        let alloc_id = *needle.lookup.get("VirtualAlloc").unwrap();
+
+        let mut insn1 = InstructionInfo {
+            address: 0x1000,
+            mnemonic: "call".into(),
+            op_str: "VirtualAlloc".into(),
+            api_resolution: Some("VirtualAlloc".into()),
+            matched: smallvec::SmallVec::new(),
+            inst_class: Default::default(),
+        };
+        insn1.matched.push(alloc_id);
+
+        let mut insn2 = InstructionInfo {
+            address: 0x1020,
+            mnemonic: "call".into(),
+            op_str: "VirtualAlloc".into(),
+            api_resolution: Some("VirtualAlloc".into()),
+            matched: smallvec::SmallVec::new(),
+            inst_class: Default::default(),
+        };
+        insn2.matched.push(alloc_id);
+
+        needle.present[alloc_id.as_usize()].store(true, std::sync::atomic::Ordering::Relaxed);
+
+        let block = BasicBlock {
+            start_address: 0x1000,
+            end_address: 0x1030,
+            instructions: vec![insn1, insn2],
+        };
+
+        let empty_entropy = AHashMap::new();
+        let features_two_calls = FeatureSet {
+            apis: FxHashSet::default(),
+            strings: AHashSet::new(),
+            section_entropies: &empty_entropy,
+            has_code_cave: false,
+            has_packer_sig: false,
+            os: "windows".to_owned(),
+            arch: "x86_64".to_owned(),
+            binary_format: "pe".to_owned(),
+            basic_blocks_count: 1,
+            has_loop: false,
+            max_cyclomatic_complexity: 1,
+            blocks: vec![&block],
+        };
+
+        let matched = Rule::evaluate(&features_two_calls, &rules, &needle);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].name, "MultipleAllocations");
+    }
+
+    #[test]
+    fn test_overlapping_needle_matching() {
+        use crate::core::{ControlFlowGraph, types::BasicBlock};
+
+        let rule_short = Rule {
+            rule: RuleInner {
+                meta: RuleMeta {
+                    name: "AllocRule".to_owned(),
+                    ..Default::default()
+                },
+                features: vec![RuleCondition::Api {
+                    api: "alloc".to_owned(),
+                }],
+            },
+        };
+
+        let rule_long = Rule {
+            rule: RuleInner {
+                meta: RuleMeta {
+                    name: "VirtualAllocRule".to_owned(),
+                    ..Default::default()
+                },
+                features: vec![RuleCondition::Api {
+                    api: "virtualalloc".to_owned(),
+                }],
+            },
+        };
+
+        let rules = vec![rule_short, rule_long];
+        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+
+        let insn = InstructionInfo {
+            address: 0x1000,
+            mnemonic: "call".into(),
+            op_str: "0x4010".into(),
+            api_resolution: Some("VirtualAlloc".into()),
+            matched: smallvec::SmallVec::new(),
+            inst_class: Default::default(),
+        };
+
+        let block = BasicBlock {
+            start_address: 0x1000,
+            end_address: 0x1005,
+            instructions: vec![insn],
+        };
+
+        let mut cfg = ControlFlowGraph {
+            blocks: [(0x1000, block)].into_iter().collect(),
+            edges: vec![],
+        };
+
+        needle.populate_cfg(&mut cfg);
+
+        let insn_matched = &cfg.blocks[&0x1000].instructions[0].matched;
+        // Both overlapping patterns ("alloc" and "virtualalloc") must match
+        assert_eq!(insn_matched.len(), 2, "Both overlapping patterns must be present in matched");
     }
 }

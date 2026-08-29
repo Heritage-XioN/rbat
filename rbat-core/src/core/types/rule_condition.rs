@@ -4,7 +4,7 @@ use crate::{
     core::{BasicBlock, FeatureSet, NeedleIndex, RuleTag, disassembler::InstructionInfo},
     utils::rules::parse_number_constant,
 };
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 
@@ -295,17 +295,23 @@ impl RuleCondition {
         }
     }
 
-    /// Recursively evaluates the condition against the feature set.
-    pub fn matches(&self, features: &FeatureSet, needle: &NeedleIndex) -> bool {
+    /// Recursively evaluates the condition against the feature set and previously matched rule dependencies.
+    pub fn matches(
+        &self,
+        features: &FeatureSet,
+        needle: &NeedleIndex,
+        matched_rules: &AHashSet<&str>,
+    ) -> bool {
         match self {
             // Logic Operators
-            Self::And { and } => and.iter().all(|c| c.matches(features, needle)),
-            Self::Or { or } => or.iter().any(|c| c.matches(features, needle)),
-            Self::Not { not } => !not.matches(features, needle),
+            Self::And { and } => and.iter().all(|c| c.matches(features, needle, matched_rules)),
+            Self::Or { or } => or.iter().any(|c| c.matches(features, needle, matched_rules)),
+            Self::Not { not } => !not.matches(features, needle, matched_rules),
             // capa Supported Feature Assertions
             Self::Api { api } => {
                 if let Some(id) = needle.lookup.get(api) {
                     features.apis.contains(id)
+                        || needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
                     false
                 }
@@ -318,14 +324,7 @@ impl RuleCondition {
                     false
                 }
             }
-            Self::Match { match_name } => {
-                if let Some(id) = needle.lookup.get(match_name)
-                    && features.apis.contains(id)
-                {
-                    return true;
-                }
-                features.strings.iter().any(|s| s.contains(match_name))
-            }
+            Self::Match { match_name } => matched_rules.contains(match_name.as_str()),
             Self::Entropy { section, min } => features
                 .section_entropies
                 .get(section.as_str())
@@ -367,6 +366,7 @@ impl RuleCondition {
             Self::Import { import } => {
                 if let Some(id) = needle.lookup.get(import) {
                     features.apis.contains(id)
+                        || needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
                     false
                 }
@@ -374,6 +374,7 @@ impl RuleCondition {
             Self::Export { export } => {
                 if let Some(id) = needle.lookup.get(export) {
                     features.apis.contains(id)
+                        || needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
                     false
                 }
@@ -384,15 +385,25 @@ impl RuleCondition {
             }
             // Supported count/offset/number features
             Self::Number { number } | Self::Offset { offset: number } => {
-                features.strings.iter().any(|s| s.contains(number))
+                if let Some(id) = needle.lookup.get(number) {
+                    needle.present[id.as_usize()].load(Ordering::Relaxed)
+                } else {
+                    false
+                }
             }
             Self::Count { condition, count } => match &**condition {
                 Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
                     if let Some(id) = needle.lookup.get(api) {
-                        if features.apis.contains(id) {
-                            1 >= *count
-                        } else {
+                        if !needle.present[id.as_usize()].load(Ordering::Relaxed) {
                             0 == *count
+                        } else {
+                            features
+                                .blocks
+                                .iter()
+                                .flat_map(|b| b.instructions.iter())
+                                .filter(|insn| insn.matched.contains(id))
+                                .count()
+                                >= *count
                         }
                     } else {
                         false
@@ -423,18 +434,12 @@ impl RuleCondition {
                     }
                 }
                 Self::Match { match_name } => {
-                    let mut cnt = features
-                        .strings
-                        .iter()
-                        .filter(|s| s.contains(match_name))
-                        .count();
-
-                    if let Some(id) = needle.lookup.get(match_name)
-                        && features.apis.contains(id)
-                    {
-                        cnt += 1;
-                    }
-                    cnt >= *count
+                    let matched_cnt = if matched_rules.contains(match_name.as_str()) {
+                        1
+                    } else {
+                        0
+                    };
+                    matched_cnt >= *count
                 }
                 _ => false,
             },
@@ -465,10 +470,7 @@ impl RuleCondition {
                 .lookup
                 .get(mnemonic)
                 .is_some_and(|id| insn.matched.contains(id)),
-            Self::Match { match_name } => needle
-                .lookup
-                .get(match_name)
-                .is_some_and(|id| insn.matched.contains(id)),
+            Self::Match { .. } => false,
             Self::Number { number } | Self::Offset { offset: number } => needle
                 .lookup
                 .get(number)
@@ -512,12 +514,7 @@ impl RuleCondition {
                     .iter()
                     .any(|insn| insn.matched.contains(id))
             }),
-            Self::Match { match_name } => needle.lookup.get(match_name).is_some_and(|id| {
-                block
-                    .instructions
-                    .iter()
-                    .any(|insn| insn.matched.contains(id))
-            }),
+            Self::Match { .. } => false,
             Self::BasicBlockScope { conditions } => conditions
                 .iter()
                 .all(|cond| cond.matches_block(block, needle)),
@@ -567,10 +564,7 @@ impl RuleCondition {
                 .lookup
                 .get(mnemonic)
                 .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed)),
-            Self::Match { match_name } => needle
-                .lookup
-                .get(match_name)
-                .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed)),
+            Self::Match { .. } => true,
             Self::Number { number } | Self::Offset { offset: number } => needle
                 .lookup
                 .get(number)
