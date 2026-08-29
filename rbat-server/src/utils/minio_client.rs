@@ -2,7 +2,7 @@
 //!
 //! Provides helper functions to connect to, verify, and initialize a target S3 bucket in MinIO.
 
-use crate::{RbatServerError, Result};
+use crate::{RbatServerError, Result, S3_BUCKET_NAME};
 use s3::Bucket as S3Client;
 use s3::creds::Credentials;
 use s3::{BucketConfiguration, Region};
@@ -67,8 +67,7 @@ pub async fn setup_minio_client() -> Result<S3Client> {
         endpoint: endpoint.clone(),
     };
 
-    let bucket_name = "pt-compromised-binaries";
-    let mut bucket = S3Client::new(bucket_name, region.clone(), credentials.clone())
+    let mut bucket = S3Client::new(S3_BUCKET_NAME, region.clone(), credentials.clone())
         .map_err(|e| RbatServerError::S3client(e.to_string()))?;
     bucket.set_path_style();
 
@@ -79,20 +78,20 @@ pub async fn setup_minio_client() -> Result<S3Client> {
         .map_err(|e| RbatServerError::S3client(e.to_string()))?;
     if !exists {
         tracing::info!(
-            bucket = bucket_name,
+            bucket = S3_BUCKET_NAME,
             "Bucket does not exist. Creating it..."
         );
         S3Client::create_with_path_style(
-            bucket_name,
+            S3_BUCKET_NAME,
             region,
             credentials,
             BucketConfiguration::default(),
         )
         .await
         .map_err(|e| RbatServerError::S3client(e.to_string()))?;
-        tracing::info!(bucket = bucket_name, "Bucket created successfully.");
+        tracing::info!(bucket = S3_BUCKET_NAME, "Bucket created successfully.");
     } else {
-        tracing::info!(bucket = bucket_name, "Bucket already exists.");
+        tracing::info!(bucket = S3_BUCKET_NAME, "Bucket already exists.");
     }
 
     Ok(bucket)

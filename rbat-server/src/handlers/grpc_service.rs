@@ -5,7 +5,7 @@
 //! to MinIO object storage using multipart uploading.
 
 use crate::{
-    AppState,
+    AppState, S3_BUCKET_NAME,
     transfer::{UploadRequest, UploadResponse, analysis_server::Analysis},
 };
 
@@ -36,7 +36,6 @@ impl Analysis for GRPCservice {
     ) -> Result<Response<UploadResponse>, Status> {
         let mut stream = request.into_inner();
         let s3_client = &self.state.s3_client;
-        let bucket = "pt-compromised-binaries";
         let file_id = Uuid::new_v4().to_string();
         tracing::Span::current().record("file_id", &file_id);
         let mut total_bytes = 0;
@@ -46,7 +45,7 @@ impl Analysis for GRPCservice {
             .initiate_multipart_upload(&file_id, "application/octet-stream")
             .await
             .map_err(|e| {
-                tracing::error!(bucket, error = %e, "Failed to initiate S3 multipart upload");
+                tracing::error!(S3_BUCKET_NAME, error = %e, "Failed to initiate S3 multipart upload");
                 tonic::Status::internal(format!("Failed to initiate S3 multipart upload: {}", e))
             })?;
 
@@ -70,7 +69,7 @@ impl Analysis for GRPCservice {
                 .await
                 .map_err(|e| {
                     tracing::error!(
-                        bucket,
+                        S3_BUCKET_NAME,
                         upload_id,
                         part_number,
                         error = %e,
@@ -93,7 +92,7 @@ impl Analysis for GRPCservice {
             .await
             .map_err(|e| {
                 tracing::error!(
-                    bucket,
+                    S3_BUCKET_NAME,
                     upload_id,
                     error = %e,
                     "Failed to complete S3 multipart upload"

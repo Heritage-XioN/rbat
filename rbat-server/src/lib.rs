@@ -22,6 +22,9 @@ use axum_standardwebhooks::SharedWebhook;
 use s3::Bucket as S3Client;
 use thiserror::Error;
 
+/// minio binary storage bucket
+pub const S3_BUCKET_NAME: &str = "pt-compromised-binaries";
+
 /// Represents all possible error conditions returned by the RBAT server library.
 #[derive(Debug, Error)]
 pub enum RbatServerError {

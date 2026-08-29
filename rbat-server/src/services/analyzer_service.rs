@@ -5,7 +5,7 @@
 //! processing pipeline to heavy-CPU Rayon worker threads, and sends the completion status
 //! payload to the client via Webhook dispatch.
 
-use crate::utils::webhook_sender::dispatch_webhook;
+use crate::{S3_BUCKET_NAME, utils::webhook_sender::dispatch_webhook};
 use rbat::core::analyzer::analyze_batch;
 use s3::Bucket as S3Client;
 use serde_json::{json, to_value};
@@ -27,10 +27,8 @@ pub fn analyze_stored_binary(s3_client: S3Client, file_id: String, webhook_secre
     let span = tracing::info_span!("analyze_stored_binary_background", file_id = %file_id_clone);
     tokio::spawn(
         async move {
-            let bucket = "pt-compromised-binaries";
-
             tracing::debug!(
-                bucket,
+                S3_BUCKET_NAME,
                 key = %file_id,
                 "Downloading binary from S3"
             );
@@ -38,7 +36,7 @@ pub fn analyze_stored_binary(s3_client: S3Client, file_id: String, webhook_secre
             let download_output = match s3_client.get_object(&file_id).await {
                 Ok(output) => output,
                 Err(e) => {
-                    tracing::error!(bucket, key = %file_id, error = ?e, "Failed to get object from S3");
+                    tracing::error!(S3_BUCKET_NAME, key = %file_id, error = ?e, "Failed to get object from S3");
                     return;
                 }
             };
@@ -110,9 +108,9 @@ pub fn analyze_stored_binary(s3_client: S3Client, file_id: String, webhook_secre
 
             // drop minio copy
             if let Err(e) = s3_client.delete_object(&file_id).await {
-                tracing::error!(bucket, key = %file_id, error = ?e, "Failed to delete binary from MinIO");
+                tracing::error!(S3_BUCKET_NAME, key = %file_id, error = ?e, "Failed to delete binary from MinIO");
             } else {
-                tracing::info!(bucket, key = %file_id, "Successfully deleted temporary binary from MinIO");
+                tracing::info!(S3_BUCKET_NAME, key = %file_id, "Successfully deleted temporary binary from MinIO");
             }
         }
         .instrument(span),
