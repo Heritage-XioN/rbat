@@ -55,6 +55,7 @@ impl ControlFlowGraph {
         }
 
         let mut sorted_leaders: Vec<u64> = leaders.into_iter().collect();
+        sorted_leaders.retain(|addr| addr_to_idx.contains_key(addr));
         sorted_leaders.sort_unstable();
 
         let mut blocks = FxHashMap::default();
@@ -397,6 +398,25 @@ mod tests {
             .filter(|(_, dst, _)| *dst == 0x9999)
             .collect();
         assert!(edges_to_9999.is_empty());
+    }
+
+    #[test]
+    fn test_invalid_jump_target_between_valid_leaders() {
+        // Jump targets 0x1001 which is not an instruction boundary between 0x1000 and 0x1002.
+        // It must NOT swallow the block at 0x1002.
+        let instructions = vec![
+            insn(0x1000, "jmp", "0x1001"),
+            insn(0x1002, "nop", ""),
+            insn(0x1003, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+
+        // Leaders must be 0x1000 and 0x1002 (0x1001 is filtered out)
+        assert_eq!(cfg.blocks.len(), 2);
+        assert!(cfg.blocks.contains_key(&0x1000));
+        assert!(cfg.blocks.contains_key(&0x1002));
+        assert_eq!(cfg.blocks[&0x1000].instructions.len(), 1);
+        assert_eq!(cfg.blocks[&0x1002].instructions.len(), 2);
     }
 
     #[test]
