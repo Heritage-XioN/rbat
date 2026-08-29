@@ -551,6 +551,10 @@ mod tests {
 
         let insn_matched = &cfg.blocks[&0x1000].instructions[0].matched;
         // Both overlapping patterns ("alloc" and "virtualalloc") must match
-        assert_eq!(insn_matched.len(), 2, "Both overlapping patterns must be present in matched");
+        assert_eq!(
+            insn_matched.len(),
+            2,
+            "Both overlapping patterns must be present in matched"
+        );
     }
 }

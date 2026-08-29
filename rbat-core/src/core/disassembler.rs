@@ -510,7 +510,10 @@ mod tests {
         let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "b");
-        assert_eq!(insns[0].class(&BinaryArch::Arm), InstructionClass::UnconditionalJump);
+        assert_eq!(
+            insns[0].class(&BinaryArch::Arm),
+            InstructionClass::UnconditionalJump
+        );
     }
 
     #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]

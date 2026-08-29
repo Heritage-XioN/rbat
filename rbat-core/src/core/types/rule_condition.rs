@@ -304,8 +304,12 @@ impl RuleCondition {
     ) -> bool {
         match self {
             // Logic Operators
-            Self::And { and } => and.iter().all(|c| c.matches(features, needle, matched_rules)),
-            Self::Or { or } => or.iter().any(|c| c.matches(features, needle, matched_rules)),
+            Self::And { and } => and
+                .iter()
+                .all(|c| c.matches(features, needle, matched_rules)),
+            Self::Or { or } => or
+                .iter()
+                .any(|c| c.matches(features, needle, matched_rules)),
             Self::Not { not } => !not.matches(features, needle, matched_rules),
             // capa Supported Feature Assertions
             Self::Api { api } => {

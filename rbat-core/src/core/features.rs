@@ -160,11 +160,7 @@ impl<'buf> FeatureSet<'buf> {
                     .into_iter()
                     .map(|(root, n)| {
                         let e = component_edges.get(&root).copied().unwrap_or(0);
-                        if e >= n {
-                            e - n + 2
-                        } else {
-                            1
-                        }
+                        if e >= n { e - n + 2 } else { 1 }
                     })
                     .max()
                     .unwrap_or(1);
