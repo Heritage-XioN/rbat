@@ -259,16 +259,12 @@ mod tests {
 
         let names: Vec<&str> = matched.iter().map(|m| m.name.as_str()).collect();
         assert!(
-            names
-                .iter()
-                .any(|n| *n == "encrypt data using AES via x86 extensions"),
+            names.contains(&"encrypt data using AES via x86 extensions"),
             "expected AES encrypt rule to match; matched={:?}",
             names
         );
         assert!(
-            names
-                .iter()
-                .any(|n| *n == "decrypt data using AES via x86 extensions"),
+            names.contains(&"decrypt data using AES via x86 extensions"),
             "expected AES decrypt rule to match; matched={:?}",
             names
         );
