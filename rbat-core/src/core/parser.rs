@@ -68,7 +68,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
     pub fn parse_buffer(&self) -> Result<ParsedBinaryContext> {
         let os = match self.binary_object.format() {
             BinaryFormat::Elf => BinaryOS::Linux,
-            BinaryFormat::Pe => BinaryOS::Win,
+            BinaryFormat::Pe | BinaryFormat::Coff => BinaryOS::Win,
             BinaryFormat::MachO => BinaryOS::Mac,
             _ => {
                 return Err(RbatError::UnsupportedBinaryFormat(
@@ -93,16 +93,26 @@ impl<'data, 'obj> Parser<'data, 'obj> {
         let entry_addr = self.binary_object.entry();
 
         let mut text_bytes = None;
+        let mut first_fallback_text = None;
+
         for section in self.binary_object.sections() {
             if section.kind() == SectionKind::Text
                 && let Ok(data) = section.uncompressed_data()
             {
-                text_bytes = Some(data.into_owned());
-                break;
+                let start = section.address();
+                let end = start + section.size();
+                if entry_addr != 0 && entry_addr >= start && entry_addr < end {
+                    text_bytes = Some(data.into_owned());
+                    break;
+                } else if first_fallback_text.is_none() && !data.is_empty() {
+                    first_fallback_text = Some(data.into_owned());
+                }
             }
         }
 
-        let text_bytes = text_bytes.ok_or(RbatError::MissingExecutableSection)?;
+        let text_bytes = text_bytes
+            .or(first_fallback_text)
+            .ok_or(RbatError::MissingExecutableSection)?;
 
         let iat_map = self.build_iat_map();
 
@@ -136,17 +146,18 @@ impl<'data, 'obj> Parser<'data, 'obj> {
                         };
 
                         if let Ok(mut thunks) = import_table.thunks(thunk_rva) {
-                            let mut i = 0;
+                            let mut thunk_index = 0u64;
                             while let Ok(Some(thunk_data)) = thunks.next::<ImageNtHeaders32>() {
                                 if let Ok(object::read::pe::Import::Name(_, name)) =
                                     import_table.import::<ImageNtHeaders32>(thunk_data)
                                 {
-                                    let iat_addr = image_base + (first_thunk + (i * 4)) as u64;
+                                    let iat_addr =
+                                        image_base + first_thunk as u64 + (thunk_index * 4);
                                     if let Ok(s) = std::str::from_utf8(name) {
                                         map.insert(iat_addr, s.into());
                                     }
                                 }
-                                i += 1;
+                                thunk_index += 1;
                             }
                         }
                     }
@@ -167,17 +178,18 @@ impl<'data, 'obj> Parser<'data, 'obj> {
                         };
 
                         if let Ok(mut thunks) = import_table.thunks(thunk_rva) {
-                            let mut i = 0;
+                            let mut thunk_index = 0u64;
                             while let Ok(Some(thunk_data)) = thunks.next::<ImageNtHeaders64>() {
                                 if let Ok(object::read::pe::Import::Name(_, name)) =
                                     import_table.import::<ImageNtHeaders64>(thunk_data)
                                 {
-                                    let iat_addr = image_base + (first_thunk + (i * 8)) as u64;
+                                    let iat_addr =
+                                        image_base + first_thunk as u64 + (thunk_index * 8);
                                     if let Ok(s) = std::str::from_utf8(name) {
                                         map.insert(iat_addr, s.into());
                                     }
                                 }
-                                i += 1;
+                                thunk_index += 1;
                             }
                         }
                     }
@@ -318,5 +330,21 @@ mod tests {
             }
             _ => panic!("Expected UnsupportedBinaryFormat error, got {:?}", result),
         }
+    }
+
+    #[test]
+    fn test_parse_buffer_pe_stub() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dummy_pe");
+        test_helpers::generate_pe_stub(&path);
+
+        let buffer = fs::read(&path).unwrap();
+        let binary_object = object::File::parse(&buffer[..]).unwrap();
+        let parser = Parser::new(&binary_object);
+        let result = parser.parse_buffer();
+        assert!(result.is_ok());
+        let ctx = result.unwrap();
+        assert_eq!(ctx.os, BinaryOS::Win);
+        assert!(!ctx.text_bytes.is_empty());
     }
 }
