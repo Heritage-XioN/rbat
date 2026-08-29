@@ -122,9 +122,11 @@ mod capstone_backend {
             InstructionClass::Return
         } else if grouped(InsnGroupType::CS_GRP_JUMP as u8) {
             // Capstone tags both conditional and unconditional jumps with the
-            // generic `Jump` group; only `jmp` is unconditional.
+            // generic `Jump` group. Recognize x86 (`jmp`) and ARM/ARM64 (`b`, `bx`, `br`) unconditional jumps.
             match insn.mnemonic() {
-                Some("jmp") => InstructionClass::UnconditionalJump,
+                Some("jmp") | Some("b") | Some("bx") | Some("br") => {
+                    InstructionClass::UnconditionalJump
+                }
                 _ => InstructionClass::ConditionalJump,
             }
         } else {
@@ -493,6 +495,22 @@ mod tests {
         // Crypto/anti-debug primitives are NOT branches.
         assert_eq!(class[4], InstructionClass::Normal);
         assert_eq!(class[5], InstructionClass::Normal);
+    }
+
+    #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
+    #[test]
+    fn test_capstone_arm_unconditional_branch_class() {
+        use crate::core::traits::Disassembler;
+        use crate::core::types::IatMap;
+        use crate::core::{BinaryArch, InstructionClass};
+        let disasm = DisassemblerImpl::new(BinaryArch::Arm);
+        let iat_map = IatMap::default();
+        // b #0 (ARM32 little endian: 0x00, 0x00, 0x00, 0xEA)
+        let bytes = [0x00, 0x00, 0x00, 0xEA];
+        let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].format_mnemonic(), "b");
+        assert_eq!(insns[0].class(&BinaryArch::Arm), InstructionClass::UnconditionalJump);
     }
 
     #[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
