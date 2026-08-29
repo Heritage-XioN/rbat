@@ -505,10 +505,12 @@ impl<'buf> App<'buf> {
             .render(left_chunks[1], buf);
 
         // Column 2: Entropy Summary
-        let entropy_items: Vec<Row> = self
-            .analysis_result
-            .section_entropy
-            .iter()
+        let mut overview_entropy: Vec<(&&str, &f64)> =
+            self.analysis_result.section_entropy.iter().collect();
+        overview_entropy.sort_by_key(|(name, _)| **name);
+
+        let entropy_items: Vec<Row> = overview_entropy
+            .into_iter()
             .map(|(name, val)| {
                 let color = if *val > 7.0 {
                     palette::DANGER
@@ -572,8 +574,11 @@ impl<'buf> App<'buf> {
     fn render_security(&mut self, area: Rect, buf: &mut Buffer) {
         let mut items = Vec::new();
 
-        // Combine all security findings into one list for unified scrolling
-        for (rule, matches) in &self.analysis_result.packer_signatures {
+        // Sort packer signatures deterministically
+        let mut packers: Vec<_> = self.analysis_result.packer_signatures.iter().collect();
+        packers.sort_by_key(|(rule, _)| **rule);
+
+        for (rule, matches) in packers {
             items.push(ListItem::new(Line::from(vec![
                 Span::styled(
                     "PACKER: ",
@@ -584,7 +589,12 @@ impl<'buf> App<'buf> {
                 Span::raw(format!("{} ({} matches)", rule, matches.len())),
             ])));
         }
-        for (rule, matches) in &self.analysis_result.string_values {
+
+        // Sort YARA matches deterministically
+        let mut yaras: Vec<_> = self.analysis_result.string_values.iter().collect();
+        yaras.sort_by_key(|(rule, _)| **rule);
+
+        for (rule, matches) in yaras {
             items.push(ListItem::new(Line::from(vec![
                 Span::styled(
                     "YARA: ",
@@ -594,6 +604,13 @@ impl<'buf> App<'buf> {
                 ),
                 Span::raw(format!("{} ({} matches)", rule, matches.len())),
             ])));
+        }
+
+        if items.is_empty() {
+            items.push(ListItem::new(Line::from(Span::styled(
+                "No security indicators or packer signatures detected.",
+                Style::default().fg(palette::MUTED),
+            ))));
         }
 
         let list = List::new(items)
@@ -697,10 +714,12 @@ impl<'buf> App<'buf> {
     }
 
     fn render_entropy(&mut self, area: Rect, buf: &mut Buffer) {
-        let rows: Vec<Row> = self
-            .analysis_result
-            .section_entropy
-            .iter()
+        let mut section_entries: Vec<(&&str, &f64)> =
+            self.analysis_result.section_entropy.iter().collect();
+        section_entries.sort_by_key(|(name, _)| **name);
+
+        let rows: Vec<Row> = section_entries
+            .into_iter()
             .map(|(name, val)| {
                 let status = if *val > 7.5 {
                     "CRITICAL"
@@ -851,5 +870,27 @@ mod tests {
         assert_eq!(app.instr_state.selected(), Some(0));
         app.prev_instruction();
         assert_eq!(app.instr_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_security_and_entropy_rendering_deterministic() {
+        let mut result = AnalysisResult::default();
+        result.packer_signatures.insert("UPX", vec![]);
+        result.packer_signatures.insert("ASPack", vec![]);
+        result.string_values.insert("rule_b", vec![]);
+        result.string_values.insert("rule_a", vec![]);
+        result.section_entropy.insert(".text", 6.2);
+        result.section_entropy.insert(".data", 3.1);
+        result.section_entropy.insert(".rdata", 4.5);
+
+        let mut app = App::new(result, RiskAssessment::default());
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+
+        // Verify render_security runs deterministically without panicking
+        app.render_security(area, &mut buf);
+
+        // Verify render_entropy runs deterministically without panicking
+        app.render_entropy(area, &mut buf);
     }
 }
