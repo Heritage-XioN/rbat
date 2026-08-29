@@ -62,12 +62,7 @@ pub fn analyze_stored_binary(s3_client: S3Client, file_id: String, webhook_secre
 
             // Offload to Rayon's CPU threads
             rayon::spawn(move || {
-                let result = analyze_batch(&payload, None);
-                let _ = tx.send(result);
-            });
-
-            if let Ok(analysis_result) = rx.await {
-                match analysis_result {
+                let json_data = match analyze_batch(&payload, &None) {
                     Ok(report) => {
                         let analysis_result = match to_value(report.0) {
                             Ok(val) => val,
@@ -91,8 +86,7 @@ pub fn analyze_stored_binary(s3_client: S3Client, file_id: String, webhook_secre
                                 "risk_assesment": risk_assesment
                             }
                         });
-
-                        dispatch_webhook(webhook_url, event_id, report_json, webhook_secret.clone()).await;
+                        report_json
                     }
                     Err(e) => {
                         // Handle malformed binary or processing error
@@ -104,9 +98,14 @@ pub fn analyze_stored_binary(s3_client: S3Client, file_id: String, webhook_secre
                             }
                         });
                         tracing::error!(error = ?e, "Analysis failed for binary");
-                        dispatch_webhook(webhook_url, event_id, report_json, webhook_secret.clone()).await;
+                        report_json
                     }
-                }
+                };
+                let _ = tx.send(json_data);
+            });
+
+            if let Ok(json_payload) = rx.await {
+                dispatch_webhook(webhook_url, event_id, json_payload, webhook_secret.clone()).await;
             }
 
             // drop minio copy
