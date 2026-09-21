@@ -2,9 +2,11 @@
 
 use crate::core::InstructionClass;
 use crate::core::traits::Disassembler;
+use crate::core::types::{RbatError, RbatResult};
 use crate::core::{BinaryArch, IatMap};
 use aho_corasick::PatternID;
 use iced_x86::{Code, Decoder, DecoderOptions};
+use smallvec::SmallVec;
 use std::sync::Arc;
 
 /// A generic view over a disassembled instruction.
@@ -13,7 +15,7 @@ pub struct InstructionInfo {
     pub inner: iced_x86::Instruction,
     pub api_resolution: Option<Arc<str>>,
     /// Pre-computed set of Aho-Corasick pattern IDs matched against this instruction's text.
-    pub matched: smallvec::SmallVec<[PatternID; 4]>,
+    pub matched: SmallVec<[PatternID; 8]>,
     /// Control-flow class resolved from Iced's precise `flow_control()`
     pub inst_class: InstructionClass,
 }
@@ -127,24 +129,44 @@ impl DisassemblerImpl {
 }
 
 impl Disassembler for DisassemblerImpl {
+    /// Decodes/disassembles all x86 instructions in the provided text bytes.
+    ///
+    /// # Allocation behavior
+    ///
+    /// The returned `Vec<InstructionInfo>` is pre-allocated to
+    /// `min(text.len() / 4, MAX_PREALLOC_BYTES / size_of::<InstructionInfo>())`
+    /// entries as a heuristic estimate of instruction count (x86 instructions
+    /// average ~3–4 bytes). The upfront allocation is therefore capped at
+    /// `MAX_PREALLOC_BYTES` (8 MiB) regardless of input size, so a very large
+    /// or adversarial `text` cannot trigger an unbounded upfront allocation.
+    ///
+    /// If the input contains more instructions than the pre-allocated capacity
+    /// (e.g. a long run of 1-byte instructions such as NOPs), the vector grows
+    /// amortized, requiring a small, bounded number of reallocations.
+    ///
+    /// Peak memory is O(number of instructions).
     fn disassemble(
         &self,
         text_bytes: &[u8],
         entry_addr: u64,
         iat_map: &IatMap,
-    ) -> crate::core::Result<Vec<InstructionInfo>> {
+    ) -> RbatResult<Vec<InstructionInfo>> {
         let bitness = match self.arch {
             BinaryArch::X64 => 64,
             BinaryArch::X86 => 32,
             _ => {
-                return Err(crate::core::RbatError::GenericDisassemblerError(
+                return Err(RbatError::GenericDisassemblerError(
                     "iced-x86 only supports x86 and x64 architectures".into(),
                 ));
             }
         };
 
+        const MAX_PREALLOC_BYTES: usize = 8 << 20; // 8 MiB
+        let max_entries = MAX_PREALLOC_BYTES / size_of::<InstructionInfo>();
+        let cap = (text_bytes.len() / 4).min(max_entries);
+
         let mut decoder = Decoder::with_ip(bitness, text_bytes, entry_addr, DecoderOptions::NONE);
-        let mut instructions = Vec::with_capacity(if decoder.can_decode() { 1024 } else { 0 });
+        let mut instructions = Vec::with_capacity(if decoder.can_decode() { cap } else { 0 });
         let mut instr = iced_x86::Instruction::default();
 
         while decoder.can_decode() {

@@ -2,10 +2,13 @@
 
 use crate::core::InstructionClass;
 use crate::core::traits::Disassembler;
+use crate::core::types::RbatResult;
 use crate::core::{BinaryArch, IatMap};
 use aho_corasick::PatternID;
 use capstone::prelude::*;
+use compact_str::CompactString;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::sync::Arc;
 
 /// Represents a single disassembled instruction with pre-computed optimization metadata.
@@ -14,13 +17,13 @@ pub struct InstructionInfo {
     /// The memory address of the instruction.
     pub address: u64,
     /// The cached mnemonic string.
-    pub mnemonic: Arc<str>,
+    pub mnemonic: CompactString,
     /// The cached operand string.
-    pub op_str: Arc<str>,
+    pub op_str: CompactString,
     pub api_resolution: Option<Arc<str>>,
     /// The set of PatternIDs this instruction matched.
     #[serde(skip)]
-    pub matched: smallvec::SmallVec<[PatternID; 4]>,
+    pub matched: SmallVec<[PatternID; 8]>,
     /// Precise control-flow class resolved from Capstone instruction detail.
     pub inst_class: InstructionClass,
 }
@@ -34,10 +37,10 @@ impl InstructionInfo {
     ) -> Self {
         Self {
             address: insn.address(),
-            mnemonic: insn.mnemonic().unwrap_or("").into(),
-            op_str: insn.op_str().unwrap_or("").into(),
+            mnemonic: CompactString::new(insn.mnemonic().unwrap_or("")),
+            op_str: CompactString::new(insn.op_str().unwrap_or("")),
             api_resolution,
-            matched: smallvec::SmallVec::new(),
+            matched: SmallVec::new(),
             inst_class,
         }
     }
@@ -100,7 +103,7 @@ impl Disassembler for DisassemblerImpl {
         text_bytes: &[u8],
         entry_addr: u64,
         iat_map: &IatMap,
-    ) -> crate::core::Result<Vec<InstructionInfo>> {
+    ) -> RbatResult<Vec<InstructionInfo>> {
         let mut cs = match self.arch {
             BinaryArch::X86 | BinaryArch::X64 => {
                 let mut x86 = Capstone::new().x86();
@@ -130,7 +133,8 @@ impl Disassembler for DisassemblerImpl {
         cs.set_skipdata(true)?;
 
         let cs_insns = cs.disasm_all(text_bytes, entry_addr)?;
-        Ok(cs_insns
+
+        let inst_vec: Vec<InstructionInfo> = cs_insns
             .iter()
             .map(|insn| {
                 let detail = cs.insn_detail(insn).ok();
@@ -166,7 +170,9 @@ impl Disassembler for DisassemblerImpl {
                 };
                 InstructionInfo::from_capstone(insn, api_resolution, inst_class)
             })
-            .collect())
+            .collect();
+
+        Ok(inst_vec)
     }
 }
 
@@ -272,9 +278,10 @@ mod tests {
             0x38, 0xdc, 0xc0,
         ];
         let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
-        assert_eq!(insns.len(), 6);
         let class: Vec<InstructionClass> =
             insns.iter().map(|i| i.class(&BinaryArch::X64)).collect();
+
+        assert_eq!(insns.len(), 6);
         assert_eq!(class[0], InstructionClass::Call);
         assert_eq!(class[1], InstructionClass::Return);
         assert_eq!(class[2], InstructionClass::UnconditionalJump);
@@ -294,6 +301,7 @@ mod tests {
         // b #0 (ARM32 little endian: 0x00, 0x00, 0x00, 0xEA)
         let bytes = [0x00, 0x00, 0x00, 0xEA];
         let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "b");
         assert_eq!(
@@ -310,6 +318,7 @@ mod tests {
         // nop ; 0x06 (invalid in long mode) ; rdtsc ; aesenc xmm0, xmm0
         let bytes = [0x90, 0x06, 0x0f, 0x31, 0x66, 0x0f, 0x38, 0xdc, 0xc0];
         let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+
         // Without skipdata capstone truncates at the first invalid byte (only `nop`);
         // with skipdata it decodes everything, so instructions past 0x06 survive.
         assert!(
