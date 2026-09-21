@@ -33,7 +33,14 @@ use std::time::Duration;
 use std::{fs, sync::mpsc};
 use tui_banner::Banner;
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     color_eyre::install()?;
     let cli = Cli::parse();
 
