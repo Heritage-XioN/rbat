@@ -34,7 +34,7 @@ pub enum RbatServerError {
 
     /// Error returned by the core analysis engine.
     #[error("error analyzing binary")]
-    Rbat(#[from] rbat::core::error::RbatError),
+    Rbat(#[from] rbat::core::types::RbatError),
 
     /// Errors originating from the S3 / MinIO storage client interface.
     #[error("AWS sdk error occurred: {0}")]
