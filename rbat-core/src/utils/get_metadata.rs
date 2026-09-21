@@ -3,14 +3,17 @@
 //! This module extracts target platform details, machine architecture codes, and entry point
 //! addresses from a parsed [`Object`] representation of ELF, PE, and Mach-O files.
 
-use crate::core::{BinaryMetadata, RbatError, Result};
+use crate::core::{
+    BinaryMetadata,
+    types::{RbatError, RbatResult},
+};
 use object::{Architecture, BinaryFormat, Object};
 
 /// Extracts high-level metadata (architecture type, entry address, name) from a parsed object.
 ///
 /// # Errors
 /// Returns `RbatError::UnsupportedBinaryFormat` if the parsed magic does not map to ELF, PE, or Mach-O.
-pub fn get_binary_metadata(binary_object: &object::File) -> Result<BinaryMetadata> {
+pub fn get_binary_metadata(binary_object: &object::File) -> RbatResult<BinaryMetadata> {
     let binary_type = match binary_object.format() {
         BinaryFormat::Elf => "Linux ELF",
         BinaryFormat::Pe | BinaryFormat::Coff => "Windows PE",

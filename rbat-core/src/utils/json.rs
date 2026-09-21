@@ -3,7 +3,8 @@
 //! This module serializes the binary structure findings and calculated risk metrics
 //! into a pretty-printed JSON file format for automation integration.
 
-use crate::core::{AnalysisResult, RbatError, Result, RiskAssessment};
+use crate::core::types::{RbatError, RbatResult};
+use crate::core::{AnalysisResult, RiskAssessment};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -16,7 +17,7 @@ pub fn generate_json_report(
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult<'_>,
     out_path: &Path,
-) -> Result<()> {
+) -> RbatResult<()> {
     let report = serde_json::json!({
         "target": {
             "name": filename.file_name().unwrap_or_default().to_string_lossy(),

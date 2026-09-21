@@ -4,10 +4,8 @@
 //! and executing heuristic plugins.
 
 use crate::core::disassembler::InstructionInfo;
-use crate::core::types::IatMap;
+use crate::core::types::{IatMap, RbatResult};
 use crate::core::{AnalysisContext, AnalysisProgress};
-
-use super::Result;
 
 /// Interface for configuring and instantiating the Capstone disassembly engine.
 pub trait Disassembler {
@@ -17,7 +15,7 @@ pub trait Disassembler {
         text_bytes: &[u8],
         entry_addr: u64,
         iat_map: &IatMap,
-    ) -> Result<Vec<InstructionInfo>>;
+    ) -> RbatResult<Vec<InstructionInfo>>;
 }
 
 /// Interface for implementing custom static binary analysis heuristics plugins.
@@ -27,5 +25,8 @@ pub trait HeuristicPlugin: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Runs the heuristic logic using the provided analysis context.
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>>;
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>>;
 }

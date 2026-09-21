@@ -3,8 +3,14 @@
 //! This module coordinates compiling rules from embedded assets (e.g. `yara/api_hooking.yar`)
 //! and scanning raw byte buffers to extract signature matches with section offsets.
 
-use super::{Asset, RbatError, Result, YaraMatches};
-use crate::{core::SectionRange, utils::section_offset::get_section_for_offset};
+use super::{Asset, YaraMatches};
+use crate::{
+    core::{
+        SectionRange,
+        types::{RbatError, RbatResult},
+    },
+    utils::section_offset::get_section_for_offset,
+};
 use ahash::AHashMap;
 use yara::{Compiler, Rules};
 
@@ -34,7 +40,7 @@ impl YaraHandler {
     /// # Errors
     /// Returns `RbatError::MissingAsset` if the rule file does not exist in the embedded directory,
     /// or `RbatError::YaraCompileError` if the rule string contains syntax errors.
-    pub fn compile_yara_rule(&self) -> Result<Rules> {
+    pub fn compile_yara_rule(&self) -> RbatResult<Rules> {
         let file =
             Asset::get(&self.path).ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
         let rules = String::from_utf8(file.data.to_vec())?;
@@ -53,7 +59,7 @@ impl YaraHandler {
         compiled_rules: &'buf Rules,
         buffer: &'buf [u8],
         section_ranges: &[SectionRange<'buf>],
-    ) -> Result<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
+    ) -> RbatResult<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
         let mut scanner = compiled_rules.scanner()?;
         let results = scanner.scan_mem(buffer)?;
         let mut yara_result: AHashMap<&'buf str, Vec<YaraMatches<'buf>>> = AHashMap::new();

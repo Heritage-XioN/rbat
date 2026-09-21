@@ -7,7 +7,6 @@ pub mod analyzer;
 pub mod cfg;
 pub mod cli;
 pub mod disassembler;
-pub mod error;
 pub mod features;
 pub mod flirt;
 pub mod heuristics;
@@ -21,7 +20,6 @@ pub mod yarahandler;
 
 pub use crate::core::{
     cfg::ControlFlowGraph,
-    error::RbatError,
     features::FeatureSet,
     flirt::FlirtMatcher,
     heuristics::{disassemble_section, packer_sig_check, string_check},
@@ -33,6 +31,3 @@ pub use crate::core::{
         RuleInner, RuleMeta, RuleTag, SectionRange, SeverityClass, YaraMatches,
     },
 };
-
-/// A specialized Result type for rbat core operations.
-pub type Result<T> = core::result::Result<T, RbatError>;

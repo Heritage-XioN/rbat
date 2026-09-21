@@ -4,7 +4,8 @@
 //! into a stylized HTML template (using `askama`) and generates a PDF using the `fullbleed` printing engine.
 
 use super::viz::generate_entropy_heatmap;
-use crate::core::{AnalysisResult, RbatError, Result, RiskAssessment, SeverityClass};
+use crate::core::types::{RbatError, RbatResult};
+use crate::core::{AnalysisResult, RiskAssessment, SeverityClass};
 use askama::Template;
 use chrono::Local;
 use std::fs;
@@ -75,7 +76,7 @@ pub fn generate_pdf_report(
     assessment: &RiskAssessment,
     analysis_result: &AnalysisResult<'_>,
     out_path: &Path,
-) -> Result<()> {
+) -> RbatResult<()> {
     let heatmap_svg_content = generate_entropy_heatmap(&analysis_result.section_entropy);
     let has_heatmap = !heatmap_svg_content.trim().is_empty();
 
@@ -208,7 +209,7 @@ pub fn generate_pdf_report(
 }
 
 /// Uses the `fullbleed` engine to render an HTML report into a PDF buffer.
-fn generate_pdf_from_html(html: &str, out_path: &Path) -> Result<()> {
+fn generate_pdf_from_html(html: &str, out_path: &Path) -> RbatResult<()> {
     use fullbleed::FullBleed;
 
     let engine = FullBleed::builder()

@@ -3,7 +3,7 @@
 //! This module formats risk assessments and threat findings into a SOC-ready CSV format,
 //! optimized for ingestion into SIEM or other security orchestration tools.
 
-use crate::core::{Result, RiskAssessment};
+use crate::core::{RiskAssessment, types::RbatResult};
 use csv::Writer;
 use std::path::Path;
 
@@ -17,7 +17,7 @@ pub fn generate_csv_report(
     assessment: &RiskAssessment,
     analysis_result: &crate::core::AnalysisResult<'_>,
     out_path: &Path,
-) -> Result<()> {
+) -> RbatResult<()> {
     let mut wtr = Writer::from_path(out_path)?;
 
     // Standard headers expected by SOC tools

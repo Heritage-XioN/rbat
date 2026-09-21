@@ -20,7 +20,10 @@
 //! ```
 
 use crate::{
-    core::{IatMap, ParsedBinaryContext},
+    core::{
+        IatMap, ParsedBinaryContext,
+        types::{RbatError, RbatResult},
+    },
     utils::entropy::calculate_entropy,
 };
 use ahash::AHashMap;
@@ -30,7 +33,7 @@ use object::{
     pe::{ImageNtHeaders32, ImageNtHeaders64},
 };
 
-use super::{BinaryArch, BinaryOS, RbatError, Result};
+use super::{BinaryArch, BinaryOS};
 
 /// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
 /// It holds the raw binary buffer and the parsed object from the `object` crate.
@@ -49,7 +52,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
     /// Evaluates the Shannon entropy for each section of the binary.
     ///
     /// This is useful for identifying packed or encrypted sections where entropy is typically high (>= 7.5).
-    pub fn evaluate_section_entropy(&self) -> Result<AHashMap<&'data str, f64>> {
+    pub fn evaluate_section_entropy(&self) -> RbatResult<AHashMap<&'data str, f64>> {
         let mut section_entropy: AHashMap<&'data str, f64> = AHashMap::new();
 
         for section in self.binary_object.sections() {
@@ -65,7 +68,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
     }
 
     /// Parses the binary buffer for initial mapped values.
-    pub fn parse_buffer(&self) -> Result<ParsedBinaryContext> {
+    pub fn parse_buffer(&self) -> RbatResult<ParsedBinaryContext> {
         let os = match self.binary_object.format() {
             BinaryFormat::Elf => BinaryOS::Linux,
             BinaryFormat::Pe | BinaryFormat::Coff => BinaryOS::Win,
@@ -213,7 +216,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
     }
 
     /// Extracts all dynamically imported symbols.
-    pub fn extract_imports(&self) -> Result<Vec<&'data [u8]>> {
+    pub fn extract_imports(&self) -> RbatResult<Vec<&'data [u8]>> {
         let mut imports_list = Vec::new();
 
         if let Ok(imports) = self.binary_object.imports() {
@@ -235,7 +238,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
     }
 
     /// Extracts all exported symbols.
-    pub fn extract_exports(&self) -> Result<Vec<&'data [u8]>> {
+    pub fn extract_exports(&self) -> RbatResult<Vec<&'data [u8]>> {
         let mut exports_list = Vec::new();
 
         if let Ok(exports) = self.binary_object.exports() {

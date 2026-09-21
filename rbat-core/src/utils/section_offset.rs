@@ -4,7 +4,7 @@
 //! lookup to determine which binary section contains a specific raw file offset.
 //! This improves YARA scan match localization performance.
 
-use crate::core::{Result, SectionRange};
+use crate::core::{SectionRange, types::RbatResult};
 use object::{Object, ObjectSection};
 
 /// Builds a cached mapping of file offset boundaries for all sections in a parsed binary object.
@@ -21,7 +21,7 @@ use object::{Object, ObjectSection};
 /// ```
 pub fn build_section_map<'buf>(
     binary_object: &object::File<'buf, &'buf [u8]>,
-) -> Result<Vec<SectionRange<'buf>>> {
+) -> RbatResult<Vec<SectionRange<'buf>>> {
     let mut ranges = Vec::new();
     for section in binary_object.sections() {
         if let Some((start, size)) = section.file_range() {

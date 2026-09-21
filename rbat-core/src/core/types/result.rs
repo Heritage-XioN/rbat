@@ -1,11 +1,14 @@
-//! # Custom Error Types
+//! # Custom Result and Error Types
 //!
-//! This module defines the [`RbatError`] enumeration which encapsulates all
-//! classification, disassembling, scanning, template rendering, and file I/O error states
+//! This module defines the [`RbatResult`] type and the [`RbatError`] enum which encapsulates all
+//! classification, disassembling, scanning, template rendering, and file I/O error states and Results outputs
 //! produced by the RBAT core library.
 
 use serde::Serialize;
 use thiserror::Error;
+
+/// A specialized Result type for rbat core operations.
+pub type RbatResult<T> = core::result::Result<T, RbatError>;
 
 /// Represents all possible error conditions returned by the RBAT core library.
 #[derive(Debug, Error, Serialize)]

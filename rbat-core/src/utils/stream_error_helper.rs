@@ -8,7 +8,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::core::RbatError;
+use crate::core::types::RbatError;
 
 /// Saves the first error that occurs to the shared Mutex and triggers the cancellation flag.
 /// Subsequent errors are discarded to preserve the root cause error.
