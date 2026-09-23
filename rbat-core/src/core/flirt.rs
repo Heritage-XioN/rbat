@@ -1,6 +1,7 @@
 //! Fast Library Identification and Recognition Technology module.
 
 use fast_flirt::{FlirtSet, Pattern, sig};
+use rayon::prelude::*;
 use rust_embed::RustEmbed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
@@ -95,22 +96,20 @@ impl FlirtMatcher {
         text_bytes: &[u8],
         text_base: u64,
     ) -> FxHashMap<u64, String> {
-        let mut library_functions = FxHashMap::default();
-
-        for &addr in entry_points {
-            if addr >= text_base {
-                let offset = (addr - text_base) as usize;
-                if offset < text_bytes.len() {
-                    let max_len = 1024.min(text_bytes.len() - offset);
-                    let func_bytes = &text_bytes[offset..offset + max_len];
-                    if let Some(matched_name) = self.match_bytes(func_bytes) {
-                        library_functions.insert(addr, matched_name);
+        entry_points
+            .par_iter()
+            .filter_map(|&addr| {
+                if addr >= text_base {
+                    let offset = (addr - text_base) as usize;
+                    if offset < text_bytes.len() {
+                        let max_len = 1024.min(text_bytes.len() - offset);
+                        let func_bytes = &text_bytes[offset..offset + max_len];
+                        return self.match_bytes(func_bytes).map(|name| (addr, name));
                     }
                 }
-            }
-        }
-
-        library_functions
+                None
+            })
+            .collect()
     }
 }
 

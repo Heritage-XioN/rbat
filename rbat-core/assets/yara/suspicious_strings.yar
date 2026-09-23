@@ -212,11 +212,12 @@ rule Obfuscation_Patterns {
     meta:
         description = "Obfuscation and encoding patterns"
         author = "rBAT Project"
-        version = "0.2.0"
+        version = "0.2.1"
 
     strings:
-        /* Base64 patterns (common in encoded payloads) */
-        $b64_strict = /[A-Za-z0-9+\/]+=*$/ nocase
+        /* Base64 payloads (minimum 32 characters, standard padding or 64 unpadded) */
+        $b64_padded = /[A-Za-z0-9+\/]{32,}={1,2}/ ascii
+        $b64_unpadded = /[A-Za-z0-9+\/]{64}/ ascii
 
         /* XOR-related strings */
         $xor_encrypt = "XOREncrypt" ascii wide

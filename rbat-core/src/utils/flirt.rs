@@ -51,7 +51,7 @@ pub fn collect_function_entry_points(
 /// It stops scanning when it encounters a return instruction or the start of another function.
 pub fn find_function_range(
     start_addr: u64,
-    instructions: &[&InstructionInfo],
+    instructions: &[InstructionInfo],
     all_entry_points: &FxHashSet<u64>,
     arch: &crate::core::BinaryArch,
 ) -> (u64, u64) {
@@ -216,18 +216,18 @@ mod tests {
             },
         ];
 
-        let insns: Vec<&InstructionInfo> = insns_data.iter().collect();
         let mut entries = FxHashSet::default();
         entries.insert(0x1000);
         entries.insert(0x100B);
 
         // 1. Should stop at ret
-        let (start, end) = super::find_function_range(0x1000, &insns, &entries, &BinaryArch::X64);
+        let (start, end) =
+            super::find_function_range(0x1000, insns_data, &entries, &BinaryArch::X64);
         assert_eq!(start, 0x1000);
         assert_eq!(end, 0x100A);
 
         // 2. Should stop at next function entry point if no ret found
-        let insns_no_ret_data = &[
+        let insns_no_ret_data = [
             InstructionInfo {
                 address: 0x1000,
                 mnemonic: "push".into(),
@@ -253,10 +253,9 @@ mod tests {
                 inst_class: Default::default(),
             },
         ];
-        let insns_no_ret: Vec<&InstructionInfo> = insns_no_ret_data.iter().collect();
 
         let (start2, end2) =
-            super::find_function_range(0x1000, &insns_no_ret, &entries, &BinaryArch::X64);
+            super::find_function_range(0x1000, &insns_no_ret_data, &entries, &BinaryArch::X64);
         assert_eq!(start2, 0x1000);
         assert_eq!(end2, 0x1005);
     }

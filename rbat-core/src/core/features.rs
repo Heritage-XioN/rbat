@@ -4,11 +4,16 @@
 //! binary analysis results into fast-lookup sets and maps for rule evaluation.
 
 use crate::core::disassembler::InstructionInfo;
-use crate::core::{AnalysisResult, BasicBlock, EdgeType};
+use crate::core::{AnalysisResult, BasicBlock};
 use crate::utils::flirt::find_function_range;
-use ahash::{AHashMap, AHashSet};
+use ahash::{AHashMap, AHashSet, HashMapExt, HashSetExt};
 use aho_corasick::PatternID;
+use petgraph::unionfind::UnionFind;
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::SmallVec;
+use std::sync::Arc;
+
+type Adj = Vec<SmallVec<[u32; 2]>>;
 
 /// Collected metrics and indicators extracted from the binary for rule evaluation.
 #[derive(Debug, Clone)]
@@ -38,134 +43,110 @@ pub struct FeatureSet<'buf> {
     pub max_cyclomatic_complexity: usize,
     /// A list of references to the basic blocks.
     pub blocks: Vec<&'buf BasicBlock>,
+    /// Shared backing instructions for CFG basic block inspection.
+    pub cfg_instructions: Arc<[InstructionInfo]>,
 }
 
 impl<'buf> FeatureSet<'buf> {
     /// Populates a `FeatureSet` from the aggregate analysis findings.
     pub fn from_analysis_result(res: &'buf AnalysisResult<'buf>) -> Self {
-        // Calculate library ranges if any library functions are matched
-        let mut library_ranges = Vec::new();
-        if let Some(ref cfg) = res.cfg {
-            // Collect all instructions across all basic blocks
-            let mut all_instructions: Vec<&InstructionInfo> = cfg
-                .blocks
-                .values()
-                .flat_map(|block| block.instructions.iter())
-                .collect();
-            all_instructions.sort_unstable_by_key(|insn| insn.address());
-            all_instructions.dedup_by_key(|insn| insn.address());
+        let arch_name = res.metadata.architecture_name();
 
-            // Reconstruct all entry points (matched library functions + basic block starts)
-            let mut all_entry_points = FxHashSet::default();
-            for &addr in res.library_functions.keys() {
-                all_entry_points.insert(addr);
-            }
-            let arch_enum = match res.metadata.architecture_name().as_str() {
-                "x86_64" => crate::core::BinaryArch::X64,
-                "x86" => crate::core::BinaryArch::X86,
-                "arm" => crate::core::BinaryArch::Arm,
-                _ => crate::core::BinaryArch::Arm64,
-            };
+        // ---- Library ranges (only when library functions were matched) ----
+        let library_ranges: Vec<(u64, u64)> = match res.cfg.as_ref() {
+            Some(cfg) if !res.library_functions.is_empty() => {
+                let all_entry_points: FxHashSet<u64> =
+                    res.library_functions.keys().copied().collect();
 
-            for &lib_addr in res.library_functions.keys() {
-                let (start, end) =
-                    find_function_range(lib_addr, &all_instructions, &all_entry_points, &arch_enum);
-                library_ranges.push((start, end));
-            }
-        }
+                let arch_enum = match arch_name.as_str() {
+                    "x86_64" => crate::core::BinaryArch::X64,
+                    "x86" => crate::core::BinaryArch::X86,
+                    "arm" => crate::core::BinaryArch::Arm,
+                    _ => crate::core::BinaryArch::Arm64,
+                };
 
-        let is_lib_block = |addr: u64| {
-            for &(start, end) in &library_ranges {
-                if addr >= start && addr <= end {
-                    return true;
-                }
+                let ranges = res
+                    .library_functions
+                    .keys()
+                    .map(|&lib_addr| {
+                        find_function_range(
+                            lib_addr,
+                            &cfg.instructions,
+                            &all_entry_points,
+                            &arch_enum,
+                        )
+                    })
+                    .collect();
+
+                // Sorts and merges overlapping ranges so
+                // membership can be checked with a binary
+                // search instead of a linear scan.
+                FeatureSet::merge_ranges(ranges)
             }
-            false
+            _ => Vec::new(),
         };
 
-        let mut apis = FxHashSet::default();
-        let mut strings = AHashSet::new();
+        // Binary search over merged, sorted, non-overlapping ranges.
+        let is_lib_block = |addr: u64| {
+            let i = library_ranges.partition_point(|&(s, _)| s <= addr);
+            i > 0 && addr <= library_ranges[i - 1].1
+        };
 
-        for &api_id in &res.imports {
+        // ---- APIs and strings ----
+        let mut apis = FxHashSet::with_capacity(res.imports.len() + res.exports.len());
+        for &api_id in res.imports.iter().chain(res.exports.iter()) {
             apis.insert(PatternID::must(api_id));
         }
-        for &api_id in &res.exports {
-            apis.insert(PatternID::must(api_id));
-        }
 
+        let string_capacity: usize = res.string_values.values().map(|v| v.len()).sum();
+        let mut strings = AHashSet::with_capacity(string_capacity);
         for instances in res.string_values.values() {
             for inst in instances {
-                if !is_lib_block(inst.offset as u64) {
-                    strings.insert(inst.data.to_lowercase());
-                }
+                strings.insert(inst.data.to_lowercase());
             }
         }
 
-        let mut basic_blocks_count = 0;
-        let mut has_loop = false;
-        let mut max_cyclomatic_complexity = 0;
-        let mut blocks = Vec::new();
+        // ---- User-code blocks and graph metrics ----
+        let (blocks, has_loop, max_cyclomatic_complexity) = match res.cfg.as_ref() {
+            Some(cfg) => {
+                let blocks: Vec<&'buf BasicBlock> = cfg
+                    .blocks
+                    .values()
+                    .filter(|block| !is_lib_block(block.start_address))
+                    .collect();
 
-        if let Some(ref cfg) = res.cfg {
-            let filtered_blocks: Vec<&'buf BasicBlock> = cfg
-                .blocks
-                .values()
-                .filter(|block| !is_lib_block(block.start_address))
-                .collect();
+                if blocks.is_empty() {
+                    (blocks, false, 0)
+                } else {
+                    let n = blocks.len();
+                    let mut addr_to_idx = FxHashMap::with_capacity(n);
+                    for (idx, block) in blocks.iter().enumerate() {
+                        addr_to_idx.insert(block.start_address, idx);
+                    }
 
-            basic_blocks_count = filtered_blocks.len();
-            blocks = filtered_blocks;
+                    let mut adj: Adj = vec![SmallVec::new(); n];
+                    for &(src, dst, _) in &cfg.edges {
+                        if let (Some(&s), Some(&d)) = (addr_to_idx.get(&src), addr_to_idx.get(&dst))
+                        {
+                            adj[s].push(d as u32);
+                        }
+                    }
 
-            // Reconstruct the petgraph containing only non-library blocks
-            let mut graph = petgraph::graph::DiGraph::<u64, EdgeType>::new();
-            let mut indices = FxHashMap::default();
+                    // Collapse duplicate edges (e.g. a conditional branch whose target
+                    // equals its fallthrough) to prevent artificially inflating McCabe complexity
+                    // and to ensure deterministic, non-redundant DFS traversal.
+                    for succs in adj.iter_mut() {
+                        succs.sort_unstable();
+                        succs.dedup();
+                    }
 
-            for block in &blocks {
-                let idx = graph.add_node(block.start_address);
-                indices.insert(block.start_address, idx);
-            }
-
-            for &(src, dst, edge_type) in &cfg.edges {
-                if let (Some(&src_idx), Some(&dst_idx)) = (indices.get(&src), indices.get(&dst)) {
-                    graph.add_edge(src_idx, dst_idx, edge_type);
+                    let has_loop = FeatureSet::has_cycle(&adj);
+                    let cc = FeatureSet::max_cyclomatic_complexity(&adj);
+                    (blocks, has_loop, cc)
                 }
             }
-
-            // Cycle/Loop detection via petgraph on user code only
-            has_loop = petgraph::algo::toposort(&graph, None).is_err();
-
-            // McCabe complexity per connected component (subgraph/function) on user code only
-            if basic_blocks_count > 0 {
-                let mut uf = petgraph::unionfind::UnionFind::new(graph.node_count());
-                for edge in graph.edge_indices() {
-                    let (src, dst) = graph.edge_endpoints(edge).unwrap();
-                    uf.union(src.index(), dst.index());
-                }
-
-                let mut component_nodes = FxHashMap::default();
-                let mut component_edges = FxHashMap::default();
-
-                for node in graph.node_indices() {
-                    let root = uf.find(node.index());
-                    *component_nodes.entry(root).or_insert(0) += 1;
-                }
-
-                for edge in graph.edge_indices() {
-                    let (src, _dst) = graph.edge_endpoints(edge).unwrap();
-                    let root = uf.find(src.index());
-                    *component_edges.entry(root).or_insert(0) += 1;
-                }
-
-                max_cyclomatic_complexity = component_nodes
-                    .into_iter()
-                    .map(|(root, n)| {
-                        let e = component_edges.get(&root).copied().unwrap_or(0);
-                        if e >= n { e - n + 2 } else { 1 }
-                    })
-                    .max()
-                    .unwrap_or(1);
-            }
-        }
+            None => (Vec::new(), false, 0),
+        };
 
         let binary_type = res.metadata.binary_type.to_lowercase();
         let binary_format = if binary_type.contains("mach") {
@@ -187,11 +168,92 @@ impl<'buf> FeatureSet<'buf> {
             os: binary_type,
             arch: res.metadata.architecture_name().to_lowercase(),
             binary_format: binary_format.to_string(),
-            basic_blocks_count,
+            basic_blocks_count: blocks.len(),
             has_loop,
             max_cyclomatic_complexity,
             blocks,
+            cfg_instructions: res
+                .cfg
+                .as_ref()
+                .map(|c| Arc::clone(&c.instructions))
+                .unwrap_or_else(|| Arc::from([])),
         }
+    }
+
+    /// Sorts and merges overlapping ranges
+    fn merge_ranges(mut ranges: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
+        ranges.sort_unstable();
+        let mut merged: Vec<(u64, u64)> = Vec::with_capacity(ranges.len());
+        for (s, e) in ranges {
+            match merged.last_mut() {
+                Some(last) if s <= last.1 => last.1 = last.1.max(e),
+                _ => merged.push((s, e)),
+            }
+        }
+        merged
+    }
+
+    /// Iterative 3-state DFS with a per-node edge cursor.
+    /// Returns true if the graph contains a cycle (a self-loop counts).
+    fn has_cycle(adj: &[SmallVec<[u32; 2]>]) -> bool {
+        let n = adj.len();
+        let mut state = vec![0u8; n]; // 0 = unvisited, 1 = on stack, 2 = done
+        let mut cursor = vec![0usize; n];
+        let mut stack: Vec<u32> = Vec::new();
+
+        for start in 0..n {
+            if state[start] != 0 {
+                continue;
+            }
+            state[start] = 1;
+            stack.push(start as u32);
+
+            while let Some(&u) = stack.last() {
+                let u = u as usize;
+                if cursor[u] < adj[u].len() {
+                    let v = adj[u][cursor[u]] as usize;
+                    cursor[u] += 1;
+                    match state[v] {
+                        1 => return true,
+                        0 => {
+                            state[v] = 1;
+                            stack.push(v as u32);
+                        }
+                        _ => {}
+                    }
+                } else {
+                    state[u] = 2;
+                    stack.pop();
+                }
+            }
+        }
+        false
+    }
+
+    /// Max McCabe complexity (E - N + 2) across weakly connected components.
+    fn max_cyclomatic_complexity(adj: &[SmallVec<[u32; 2]>]) -> usize {
+        let n = adj.len();
+        let mut uf = UnionFind::new(n);
+        for (s, succs) in adj.iter().enumerate() {
+            for &d in succs {
+                uf.union(s, d as usize);
+            }
+        }
+        let labels = uf.into_labeling();
+
+        let mut comp_nodes = vec![0u32; n];
+        let mut comp_edges = vec![0u32; n];
+        for (s, succs) in adj.iter().enumerate() {
+            let r = labels[s];
+            comp_nodes[r] += 1;
+            comp_edges[r] += succs.len() as u32;
+        }
+
+        (0..n)
+            .filter(|&r| comp_nodes[r] > 0)
+            .map(|r| (comp_edges[r] + 2).saturating_sub(comp_nodes[r]).max(1) as usize)
+            .max()
+            .unwrap_or(1)
     }
 }
 
@@ -286,7 +348,7 @@ mod tests {
             },
         ];
 
-        let cfg = ControlFlowGraph::new(&insns, &crate::core::BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(insns.into(), &crate::core::BinaryArch::X64);
         res.cfg = Some(cfg);
 
         // Add library function at 0x2000
@@ -364,7 +426,7 @@ mod tests {
             },
         ];
 
-        let cfg = ControlFlowGraph::new(&insns, &crate::core::BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(insns.into(), &crate::core::BinaryArch::X64);
         res.cfg = Some(cfg);
 
         let fs = FeatureSet::from_analysis_result(&res);
