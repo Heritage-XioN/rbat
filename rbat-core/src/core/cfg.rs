@@ -3,9 +3,11 @@
 //! This module analyzes linear disassembler output to reconstruct basic blocks and
 //! model directed control flow transitions using graph topologies.
 
+use ahash::{HashMapExt, HashSetExt};
 use petgraph::graph::DiGraph;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::core::{
     BasicBlock, BinaryArch, EdgeType, disassembler::InstructionInfo, types::InstructionClass,
@@ -14,6 +16,9 @@ use crate::core::{
 /// A serialized and queryable model of a binary's Control Flow Graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlFlowGraph {
+    /// Shared backing instruction store.
+    #[serde(skip)]
+    pub instructions: Arc<[InstructionInfo]>,
     /// Mapped basic blocks by start virtual address.
     pub blocks: FxHashMap<u64, BasicBlock>,
     /// Directed links representing control flow jumps.
@@ -22,8 +27,8 @@ pub struct ControlFlowGraph {
 
 impl ControlFlowGraph {
     /// Analyzes an instruction list to partition basic blocks and map execution transitions.
-    pub fn new(instructions: &[InstructionInfo], arch: &BinaryArch) -> Self {
-        let mut leaders = FxHashSet::default();
+    pub fn new(instructions: Arc<[InstructionInfo]>, arch: &BinaryArch) -> Self {
+        let mut leaders = FxHashSet::with_capacity(instructions.len());
         if !instructions.is_empty() {
             leaders.insert(instructions[0].address());
         }
@@ -49,7 +54,7 @@ impl ControlFlowGraph {
             }
         }
 
-        let mut addr_to_idx = FxHashMap::default();
+        let mut addr_to_idx = FxHashMap::with_capacity(instructions.len());
         for (idx, insn) in instructions.iter().enumerate() {
             addr_to_idx.insert(insn.address(), idx);
         }
@@ -58,7 +63,7 @@ impl ControlFlowGraph {
         sorted_leaders.retain(|addr| addr_to_idx.contains_key(addr));
         sorted_leaders.sort_unstable();
 
-        let mut blocks = FxHashMap::default();
+        let mut blocks = FxHashMap::with_capacity(sorted_leaders.len());
         let mut block_starts = vec![];
 
         for i in 0..sorted_leaders.len() {
@@ -82,16 +87,11 @@ impl ControlFlowGraph {
                 continue;
             }
 
-            let block_insns = &instructions[start_idx..end_idx];
-            let inst_infos = block_insns.to_vec();
-
             let basic_block = BasicBlock {
                 start_address: start_addr,
-                end_address: block_insns
-                    .last()
-                    .expect("block_insns cannot be empty")
-                    .address(),
-                instructions: inst_infos,
+                end_address: instructions[end_idx - 1].address(),
+                start_idx,
+                end_idx,
             };
 
             blocks.insert(start_addr, basic_block);
@@ -101,7 +101,8 @@ impl ControlFlowGraph {
         let mut edges = vec![];
         for (idx, &start_addr) in block_starts.iter().enumerate() {
             let block = &blocks[&start_addr];
-            let last_insn = match block.instructions.last() {
+            let block_insns = &instructions[block.start_idx..block.end_idx];
+            let last_insn = match block_insns.last() {
                 Some(insn) => insn,
                 None => continue,
             };
@@ -151,7 +152,11 @@ impl ControlFlowGraph {
             }
         }
 
-        Self { blocks, edges }
+        Self {
+            instructions,
+            blocks,
+            edges,
+        }
     }
 
     /// Converts the control flow graph into a Graphviz DOT representation.
@@ -169,7 +174,7 @@ impl ControlFlowGraph {
         for (addr, block) in sorted_blocks {
             let mut label = format!("Block 0x{:X}\\l", addr);
             label.push_str("-----------------\\l");
-            for insn in &block.instructions {
+            for insn in self.block_instructions(block) {
                 label.push_str(&format!(
                     "0x{:X}: {:<6} {}\\l",
                     insn.address(),
@@ -216,6 +221,12 @@ impl ControlFlowGraph {
 
         graph
     }
+
+    /// Returns the instruction slice for a given basic block.
+    #[inline]
+    pub fn block_instructions(&self, block: &BasicBlock) -> &[InstructionInfo] {
+        &self.instructions[block.start_idx..block.end_idx]
+    }
 }
 
 #[cfg(all(test, feature = "backend-capstone"))]
@@ -242,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_empty_instructions() {
-        let cfg = ControlFlowGraph::new(&[], &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
         assert!(cfg.blocks.is_empty());
         assert!(cfg.edges.is_empty());
     }
@@ -255,7 +266,7 @@ mod tests {
             insn(0x1001, "mov", "rbp, rsp"),
             insn(0x1004, "nop", ""),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         assert_eq!(cfg.blocks.len(), 1);
         assert!(cfg.edges.is_empty());
@@ -263,7 +274,7 @@ mod tests {
         let block = &cfg.blocks[&0x1000];
         assert_eq!(block.start_address, 0x1000);
         assert_eq!(block.end_address, 0x1004);
-        assert_eq!(block.instructions.len(), 3);
+        assert_eq!(block.instruction_count(), 3);
     }
 
     #[test]
@@ -278,7 +289,7 @@ mod tests {
             insn(0x1003, "nop", ""),
             insn(0x1004, "mov", "eax, 1"),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         // Three leaders: 0x1000 (entry), 0x1003 (fallthrough after je), 0x1004 (target of je)
         assert_eq!(cfg.blocks.len(), 3);
@@ -287,13 +298,13 @@ mod tests {
         assert!(cfg.blocks.contains_key(&0x1004));
 
         // Block 0x1000 should contain [cmp, je]
-        assert_eq!(cfg.blocks[&0x1000].instructions.len(), 2);
+        assert_eq!(cfg.blocks[&0x1000].instruction_count(), 2);
 
         // Block 0x1003 should contain [nop]
-        assert_eq!(cfg.blocks[&0x1003].instructions.len(), 1);
+        assert_eq!(cfg.blocks[&0x1003].instruction_count(), 1);
 
         // Block 0x1004 should contain [mov]
-        assert_eq!(cfg.blocks[&0x1004].instructions.len(), 1);
+        assert_eq!(cfg.blocks[&0x1004].instruction_count(), 1);
 
         // Should have a ConditionalTrue edge from 0x1000 -> 0x1004
         assert!(
@@ -316,7 +327,7 @@ mod tests {
             insn(0x1003, "nop", ""),
             insn(0x1004, "ret", ""),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         // Should have an Unconditional edge from 0x1000 to the target block
         assert!(
@@ -341,7 +352,7 @@ mod tests {
             insn(0x2000, "push", "rbp"),
             insn(0x2001, "ret", ""),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         // Call edge from 0x1000-block to 0x2000-block
         assert!(cfg.edges.contains(&(0x1000, 0x2000, EdgeType::Call)));
@@ -357,7 +368,7 @@ mod tests {
             insn(0x1002, "ret", ""),
             insn(0x1003, "nop", ""),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         // ret terminates the block — no outgoing edges from block 0x1000
         let block_0x1000_edges: Vec<_> = cfg
@@ -379,7 +390,7 @@ mod tests {
             insn(0x1003, "nop", ""),
             insn(0x1004, "nop", ""),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         // Block starting at 0x1002 ends with "nop" (Normal) and should fallthrough to 0x1003
         assert!(cfg.edges.contains(&(0x1002, 0x1003, EdgeType::FallThrough)));
@@ -390,7 +401,7 @@ mod tests {
         // If a jump targets an address not present in the instruction stream,
         // no edge should be emitted for that target.
         let instructions = vec![insn(0x1000, "jmp", "0x9999"), insn(0x1002, "nop", "")];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         let edges_to_9999: Vec<_> = cfg
             .edges
@@ -409,20 +420,20 @@ mod tests {
             insn(0x1002, "nop", ""),
             insn(0x1003, "ret", ""),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         // Leaders must be 0x1000 and 0x1002 (0x1001 is filtered out)
         assert_eq!(cfg.blocks.len(), 2);
         assert!(cfg.blocks.contains_key(&0x1000));
         assert!(cfg.blocks.contains_key(&0x1002));
-        assert_eq!(cfg.blocks[&0x1000].instructions.len(), 1);
-        assert_eq!(cfg.blocks[&0x1002].instructions.len(), 2);
+        assert_eq!(cfg.blocks[&0x1000].instruction_count(), 1);
+        assert_eq!(cfg.blocks[&0x1002].instruction_count(), 2);
     }
 
     #[test]
     fn test_to_dot_output() {
         let instructions = vec![insn(0x1000, "nop", ""), insn(0x1001, "jmp", "0x1000")];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
         let dot = cfg.to_dot();
 
         assert!(dot.starts_with("digraph CFG {"));
@@ -439,7 +450,7 @@ mod tests {
             insn(0x1003, "nop", ""),
             insn(0x1004, "ret", ""),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
         let graph = cfg.to_petgraph();
 
         // The petgraph should have the same number of nodes as blocks
@@ -458,7 +469,7 @@ mod tests {
             insn_arch(0x408, "mov", "w0, #1", &arch),
             insn_arch(0x40c, "ret", "", &arch),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &arch);
+        let cfg = ControlFlowGraph::new(instructions.into(), &arch);
 
         assert!(
             cfg.edges
@@ -473,7 +484,7 @@ mod tests {
     #[test]
     fn test_single_instruction() {
         let instructions = vec![insn(0x1000, "ret", "")];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         assert_eq!(cfg.blocks.len(), 1);
         assert!(cfg.edges.is_empty());
@@ -481,7 +492,7 @@ mod tests {
         let block = &cfg.blocks[&0x1000];
         assert_eq!(block.start_address, 0x1000);
         assert_eq!(block.end_address, 0x1000);
-        assert_eq!(block.instructions.len(), 1);
+        assert_eq!(block.instruction_count(), 1);
     }
 
     #[test]
@@ -495,7 +506,7 @@ mod tests {
             insn(0x1008, "nop", ""),
             insn(0x100a, "ret", ""),
         ];
-        let cfg = ControlFlowGraph::new(&instructions, &BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
 
         // First je targets 0x1008
         assert!(

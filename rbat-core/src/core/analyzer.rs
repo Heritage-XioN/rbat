@@ -9,17 +9,17 @@ use rayon;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use super::{AnalysisProgress, AnalysisResult, Result, RiskAssessment, parser::Parser};
+use super::{AnalysisProgress, AnalysisResult, RiskAssessment, parser::Parser};
 use crate::utils::scoring::calculate_risk_with;
 use crate::utils::severity::SeverityClassifier;
 use crate::{
     core::{
         AnalysisContext, ParsedBinaryContext, Rule,
-        disassembler::DisassemblerImpl,
+        disassembler::{DisassemblerImpl, InstructionInfo},
         features::FeatureSet,
         flirt::FlirtMatcher,
         traits::{Disassembler, HeuristicPlugin},
-        types::NeedleIndex,
+        types::{NeedleIndex, RbatResult},
     },
     utils::{
         flirt::collect_function_entry_points, section_offset::build_section_map,
@@ -53,7 +53,7 @@ pub fn analyze_streaming<'buf, F>(
     custom_flirt: &Option<FlirtMatcher>,
     needle: Arc<NeedleIndex>,
     on_progress: F,
-) -> Result<()>
+) -> RbatResult<()>
 where
     F: Fn(AnalysisProgress<'buf>) + Send + Sync,
 {
@@ -74,7 +74,9 @@ where
     } = binary_data;
 
     let factory = DisassemblerImpl::new(arch);
-    let instructions = factory.disassemble(&text_bytes, entry_addr, &iat_map)?;
+    let instructions: Arc<[InstructionInfo]> = factory
+        .disassemble(&text_bytes, entry_addr, &iat_map)?
+        .into();
     let entry_points =
         collect_function_entry_points(&binary_object, &instructions, &arch, entry_addr);
 
@@ -88,7 +90,7 @@ where
         arch,
         text_bytes: &text_bytes,
         entry_addr,
-        instructions: &instructions,
+        instructions,
         needle,
     };
 
@@ -147,7 +149,7 @@ where
 pub fn analyze_batch<'buf>(
     buffer: &'buf [u8],
     custom_flirt: &Option<FlirtMatcher>,
-) -> Result<(AnalysisResult<'buf>, RiskAssessment)> {
+) -> RbatResult<(AnalysisResult<'buf>, RiskAssessment)> {
     let start_time = std::time::Instant::now();
     let (tx, rx) = std::sync::mpsc::channel();
 

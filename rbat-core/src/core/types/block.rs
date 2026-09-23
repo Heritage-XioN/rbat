@@ -10,8 +10,27 @@ pub struct BasicBlock {
     pub start_address: u64,
     /// The end virtual memory address of the block.
     pub end_address: u64,
-    /// The set of instructions belonging to this block.
-    pub instructions: Vec<InstructionInfo>,
+    /// Start index (inclusive) into the parent instruction array.
+    pub start_idx: usize,
+    /// End index (exclusive) into the parent instruction array.
+    pub end_idx: usize,
+}
+
+impl BasicBlock {
+    /// Returns this block's instruction slice from the given backing store.
+    #[inline]
+    pub fn instructions<'inon>(
+        &self,
+        source: &'inon [InstructionInfo],
+    ) -> &'inon [InstructionInfo] {
+        &source[self.start_idx..self.end_idx]
+    }
+
+    /// Number of instructions in this block.
+    #[inline]
+    pub fn instruction_count(&self) -> usize {
+        self.end_idx - self.start_idx
+    }
 }
 
 /// Types of control flow edges connecting basic blocks.

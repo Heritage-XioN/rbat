@@ -377,7 +377,7 @@ impl<'buf> App<'buf> {
                 vec![]
             };
         if let Some(block) = self.disasm_state.selected().and_then(|idx| blocks.get(idx)) {
-            return block.instructions.len();
+            return block.instruction_count();
         }
         0
     }
@@ -668,8 +668,14 @@ impl<'buf> App<'buf> {
         let selected_block = selected_idx.and_then(|idx| blocks.get(idx));
 
         if let Some(block) = selected_block {
-            let rows: Vec<Row> = block
-                .instructions
+            let instrs = self
+                .analysis_result
+                .cfg
+                .as_ref()
+                .map(|cfg| cfg.block_instructions(block))
+                .unwrap_or(&[]);
+
+            let rows: Vec<Row> = instrs
                 .iter()
                 .map(|inst| {
                     Row::new(vec![

@@ -34,7 +34,7 @@
 //!     arch: BinaryArch::X64,
 //!     text_bytes: &buffer,
 //!     entry_addr: 0x1000,
-//!     instructions: &[],
+//!     instructions: Arc::from([]),
 //!     needle: needle.clone(),
 //!     entry_points,
 //!     custom_flirt: &None,
@@ -53,10 +53,12 @@
 
 use crate::core::heuristics::disassemble_section;
 use crate::core::traits::HeuristicPlugin;
-use crate::core::{AnalysisContext, AnalysisProgress, Result, parser::Parser};
+use crate::core::types::RbatResult;
+use crate::core::{AnalysisContext, AnalysisProgress, parser::Parser};
 use crate::core::{packer_sig_check, string_check};
 use crate::utils::get_metadata::get_binary_metadata;
 use crate::utils::hashing::compute_hashes;
+use std::sync::Arc;
 
 /// A plugin that computes cryptographic digests (MD5, SHA-1, SHA-256) and
 /// similarity hashes (SSDEEP, TLSH) over the raw binary buffer, producing the
@@ -68,7 +70,10 @@ impl HeuristicPlugin for HashingPlugin {
         "hashing"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
         Ok(AnalysisProgress::Hashes(compute_hashes(ctx.buffer)))
     }
 }
@@ -82,8 +87,11 @@ impl HeuristicPlugin for DisassemblyPlugin {
         "disassembly"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
-        let code_cave = disassemble_section(ctx.instructions, ctx.text_bytes, ctx.entry_addr)?;
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
+        let code_cave = disassemble_section(&ctx.instructions, ctx.text_bytes, ctx.entry_addr)?;
         Ok(AnalysisProgress::Disassembly(code_cave))
     }
 }
@@ -97,7 +105,10 @@ impl HeuristicPlugin for StringCheckPlugin {
         "string_check"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
         let results = string_check(ctx.buffer, ctx.section_ranges)?;
         Ok(AnalysisProgress::Strings(results))
     }
@@ -111,7 +122,10 @@ impl HeuristicPlugin for PackerSigCheckPlugin {
         "packer_sig_check"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
         let results = packer_sig_check(ctx.buffer, ctx.section_ranges)?;
         Ok(AnalysisProgress::PackerSigs(results))
     }
@@ -125,7 +139,10 @@ impl HeuristicPlugin for LibraryFunctionsPlugin {
         "library_functions"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
         let library_functions =
             match ctx.custom_flirt {
                 Some(matcher) => matcher.identify_library_functions(
@@ -149,7 +166,10 @@ impl HeuristicPlugin for EntropyPlugin {
         "entropy"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
         let parser = Parser::new(ctx.binary_object);
         let results = parser.evaluate_section_entropy()?;
         Ok(AnalysisProgress::Entropy(results))
@@ -164,7 +184,10 @@ impl HeuristicPlugin for ImportsPlugin {
         "imports"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
         let parser = Parser::new(ctx.binary_object);
         let mut matched = Vec::new();
         if let Ok(imports) = parser.extract_imports() {
@@ -188,7 +211,10 @@ impl HeuristicPlugin for ExportsPlugin {
         "exports"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
         let parser = Parser::new(ctx.binary_object);
         let mut matched = Vec::new();
         if let Ok(exports) = parser.extract_exports() {
@@ -212,7 +238,10 @@ impl HeuristicPlugin for MetadataPlugin {
         "metadata"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
         let results = get_binary_metadata(ctx.binary_object)?;
         Ok(AnalysisProgress::BinaryMetadata(results))
     }
@@ -226,8 +255,11 @@ impl HeuristicPlugin for CfgPlugin {
         "cfg"
     }
 
-    fn run<'buf, 'ctx>(&self, ctx: &AnalysisContext<'buf, 'ctx>) -> Result<AnalysisProgress<'buf>> {
-        let cfg = crate::core::cfg::ControlFlowGraph::new(ctx.instructions, &ctx.arch);
+    fn run<'buf, 'ctx>(
+        &self,
+        ctx: &AnalysisContext<'buf, 'ctx>,
+    ) -> RbatResult<AnalysisProgress<'buf>> {
+        let cfg = crate::core::cfg::ControlFlowGraph::new(Arc::clone(&ctx.instructions), &ctx.arch);
         Ok(AnalysisProgress::CFG(cfg))
     }
 }
@@ -261,7 +293,7 @@ mod tests {
             arch: BinaryArch::X64,
             text_bytes: &[],
             entry_addr: 0x1000,
-            instructions: &[],
+            instructions: Arc::from([]),
             needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
             entry_points,
             custom_flirt: &None,
@@ -295,7 +327,7 @@ mod tests {
             arch: BinaryArch::X64,
             text_bytes: &[],
             entry_addr: 0x1000,
-            instructions: &[],
+            instructions: Arc::from([]),
             needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
             entry_points,
             custom_flirt: &None,
@@ -344,7 +376,7 @@ mod tests {
             arch: BinaryArch::X64,
             text_bytes: &text_bytes,
             entry_addr: 0x1000,
-            instructions: &instructions,
+            instructions: instructions.into(),
             needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
             entry_points,
             custom_flirt: &None,

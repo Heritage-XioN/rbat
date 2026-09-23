@@ -1,8 +1,9 @@
 //! Aho-Corasick needle index for instruction/feature matching.
 
-use crate::core::{BasicBlock, Rule, RuleCondition, cfg::ControlFlowGraph};
+use crate::core::{Rule, RuleCondition, cfg::ControlFlowGraph};
 use ahash::{AHashMap, AHashSet};
 use aho_corasick::{AhoCorasick, PatternID};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Aho-Corasick based multi-pattern index for fast rule condition matching.
@@ -114,32 +115,35 @@ impl NeedleIndex {
     pub fn populate_cfg(&self, cfg: &mut ControlFlowGraph) {
         use rayon::prelude::*;
 
-        // it performs Parallel over blocks, and sequential within each block (reusing buffers)
-        let blocks: Vec<&mut BasicBlock> = cfg.blocks.values_mut().collect();
-        blocks.into_par_iter().for_each(|block| {
+        // InstructionInfo is an Arc<[T]> (shared type)
+        // this line helps upload exclusive &mut access.
+        // clone on write behaviour, helps prevent data
+        // races in instances where an arc cloned value
+        // was passed. read the Arc::make_mut() docs for
+        //  more info
+        let instructions = Arc::make_mut(&mut cfg.instructions);
+
+        instructions.par_iter_mut().for_each(|insn| {
             let mut buf_m = String::new();
             let mut buf_o = String::new();
             let mut haystack = String::new();
 
-            for insn in &mut block.instructions {
-                insn.format_mnemonic_into(&mut buf_m);
-                insn.format_operands_into(&mut buf_o);
+            insn.format_mnemonic_into(&mut buf_m);
+            insn.format_operands_into(&mut buf_o);
 
-                haystack.clear();
-                haystack.push_str(&buf_m);
+            haystack.push_str(&buf_m);
+            haystack.push(' ');
+            haystack.push_str(&buf_o);
+            if let Some(ref api) = insn.api_resolution {
                 haystack.push(' ');
-                haystack.push_str(&buf_o);
-                if let Some(ref api) = insn.api_resolution {
-                    haystack.push(' ');
-                    haystack.push_str(api);
-                }
+                haystack.push_str(api);
+            }
 
-                for mat in self.automaton.find_overlapping_iter(&haystack) {
-                    let p = mat.pattern();
-                    if !insn.matched.contains(&p) {
-                        insn.matched.push(p);
-                        self.present[p.as_usize()].store(true, Ordering::Relaxed);
-                    }
+            for mat in self.automaton.find_overlapping_iter(&haystack) {
+                let p = mat.pattern();
+                if !insn.matched.contains(&p) {
+                    insn.matched.push(p);
+                    self.present[p.as_usize()].store(true, Ordering::Relaxed);
                 }
             }
         });

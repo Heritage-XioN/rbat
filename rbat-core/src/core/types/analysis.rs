@@ -155,7 +155,7 @@ impl BinaryMetadata {
 ///     arch: BinaryArch::X64,
 ///     text_bytes: &buffer,
 ///     entry_addr: 0x1000,
-///     instructions: &[],
+///     instructions: std::sync::Arc::from([]),
 /// };
 /// ```
 pub struct AnalysisContext<'buf, 'ctx> {
@@ -178,7 +178,7 @@ pub struct AnalysisContext<'buf, 'ctx> {
     /// Raw binary entry point.
     pub entry_addr: u64,
     /// Parsed instruction list for the code section.
-    pub instructions: &'ctx [InstructionInfo],
+    pub instructions: Arc<[InstructionInfo]>,
     /// The global NeedleIndex automaton for pattern matching.
     pub needle: Arc<NeedleIndex>,
 }
