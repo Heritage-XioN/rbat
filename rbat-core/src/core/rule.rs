@@ -45,6 +45,11 @@ impl Rule {
             .all(|c| c.matches(features, needle, matched_rules))
     }
 
+    /// Returns true if this rule contains any `match:` rule dependencies.
+    pub fn has_match_dependency(&self) -> bool {
+        self.rule.features.iter().any(|c| c.has_match_dependency())
+    }
+
     /// Loads all embedded JSON and YAML rules from assets.
     pub fn load_embedded() -> Vec<Self> {
         Asset::iter()
@@ -96,8 +101,9 @@ impl Rule {
     }
 
     /// Evaluates a set of rules against the feature set and returns matching rule metadata.
-    /// Uses iterative multi-pass evaluation to support rule dependencies (`match:` conditions)
-    /// and library rules (`lib: true`).
+    /// Uses two-tier partitioned evaluation:
+    /// 1. Evaluates all independent rules (no `match:` dependency) once in parallel via Rayon.
+    /// 2. Iteratively evaluates only the remaining dependent rules until fixpoint.
     pub fn evaluate<'rule>(
         features: &FeatureSet,
         rules: &'rule [Self],
@@ -106,24 +112,40 @@ impl Rule {
         let mut matched_names: ahash::AHashSet<&str> = ahash::AHashSet::new();
         let mut matched_indices: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
 
-        // Iteratively evaluate until fixpoint (no new rules match in an iteration)
-        loop {
-            let new_matches: Vec<(usize, &'rule str)> = rules
-                .par_iter()
-                .enumerate()
-                .filter(|(i, _)| !matched_indices.contains(i))
-                .filter(|(_, rule)| rule.matches(features, needle, &matched_names))
-                .map(|(i, rule)| (i, rule.rule.meta.name.as_str()))
-                .collect();
+        // Partition rules into dependent (containing match:) vs independent rules
+        let (dep_rules, indep_rules): (Vec<_>, Vec<_>) = rules
+            .iter()
+            .enumerate()
+            .partition(|(_, r)| r.has_match_dependency());
 
-            if new_matches.is_empty() {
+        // Pass 1: Evaluate all independent rules in parallel
+        let initial_matches: Vec<(usize, &'rule str)> = indep_rules
+            .into_par_iter()
+            .filter(|(_, rule)| rule.matches(features, needle, &matched_names))
+            .map(|(i, rule)| (i, rule.rule.meta.name.as_str()))
+            .collect();
+
+        for (idx, name) in initial_matches {
+            matched_indices.insert(idx);
+            matched_names.insert(name);
+        }
+
+        // Pass 2..N: Iteratively evaluate only remaining dependent rules until fixpoint
+        let mut pending_deps = dep_rules;
+        while !pending_deps.is_empty() {
+            let (newly_matched, still_pending): (Vec<_>, Vec<_>) = pending_deps
+                .into_par_iter()
+                .partition(|(_, rule)| rule.matches(features, needle, &matched_names));
+
+            if newly_matched.is_empty() {
                 break;
             }
 
-            for (idx, name) in new_matches {
+            for (idx, rule) in newly_matched {
                 matched_indices.insert(idx);
-                matched_names.insert(name);
+                matched_names.insert(rule.rule.meta.name.as_str());
             }
+            pending_deps = still_pending;
         }
 
         rules
@@ -142,6 +164,7 @@ mod tests {
     use super::*;
     use ahash::{AHashMap, AHashSet};
     use rustc_hash::FxHashSet;
+    use std::sync::Arc;
 
     #[test]
     fn test_rule_evaluation() {
@@ -161,6 +184,7 @@ mod tests {
             has_loop: false,
             max_cyclomatic_complexity: 0,
             blocks: Vec::new(),
+            cfg_instructions: Arc::from([]),
         };
 
         // Simple API Match Rule
@@ -213,35 +237,38 @@ mod tests {
         // SetHandleInformation (call)
         // SetHandleInformation (call)
         // arg: 1 = HANDLE_FLAG_INHERIT (mov/push parameter)
-        let mut block1 = BasicBlock {
+        let mut insns = vec![
+            InstructionInfo {
+                address: 0x1000,
+                mnemonic: "mov".into(),
+                op_str: "1 = HANDLE_FLAG_INHERIT".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
+            },
+            InstructionInfo {
+                address: 0x1005,
+                mnemonic: "call".into(),
+                op_str: "SetHandleInformation".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
+            },
+            InstructionInfo {
+                address: 0x1010,
+                mnemonic: "call".into(),
+                op_str: "SetHandleInformation".into(),
+                api_resolution: None,
+                matched: smallvec::SmallVec::new(),
+                inst_class: Default::default(),
+            },
+        ];
+
+        let block1 = BasicBlock {
             start_address: 0x1000,
             end_address: 0x1010,
-            instructions: vec![
-                InstructionInfo {
-                    address: 0x1000,
-                    mnemonic: "mov".into(),
-                    op_str: "1 = HANDLE_FLAG_INHERIT".into(),
-                    api_resolution: None,
-                    matched: smallvec::SmallVec::new(),
-                    inst_class: Default::default(),
-                },
-                InstructionInfo {
-                    address: 0x1005,
-                    mnemonic: "call".into(),
-                    op_str: "SetHandleInformation".into(),
-                    api_resolution: None,
-                    matched: smallvec::SmallVec::new(),
-                    inst_class: Default::default(),
-                },
-                InstructionInfo {
-                    address: 0x1010,
-                    mnemonic: "call".into(),
-                    op_str: "SetHandleInformation".into(),
-                    api_resolution: None,
-                    matched: smallvec::SmallVec::new(),
-                    inst_class: Default::default(),
-                },
-            ],
+            start_idx: 0,
+            end_idx: insns.len(),
         };
 
         // Rule checking Loop presence & Cyclomatic Complexity
@@ -290,7 +317,7 @@ mod tests {
         let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
 
         // Manually populate matched sets since we bypass CFG in this test
-        for insn in block1.instructions.iter_mut() {
+        for insn in insns.iter_mut() {
             let haystack = format!("{} {}", insn.format_mnemonic(), insn.format_operands());
             for mat in needle.automaton.find_iter(&haystack) {
                 let p = mat.pattern();
@@ -315,6 +342,7 @@ mod tests {
             has_loop: true,
             max_cyclomatic_complexity: 5,
             blocks: vec![&block1],
+            cfg_instructions: insns.into(),
         };
 
         let matches = Rule::evaluate(&features, &rules, &needle);
@@ -340,6 +368,7 @@ mod tests {
             has_loop: false,
             max_cyclomatic_complexity: 0,
             blocks: Vec::new(),
+            cfg_instructions: Arc::from([]),
         };
 
         let rule_pe = RuleCondition::Format {
@@ -416,6 +445,7 @@ mod tests {
             has_loop: false,
             max_cyclomatic_complexity: 0,
             blocks: Vec::new(),
+            cfg_instructions: Arc::from([]),
         };
 
         let matched = Rule::evaluate(&features, &rules, &needle);
@@ -469,10 +499,12 @@ mod tests {
 
         needle.present[alloc_id.as_usize()].store(true, std::sync::atomic::Ordering::Relaxed);
 
+        let insns = vec![insn1, insn2];
         let block = BasicBlock {
             start_address: 0x1000,
             end_address: 0x1030,
-            instructions: vec![insn1, insn2],
+            start_idx: 0,
+            end_idx: insns.len(),
         };
 
         let empty_entropy = AHashMap::new();
@@ -489,6 +521,7 @@ mod tests {
             has_loop: false,
             max_cyclomatic_complexity: 1,
             blocks: vec![&block],
+            cfg_instructions: insns.into(),
         };
 
         let matched = Rule::evaluate(&features_two_calls, &rules, &needle);
@@ -539,17 +572,19 @@ mod tests {
         let block = BasicBlock {
             start_address: 0x1000,
             end_address: 0x1005,
-            instructions: vec![insn],
+            start_idx: 0,
+            end_idx: 1,
         };
 
         let mut cfg = ControlFlowGraph {
+            instructions: vec![insn].into(),
             blocks: [(0x1000, block)].into_iter().collect(),
             edges: vec![],
         };
 
         needle.populate_cfg(&mut cfg);
 
-        let insn_matched = &cfg.blocks[&0x1000].instructions[0].matched;
+        let insn_matched = &cfg.instructions[0].matched;
         // Both overlapping patterns ("alloc" and "virtualalloc") must match
         assert_eq!(
             insn_matched.len(),

@@ -1,7 +1,7 @@
 //! Rule condition tree, evaluation, and sanitization.
 
 use crate::{
-    core::{BasicBlock, FeatureSet, NeedleIndex, RuleTag, disassembler::InstructionInfo},
+    core::{FeatureSet, NeedleIndex, RuleTag, disassembler::InstructionInfo},
     utils::rules::parse_number_constant,
 };
 use ahash::{AHashMap, AHashSet};
@@ -346,9 +346,10 @@ impl RuleCondition {
                     return false;
                 }
                 features.blocks.iter().any(|block| {
+                    let instructions = block.instructions(&features.cfg_instructions);
                     conditions
                         .iter()
-                        .all(|cond| cond.matches_block(block, needle))
+                        .all(|cond| cond.matches_block(instructions, needle))
                 })
             }
             Self::CallScope { conditions } => {
@@ -356,7 +357,8 @@ impl RuleCondition {
                     return false;
                 }
                 features.blocks.iter().any(|block| {
-                    block.instructions.iter().any(|insn| {
+                    let instructions = block.instructions(&features.cfg_instructions);
+                    instructions.iter().any(|insn| {
                         conditions
                             .iter()
                             .all(|cond| cond.matches_instruction(insn, needle))
@@ -401,38 +403,52 @@ impl RuleCondition {
                         if !needle.present[id.as_usize()].load(Ordering::Relaxed) {
                             0 == *count
                         } else {
-                            features
-                                .blocks
-                                .iter()
-                                .flat_map(|b| b.instructions.iter())
-                                .filter(|insn| insn.matched.contains(id))
-                                .count()
-                                >= *count
+                            let mut accumulated = 0;
+                            'outer_api: for b in &features.blocks {
+                                for insn in b.instructions(&features.cfg_instructions) {
+                                    if insn.matched.contains(id) {
+                                        accumulated += 1;
+                                        if accumulated >= *count {
+                                            break 'outer_api;
+                                        }
+                                    }
+                                }
+                            }
+                            accumulated >= *count
                         }
                     } else {
                         false
                     }
                 }
                 Self::String { string } => {
-                    features
-                        .strings
-                        .iter()
-                        .filter(|s| s.contains(string))
-                        .count()
-                        >= *count
+                    let mut accumulated = 0;
+                    for s in &features.strings {
+                        if s.contains(string) {
+                            accumulated += 1;
+                            if accumulated >= *count {
+                                break;
+                            }
+                        }
+                    }
+                    accumulated >= *count
                 }
                 Self::Mnemonic { mnemonic } => {
                     if let Some(id) = needle.lookup.get(mnemonic) {
                         if !needle.present[id.as_usize()].load(Ordering::Relaxed) {
                             return 0 == *count;
                         }
-                        features
-                            .blocks
-                            .iter()
-                            .flat_map(|b| b.instructions.iter())
-                            .filter(|insn| insn.matched.contains(id))
-                            .count()
-                            >= *count
+                        let mut accumulated = 0;
+                        'outer_mnem: for b in &features.blocks {
+                            for insn in b.instructions(&features.cfg_instructions) {
+                                if insn.matched.contains(id) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_mnem;
+                                    }
+                                }
+                            }
+                        }
+                        accumulated >= *count
                     } else {
                         false
                     }
@@ -493,54 +509,48 @@ impl RuleCondition {
     }
 
     /// Evaluates the condition directly against a basic block via the pre-computed NeedleIndex match sets.
-    pub fn matches_block(&self, block: &BasicBlock, needle: &NeedleIndex) -> bool {
+    pub fn matches_block(&self, instructions: &[InstructionInfo], needle: &NeedleIndex) -> bool {
         match self {
-            Self::And { and } => and.iter().all(|c| c.matches_block(block, needle)),
-            Self::Or { or } => or.iter().any(|c| c.matches_block(block, needle)),
-            Self::Not { not } => !not.matches_block(block, needle),
+            Self::And { and } => and.iter().all(|c| c.matches_block(instructions, needle)),
+            Self::Or { or } => or.iter().any(|c| c.matches_block(instructions, needle)),
+            Self::Not { not } => !not.matches_block(instructions, needle),
             Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
-                needle.lookup.get(api).is_some_and(|id| {
-                    block
-                        .instructions
-                        .iter()
-                        .any(|insn| insn.matched.contains(id))
-                })
+                needle
+                    .lookup
+                    .get(api)
+                    .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id)))
             }
-            Self::String { string } => needle.lookup.get(string).is_some_and(|id| {
-                block
-                    .instructions
-                    .iter()
-                    .any(|insn| insn.matched.contains(id))
-            }),
-            Self::Mnemonic { mnemonic } => needle.lookup.get(mnemonic).is_some_and(|id| {
-                block
-                    .instructions
-                    .iter()
-                    .any(|insn| insn.matched.contains(id))
-            }),
+            Self::String { string } => needle
+                .lookup
+                .get(string)
+                .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id))),
+            Self::Mnemonic { mnemonic } => needle
+                .lookup
+                .get(mnemonic)
+                .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id))),
             Self::Match { .. } => false,
             Self::BasicBlockScope { conditions } => conditions
                 .iter()
-                .all(|cond| cond.matches_block(block, needle)),
-            Self::CallScope { conditions } => block.instructions.iter().any(|insn| {
+                .all(|cond| cond.matches_block(instructions, needle)),
+            Self::CallScope { conditions } => instructions.iter().any(|insn| {
                 conditions
                     .iter()
                     .all(|cond| cond.matches_instruction(insn, needle))
             }),
-            Self::Number { number } | Self::Offset { offset: number } => {
-                needle.lookup.get(number).is_some_and(|id| {
-                    block
-                        .instructions
-                        .iter()
-                        .any(|insn| insn.matched.contains(id))
-                })
-            }
+            Self::Number { number } | Self::Offset { offset: number } => needle
+                .lookup
+                .get(number)
+                .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id))),
             Self::Count { condition, count } => {
-                let actual = block
-                    .instructions
-                    .iter()
-                    .filter(|insn| condition.matches_instruction(insn, needle))
-                    .count();
+                let mut actual = 0;
+                for insn in instructions.iter() {
+                    if condition.matches_instruction(insn, needle) {
+                        actual += 1;
+                        if actual >= *count {
+                            return true;
+                        }
+                    }
+                }
                 actual >= *count
             }
             Self::Other(_) => false,
@@ -576,6 +586,21 @@ impl RuleCondition {
             Self::Count { condition, .. } => condition.is_present(needle),
             Self::Other(_) => true,
             _ => true,
+        }
+    }
+
+    /// Returns true if this condition tree contains any `match:` rule dependencies.
+    pub fn has_match_dependency(&self) -> bool {
+        match self {
+            Self::Match { .. } => true,
+            Self::And { and } => and.iter().any(|c| c.has_match_dependency()),
+            Self::Or { or } => or.iter().any(|c| c.has_match_dependency()),
+            Self::Not { not } => not.has_match_dependency(),
+            Self::Count { condition, .. } => condition.has_match_dependency(),
+            Self::BasicBlockScope { conditions } | Self::CallScope { conditions } => {
+                conditions.iter().any(|c| c.has_match_dependency())
+            }
+            _ => false,
         }
     }
 }
