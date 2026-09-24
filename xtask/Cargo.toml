@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rbat = { path = "../rbat-core" }
+clap = { workspace = true }
+rmp-serde = { workspace = true }
+color-eyre = { workspace = true }
