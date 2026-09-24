@@ -52,7 +52,7 @@ impl<'buf> FeatureSet<'buf> {
     pub fn from_analysis_result(res: &'buf AnalysisResult<'buf>) -> Self {
         let arch_name = res.metadata.architecture_name();
 
-        // ---- Library ranges (only when library functions were matched) ----
+        // ---- Library ranges ----
         let library_ranges: Vec<(u64, u64)> = match res.cfg.as_ref() {
             Some(cfg) if !res.library_functions.is_empty() => {
                 let all_entry_points: FxHashSet<u64> =
@@ -106,7 +106,7 @@ impl<'buf> FeatureSet<'buf> {
             }
         }
 
-        // ---- User-code blocks and graph metrics ----
+        // ---- Non lib code blocks and graph metrics ----
         let (blocks, has_loop, max_cyclomatic_complexity) = match res.cfg.as_ref() {
             Some(cfg) => {
                 let blocks: Vec<&'buf BasicBlock> = cfg

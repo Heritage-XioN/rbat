@@ -1,6 +1,6 @@
 //! Fast Library Identification and Recognition Technology module.
 
-use fast_flirt::{FlirtSet, Pattern, sig};
+use fast_flirt::{FlirtSet, FlirtSetBuilder};
 use rayon::prelude::*;
 use rust_embed::RustEmbed;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -20,8 +20,9 @@ static EMBEDDED_FLIRT: OnceLock<FlirtMatcher> = OnceLock::new();
 ///
 /// Follows the same load pattern as `Rule`: call `load_embedded()` to get the
 /// bundled signatures, then optionally `extend` with `load_from_directory()`.
+#[derive(Debug, Clone, Default)]
 pub struct FlirtMatcher {
-    set: FlirtSet,
+    sets: Vec<FlirtSet>,
 }
 
 impl FlirtMatcher {
@@ -37,55 +38,70 @@ impl FlirtMatcher {
 
     /// Loads the bundled FLIRT signatures compiled into the binary at build time.
     pub fn load_embedded() -> Self {
-        let mut patterns: Vec<Pattern> = Vec::new();
+        let mut builder = FlirtSetBuilder::new();
 
         for file in EmbeddedSignatures::iter() {
-            if let Some(embedded_file) = EmbeddedSignatures::get(&file)
-                && let Ok(mut p) = sig::parse(&embedded_file.data)
-            {
-                patterns.append(&mut p);
+            if let Some(embedded_file) = EmbeddedSignatures::get(&file) {
+                let name = file.to_lowercase();
+                if name.ends_with(".sig") {
+                    let _ = builder.add_sig(&embedded_file.data);
+                } else if name.ends_with(".pat.gz") {
+                    let _ = builder.add_pat_gz(&embedded_file.data);
+                } else if name.ends_with(".pat")
+                    && let Ok(text) = std::str::from_utf8(&embedded_file.data)
+                {
+                    let _ = builder.add_pat(text);
+                }
             }
         }
 
-        Self {
-            set: FlirtSet::with_patterns(patterns),
+        match builder.build() {
+            Ok(set) if !set.is_empty() => Self { sets: vec![set] },
+            _ => Self { sets: Vec::new() },
         }
     }
 
     /// Loads FLIRT signatures (`.sig` and `.pat` files) from the given directory.
     pub fn load_from_directory(dir: &Path) -> Self {
         if !dir.is_dir() {
-            return Self {
-                set: FlirtSet::with_patterns(Vec::new()),
-            };
+            return Self { sets: Vec::new() };
         }
 
-        // Use FlirtSet::load_dir which handles recursive walking and both formats
+        // handles recursive walking and both formats
         match FlirtSet::load_dir(dir) {
-            Ok(set) => Self { set },
-            Err(_) => Self {
-                set: FlirtSet::with_patterns(Vec::new()),
-            },
+            Ok(set) if !set.is_empty() => Self { sets: vec![set] },
+            _ => Self { sets: Vec::new() },
         }
+    }
+
+    /// Total number of signatures loaded across all signature sets.
+    pub fn len(&self) -> usize {
+        self.sets.iter().map(|s| s.len()).sum()
+    }
+
+    /// Checks if any signatures are loaded.
+    pub fn is_empty(&self) -> bool {
+        self.sets.iter().all(|s| s.is_empty())
     }
 
     /// Merges another matcher's patterns into this one.
     pub fn extend(&mut self, other: Self) {
-        let mut patterns =
-            Vec::with_capacity(self.set.patterns().len() + other.set.patterns().len());
-        patterns.extend_from_slice(self.set.patterns());
-        patterns.extend_from_slice(other.set.patterns());
-        self.set = FlirtSet::with_patterns(patterns);
+        for set in other.sets {
+            if !set.is_empty() {
+                self.sets.push(set);
+            }
+        }
     }
 
     /// Queries the FLIRT trie with candidate function bytes.
     /// Returns a normalized, demangled name if a signature matches.
     pub fn match_bytes(&self, function_bytes: &[u8]) -> Option<String> {
-        self.set
-            .matches(function_bytes)
-            .first()
-            .and_then(|pattern| pattern.public_name())
-            .map(normalize_symbol)
+        for set in &self.sets {
+            if let Some(name) = set.match_public_name(function_bytes) {
+                return Some(normalize_symbol(name));
+            }
+        }
+        None
     }
 
     /// Scans a set of function entry points against the `.text` section bytes

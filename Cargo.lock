@@ -1399,9 +1399,9 @@ dependencies = [
 
 [[package]]
 name = "fast-flirt"
-version = "0.1.2"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fa6eff9a52d24f1d6e84260d6c43d69c16a90775c5ffa382052e336bd468b5d"
+checksum = "deba46f4c332e4ec6035be74f86f6066ac3a2833444e6e900cdda6948b746871"
 dependencies = [
  "miniz_oxide 0.9.1",
  "smallvec",

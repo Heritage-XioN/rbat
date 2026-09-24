@@ -43,7 +43,7 @@ lightningcss = "=1.0.0-alpha.70"
 rayon = { workspace = true }
 indicatif = { workspace = true }
 tui-banner = { workspace = true }
-fast-flirt = "0.1.1"
+fast-flirt = "0.2.2"
 msvc-demangler = "0.9.0"
 cpp_demangle = "0.4.3"
 aho-corasick = "1.1.4"
