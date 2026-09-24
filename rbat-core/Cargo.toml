@@ -20,7 +20,7 @@ dhat-heap = ["dep:dhat"]
 dhat = { version = "0.3.3", optional = true }
 capstone = { version = "0.14.0", optional = true }
 iced-x86 = { version = "1.21.0", features = ["code_asm"], optional = true }
-clap = { version =  "4.6.1", features = ["derive", "usage"]}
+clap = { workspace = true }
 clap_complete = "4.5"
 object = "0.39.1"
 petgraph = "0.8.3"
@@ -31,6 +31,7 @@ rust-embed = { version = "8.11.0", features = ["compression", "include-exclude"]
 serde = { workspace = true }
 serde_json = { workspace = true }
 yaml_serde = { workspace = true }
+rmp-serde = { workspace = true }
 thiserror = { workspace = true }
 yara = { version = "0.32.0", features = ["vendored"] }
 csv = "1.4.0"

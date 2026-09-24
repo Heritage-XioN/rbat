@@ -50,17 +50,15 @@ impl Rule {
         self.rule.features.iter().any(|c| c.has_match_dependency())
     }
 
-    /// Loads all embedded JSON and YAML rules from assets.
+    /// Loads all embedded Capa rules from the pre-compiled MessagePack bundle.
     pub fn load_embedded() -> Vec<Self> {
-        Asset::iter()
-            .filter(|p| {
-                p.starts_with("capa-rules/")
-                    && (p.ends_with(".json") || p.ends_with(".yaml") || p.ends_with(".yml"))
-                    && !p.contains("/.")
-            })
-            .filter_map(|p| Asset::get(&p))
-            .filter_map(|f| Self::from_slice(&f.data).ok())
-            .collect()
+        if let Some(file) = Asset::get("embedded_rules.mp") {
+            match rmp_serde::from_slice::<Vec<Rule>>(&file.data) {
+                Ok(rules) => return rules,
+                Err(e) => eprintln!("Warning: Failed to decode pre-compiled rules: {e}"),
+            }
+        }
+        Vec::new()
     }
 
     /// Loads custom JSON and YAML rules from a directory on the local filesystem.
@@ -590,6 +588,17 @@ mod tests {
             insn_matched.len(),
             2,
             "Both overlapping patterns must be present in matched"
+        );
+    }
+
+    #[test]
+    fn test_load_embedded_rules() {
+        let rules = Rule::load_embedded();
+        assert_eq!(rules.len(), 1052, "Expected 1,052 embedded Capa rules");
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.rule.meta.name.contains("encrypt data using RC4 PRGA"))
         );
     }
 }

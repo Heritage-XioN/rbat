@@ -46,4 +46,5 @@ pub struct ParsedBinaryContext {
 #[folder = "./assets/"]
 #[exclude = "flirtdb/*"]
 #[exclude = "signatures_embedded/*"]
+#[exclude = "capa-rules/*"]
 pub struct Asset;
