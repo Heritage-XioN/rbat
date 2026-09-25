@@ -1,0 +1,80 @@
+name: Fuzz Testing & Robustness
+
+on:
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'crates/**'
+      - 'fuzz/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/fuzz.yml'
+  push:
+    branches: [ master ]
+    paths:
+      - 'crates/**'
+      - 'fuzz/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/fuzz.yml'
+  schedule:
+    # Run nightly at 02:00 UTC
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  property-tests:
+    name: Property-Based Verification (proptest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Run Property Invariant Tests
+        run: cargo test --test properties --verbose
+
+  fuzz-smoke:
+    name: Smoke Fuzzing (cargo-fuzz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Type-Check Fuzz Targets
+        run: cargo +nightly fuzz check
+      - name: Seed Fuzz Corpora
+        run: bash scripts/generate_fuzz_corpus.sh
+      - name: Smoke Run Fuzz Targets
+        run: |
+          # Run each target for 30 with token dictionaries
+          cargo +nightly fuzz run fuzz_rules -- -dict=fuzz/dictionaries/rules.dict -max_total_time=30
+          cargo +nightly fuzz run fuzz_flirt -- -dict=fuzz/dictionaries/sig.dict -max_total_time=30
+          cargo +nightly fuzz run fuzz_cfg -- -dict=fuzz/dictionaries/binary.dict -max_total_time=30
+          cargo +nightly fuzz run fuzz_analyze -- -dict=fuzz/dictionaries/binary.dict -max_total_time=30

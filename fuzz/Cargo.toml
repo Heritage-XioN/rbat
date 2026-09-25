@@ -1,0 +1,47 @@
+[package]
+name = "rbat-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+fast-flirt = "0.2.2"
+rustc-hash = "2.1.3"
+
+[dependencies.rbat]
+path = "../crates/rbat-core"
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_analyze"
+path = "fuzz_targets/fuzz_analyze.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_cfg"
+path = "fuzz_targets/fuzz_cfg.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_flirt"
+path = "fuzz_targets/fuzz_flirt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_rules"
+path = "fuzz_targets/fuzz_rules.rs"
+test = false
+doc = false
+bench = false

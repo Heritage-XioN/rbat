@@ -4,3 +4,7 @@ report.*
 COMPETITIVE_PARITY.md
 crates/rbat-core/assets/signatures_embedded/
 crates/rbat-core/dhat_output/*
+fuzz/target/
+fuzz/artifacts/
+fuzz/coverage/
+fuzz/corpus/
