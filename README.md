@@ -34,7 +34,7 @@ rbat/
 To further advance **RBAT**, the following capabilities are planned for future major releases:
 
 1. **Static Emulation / Auto-Unpacking Sandbox:** Integrate a lightweight emulation layer (such as Unicorn/Qiling engine bindings) to execute packed entry loops in a safe sandbox and capture unpacked memory payloads automatically.
-2. **Symbolic Execution Assistance:** Provide lightweight path constraint solver integration to evaluate complex obfuscated jump targets.
+2. **Symbolic Execution Assistance(not sure how to go about it yet):** Provide lightweight path constraint solver integration to evaluate complex obfuscated jump targets.
 
 ## Contributing & Community
 
