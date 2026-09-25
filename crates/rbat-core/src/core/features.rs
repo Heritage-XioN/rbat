@@ -181,7 +181,7 @@ impl<'buf> FeatureSet<'buf> {
     }
 
     /// Sorts and merges overlapping ranges
-    fn merge_ranges(mut ranges: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
+    pub fn merge_ranges(mut ranges: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
         ranges.sort_unstable();
         let mut merged: Vec<(u64, u64)> = Vec::with_capacity(ranges.len());
         for (s, e) in ranges {
@@ -195,7 +195,7 @@ impl<'buf> FeatureSet<'buf> {
 
     /// Iterative 3-state DFS with a per-node edge cursor.
     /// Returns true if the graph contains a cycle (a self-loop counts).
-    fn has_cycle(adj: &[SmallVec<[u32; 2]>]) -> bool {
+    pub fn has_cycle(adj: &[SmallVec<[u32; 2]>]) -> bool {
         let n = adj.len();
         let mut state = vec![0u8; n]; // 0 = unvisited, 1 = on stack, 2 = done
         let mut cursor = vec![0usize; n];
@@ -231,7 +231,7 @@ impl<'buf> FeatureSet<'buf> {
     }
 
     /// Max McCabe complexity (E - N + 2) across weakly connected components.
-    fn max_cyclomatic_complexity(adj: &[SmallVec<[u32; 2]>]) -> usize {
+    pub fn max_cyclomatic_complexity(adj: &[SmallVec<[u32; 2]>]) -> usize {
         let n = adj.len();
         let mut uf = UnionFind::new(n);
         for (s, succs) in adj.iter().enumerate() {
