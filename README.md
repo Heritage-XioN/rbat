@@ -10,28 +10,23 @@
 [![Crates.io Version](https://img.shields.io/crates/v/rbat?style=for-the-badge&logo=rust&color=orange&label=core%20version)](https://crates.io/crates/rbat)
 [![Crates.io Downloads](https://img.shields.io/crates/d/rbat?style=for-the-badge&color=blue&label=downloads)](https://crates.io/crates/rbat)
 [![Rust CI Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci-rust.yml?style=for-the-badge&label=rust%20ci)](https://github.com/Heritage-XioN/rbat/actions)
-[![Client CI Status](https://img.shields.io/github/actions/workflow/status/Heritage-XioN/rbat/ci-client.yml?style=for-the-badge&label=client%20ci)](https://github.com/Heritage-XioN/rbat/actions)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge)](https://opensource.org/licenses/Apache-2.0)
 [![Rust MSRV](https://img.shields.io/badge/rustc-1.75+-orange.svg?style=for-the-badge&logo=rust)](https://blog.rust-lang.org/2023/12/28/Rust-1.75.0.html)
-[![Node Version](https://img.shields.io/badge/node-%3E%3D20.0.0-green.svg?style=for-the-badge&logo=node.js)](https://nodejs.org)
-
 
 RBAT (Rust Binary Analysis Tool) is a modern, high-performance static analysis and security auditing framework for compiled binaries.
 
 ## Workspace Structure
 
-The project is organized as a Cargo workspace consisting of three primary components:
+The project is organized as a Cargo workspace:
 
-* **[rbat-core](rbat-core/README.md)**: The core static analysis engine. Written in Rust, it performs binary parsing (ELF, PE, Mach-O), entropy calculation, YARA rule matching, FLIRT signature matching, disassembling (via `backend-capstone` or `backend-iced` feature flags), CFG graph reconstruction, and threat scoring against MITRE ATT&CK categories using a native JSON & YAML CAPA-compatible rule engine. Exposes the subcommand CLI (`analyze`, `rules`, `completions`).
-* **[rbat-server](rbat-server/README.md)**: A high-performance gRPC server daemon wrapping the core engine to enable remote static analysis auditing services.
-* **[rbat-client](rbat-client/README.md)**: A modern Next.js web application frontend dashboard providing interactive visualizations of binary analysis findings, entropy maps, and reports.
+* **[crates/rbat-core](crates/rbat-core/README.md)**: The core static analysis engine and CLI tool. Written in Rust, it performs binary parsing (ELF, PE, Mach-O), entropy calculation, YARA rule matching, FLIRT signature matching, disassembling (via `backend-capstone` or `backend-iced` feature flags), CFG graph reconstruction, and threat scoring against MITRE ATT&CK categories using a native JSON & YAML CAPA-compatible rule engine. Exposes the subcommand CLI (`analyze`, `rules`, `completions`, `--tui`).
+* **[crates/xtask](crates/xtask)**: Developer automation CLI for pre-compiling Capa rules and repository maintenance (`cargo xtask bundle-rules`).
 
 ```text
 rbat/
-├── proto/               # gRPC Service Definition
-├── rbat-core/           # Core Rust static analysis engine & CLI
-├── rbat-server/         # gRPC server wrapper around the core engine
-└── rbat-client/         # Next.js web application dashboard
+└── crates/
+    ├── rbat-core/           # Core Rust static analysis engine & CLI
+    └── xtask/               # Automation & rule pre-compilation
 ```
 
 ## Roadmap & Future Enhancements

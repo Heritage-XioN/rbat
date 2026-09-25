@@ -1,7 +1,6 @@
 /target
 .env
 report.*
-rbat-server/src/bin/*
 COMPETITIVE_PARITY.md
-rbat-core/assets/signatures_embedded/
-rbat-core/dhat_output/*
+crates/rbat-core/assets/signatures_embedded/
+crates/rbat-core/dhat_output/*

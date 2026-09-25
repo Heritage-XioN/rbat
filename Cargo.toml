@@ -1,5 +1,5 @@
 [workspace]
-members = ["rbat-core", "rbat-server", "xtask"]
+members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
