@@ -99,7 +99,7 @@ impl SeverityClassifier {
         let map_entries = |entries: BTreeMap<String, String>| {
             entries
                 .into_iter()
-                .filter_map(|(key, class)| match parse_class(&class) {
+                .filter_map(|(key, class)| match Self::parse_class(&class) {
                     Some(c) => Some((key.to_lowercase(), c)),
                     None => {
                         eprintln!("warning: unrecognized severity class '{class}' for '{key}'");
@@ -126,7 +126,7 @@ impl SeverityClassifier {
             toml::from_str(&src).map_err(|e| format!("invalid override file: {e}"))?;
 
         for (key, class) in table.namespace_defaults {
-            if let Some(c) = parse_class(&class) {
+            if let Some(c) = Self::parse_class(&class) {
                 self.namespace_defaults.insert(key.to_lowercase(), c);
             } else {
                 eprintln!(
@@ -136,7 +136,7 @@ impl SeverityClassifier {
             }
         }
         for (key, class) in table.overrides {
-            if let Some(c) = parse_class(&class) {
+            if let Some(c) = Self::parse_class(&class) {
                 self.rule_overrides.insert(key.to_lowercase(), c);
             } else {
                 eprintln!(
@@ -151,7 +151,7 @@ impl SeverityClassifier {
     /// Resolves the effective [`SeverityClass`] for a matched rule.
     pub fn classify(&self, rule: &RuleMeta) -> SeverityClass {
         // 1. Explicit severity declared on the rule itself.
-        if let Some(class) = rule.severity.as_deref().and_then(parse_class) {
+        if let Some(class) = rule.severity.as_deref().and_then(Self::parse_class) {
             return class;
         }
 
@@ -171,124 +171,124 @@ impl SeverityClassifier {
             return *class;
         }
 
-        infer_from_mappings(rule)
+        Self::infer_from_mappings(rule)
     }
-}
 
-/// Fallback inference from ATT&CK tactics, MBC objectives, and anti-analysis namespaces.
-fn infer_from_mappings(rule: &RuleMeta) -> SeverityClass {
-    // Anti-analysis namespaces or MBC objectives are strong evasion indicators.
-    let is_anti_analysis = namespace_root_is(rule, "anti-analysis")
-        || mbc_objectives(rule)
+    /// Fallback inference from ATT&CK tactics, MBC objectives, and anti-analysis namespaces.
+    fn infer_from_mappings(rule: &RuleMeta) -> SeverityClass {
+        // Anti-analysis namespaces or MBC objectives are strong evasion indicators.
+        let is_anti_analysis = Self::namespace_root_is(rule, "anti-analysis")
+            || Self::mbc_objectives(rule)
+                .iter()
+                .any(|objective| objective.starts_with("anti-"));
+        if is_anti_analysis {
+            return SeverityClass::High;
+        }
+
+        let tactics = Self::attack_tactics(rule);
+
+        // Cryptographic primitives (encrypt/decrypt/hash via AES-NI, SHA extensions,
+        // generic implementations...) are ubiquitous in benign software. When the rule
+        // lives under `data-manipulation` and its MBC mapping is purely cryptographic,
+        // downgrade even if ATT&CK labels it Defense Evasion (T1027/T1140): primitive
+        // usage alone is weak evidence of hostile intent.
+        let objectives = Self::mbc_objectives(rule);
+        let is_pure_crypto_primitive = Self::namespace_root_is(rule, CRYPTO_NAMESPACE_ROOT)
+            && !objectives.is_empty()
+            && objectives
+                .iter()
+                .all(|o| o.starts_with(NEUTRAL_CRYPTO_OBJECTIVE))
+            // Defense Evasion alone (T1027/T1140-style obfuscation mappings) still
+            // qualifies for the demotion; any other threat tactic blocks it.
+            && tactics
+                .iter()
+                .all(|t| t == "defense_evasion");
+        if is_pure_crypto_primitive {
+            return SeverityClass::Low;
+        }
+
+        if tactics
             .iter()
-            .any(|objective| objective.starts_with("anti-"));
-    if is_anti_analysis {
-        return SeverityClass::High;
-    }
-
-    let tactics = attack_tactics(rule);
-
-    // Cryptographic primitives (encrypt/decrypt/hash via AES-NI, SHA extensions,
-    // generic implementations...) are ubiquitous in benign software. When the rule
-    // lives under `data-manipulation` and its MBC mapping is purely cryptographic,
-    // downgrade even if ATT&CK labels it Defense Evasion (T1027/T1140): primitive
-    // usage alone is weak evidence of hostile intent.
-    let objectives = mbc_objectives(rule);
-    let is_pure_crypto_primitive = namespace_root_is(rule, CRYPTO_NAMESPACE_ROOT)
-        && !objectives.is_empty()
-        && objectives
+            .any(|t| HIGH_THREAT_TACTICS.contains(&t.as_str()))
+        {
+            return SeverityClass::High;
+        }
+        if tactics
             .iter()
-            .all(|o| o.starts_with(NEUTRAL_CRYPTO_OBJECTIVE))
-        // Defense Evasion alone (T1027/T1140-style obfuscation mappings) still
-        // qualifies for the demotion; any other threat tactic blocks it.
-        && tactics
+            .any(|t| MEDIUM_THREAT_TACTICS.contains(&t.as_str()))
+        {
+            return SeverityClass::Medium;
+        }
+        SeverityClass::Low
+    }
+
+    fn namespace_root_is(rule: &RuleMeta, expected: &str) -> bool {
+        rule.namespace
+            .as_deref()
+            .and_then(|ns| ns.split('/').next())
+            .is_some_and(|root| root.eq_ignore_ascii_case(expected))
+    }
+
+    /// Lowercase ATT&CK tactic slugs referenced by the rule.
+    fn attack_tactics(rule: &RuleMeta) -> Vec<String> {
+        rule.mitre_attack
+            .as_ref()
+            .map(|m| m.as_vec())
+            .unwrap_or_default()
             .iter()
-            .all(|t| t == "defense_evasion");
-    if is_pure_crypto_primitive {
-        return SeverityClass::Low;
+            .filter_map(|entry| Self::tactic_slug(entry))
+            .collect()
     }
 
-    if tactics
-        .iter()
-        .any(|t| HIGH_THREAT_TACTICS.contains(&t.as_str()))
-    {
-        return SeverityClass::High;
+    /// Uppercase/lowercase-normalized MBC objective prefixes (segment before `::`).
+    fn mbc_objectives(rule: &RuleMeta) -> Vec<String> {
+        rule.mbc
+            .as_ref()
+            .map(|m| m.as_vec())
+            .unwrap_or_default()
+            .iter()
+            .map(|entry| {
+                entry
+                    .split_once("::")
+                    .map_or(entry.as_str(), |(objective, _)| objective)
+                    .trim()
+                    .to_lowercase()
+            })
+            .collect()
     }
-    if tactics
-        .iter()
-        .any(|t| MEDIUM_THREAT_TACTICS.contains(&t.as_str()))
-    {
-        return SeverityClass::Medium;
+
+    /// Normalizes a MITRE ATT&CK tactic name to its slug form
+    /// (e.g. `"Defense Evasion"` -> `"defense_evasion"`).
+    fn normalize_tactic(tactic: &str) -> String {
+        tactic.trim().to_lowercase().replace([' ', '-'], "_")
     }
-    SeverityClass::Low
-}
 
-fn namespace_root_is(rule: &RuleMeta, expected: &str) -> bool {
-    rule.namespace
-        .as_deref()
-        .and_then(|ns| ns.split('/').next())
-        .is_some_and(|root| root.eq_ignore_ascii_case(expected))
-}
+    /// Extracts the tactic slug from a formatted ATT&CK mapping such as
+    /// `"Defense Evasion::Obfuscated Files or Information [T1027]"`.
+    ///
+    /// Returns `None` when the entry does not resolve to a known tactic, either
+    /// because it lacks the `::` tactic prefix entirely or because the prefix is
+    /// unrecognized.
+    pub(crate) fn tactic_slug(entry: &str) -> Option<String> {
+        let candidate = match entry.split_once("::") {
+            Some((prefix, _)) => prefix,
+            None => entry,
+        };
+        let slug = Self::normalize_tactic(candidate);
+        KNOWN_TACTICS.contains(&slug.as_str()).then_some(slug)
+    }
 
-/// Lowercase ATT&CK tactic slugs referenced by the rule.
-fn attack_tactics(rule: &RuleMeta) -> Vec<String> {
-    rule.mitre_attack
-        .as_ref()
-        .map(|m| m.as_vec())
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|entry| tactic_slug(entry))
-        .collect()
-}
-
-/// Uppercase/lowercase-normalized MBC objective prefixes (segment before `::`).
-fn mbc_objectives(rule: &RuleMeta) -> Vec<String> {
-    rule.mbc
-        .as_ref()
-        .map(|m| m.as_vec())
-        .unwrap_or_default()
-        .iter()
-        .map(|entry| {
-            entry
-                .split_once("::")
-                .map_or(entry.as_str(), |(objective, _)| objective)
-                .trim()
-                .to_lowercase()
-        })
-        .collect()
-}
-
-/// Normalizes a MITRE ATT&CK tactic name to its slug form
-/// (e.g. `"Defense Evasion"` -> `"defense_evasion"`).
-fn normalize_tactic(tactic: &str) -> String {
-    tactic.trim().to_lowercase().replace([' ', '-'], "_")
-}
-
-/// Extracts the tactic slug from a formatted ATT&CK mapping such as
-/// `"Defense Evasion::Obfuscated Files or Information [T1027]"`.
-///
-/// Returns `None` when the entry does not resolve to a known tactic, either
-/// because it lacks the `::` tactic prefix entirely or because the prefix is
-/// unrecognized.
-pub fn tactic_slug(entry: &str) -> Option<String> {
-    let candidate = match entry.split_once("::") {
-        Some((prefix, _)) => prefix,
-        None => entry,
-    };
-    let slug = normalize_tactic(candidate);
-    KNOWN_TACTICS.contains(&slug.as_str()).then_some(slug)
-}
-
-/// Parses a human-readable class name into a [`SeverityClass`].
-fn parse_class(value: &str) -> Option<SeverityClass> {
-    match value.trim().to_lowercase().as_str() {
-        "informational" | "info" => Some(SeverityClass::Informational),
-        "capability" | "benign" => Some(SeverityClass::Capability),
-        "low" => Some(SeverityClass::Low),
-        "medium" => Some(SeverityClass::Medium),
-        "high" => Some(SeverityClass::High),
-        "critical" => Some(SeverityClass::Critical),
-        _ => None,
+    /// Parses a human-readable class name into a [`SeverityClass`].
+    fn parse_class(value: &str) -> Option<SeverityClass> {
+        match value.trim().to_lowercase().as_str() {
+            "informational" | "info" => Some(SeverityClass::Informational),
+            "capability" | "benign" => Some(SeverityClass::Capability),
+            "low" => Some(SeverityClass::Low),
+            "medium" => Some(SeverityClass::Medium),
+            "high" => Some(SeverityClass::High),
+            "critical" => Some(SeverityClass::Critical),
+            _ => None,
+        }
     }
 }
 
@@ -513,10 +513,12 @@ mod tests {
     #[test]
     fn test_tactic_slug_extraction() {
         assert_eq!(
-            tactic_slug("Defense Evasion::Obfuscated Files or Information [T1027]"),
+            SeverityClassifier::tactic_slug(
+                "Defense Evasion::Obfuscated Files or Information [T1027]"
+            ),
             Some("defense_evasion".to_string())
         );
-        assert_eq!(tactic_slug("T1055"), None);
-        assert_eq!(tactic_slug("Mobile::Unknown"), None);
+        assert_eq!(SeverityClassifier::tactic_slug("T1055"), None);
+        assert_eq!(SeverityClassifier::tactic_slug("Mobile::Unknown"), None);
     }
 }

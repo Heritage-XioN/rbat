@@ -46,7 +46,7 @@
 use crate::core::types::{SAFE_MAX_SCORE, SUSPICIOUS_MAX_SCORE, SeverityClass};
 use crate::core::{CategoryScore, Finding, FindingCounts, RiskAssessment, RuleMeta};
 use crate::utils::rules::StringOrVec;
-use crate::utils::severity::{SeverityClassifier, tactic_slug};
+use crate::utils::severity::SeverityClassifier;
 use ahash::{AHashMap, AHashSet};
 
 /// Calculates a final risk score (0-100) using noisy-OR aggregation and a custom
@@ -73,7 +73,7 @@ pub fn calculate_risk_with(
             .map(|m| m.as_vec())
             .unwrap_or_default()
             .iter()
-            .find_map(|entry| tactic_slug(entry));
+            .find_map(|entry| SeverityClassifier::tactic_slug(entry));
 
         match severity_class {
             SeverityClass::Informational => counts.informational += 1,
