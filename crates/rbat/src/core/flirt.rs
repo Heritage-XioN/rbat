@@ -1,17 +1,19 @@
-//! Fast Library Identification and Recognition Technology module.
-
 use fast_flirt::{FlirtSet, FlirtSetBuilder};
+use object::{Object, ObjectSymbol};
 use rayon::prelude::*;
 use rust_embed::RustEmbed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::utils::flirt::normalize_symbol;
+use crate::core::cfg::InstructionClass;
+use crate::core::disassembler::InstructionInfo;
+use crate::core::parser::BinaryArch;
 
+/// Embedded flirt signatures
 #[derive(RustEmbed)]
 #[folder = "assets/signatures_embedded/"]
-struct EmbeddedSignatures;
+struct EmbedFlirtSig;
 
 /// Process-wide cache of the bundled signature database, parsed on first use.
 static EMBEDDED_FLIRT: OnceLock<FlirtMatcher> = OnceLock::new();
@@ -40,8 +42,8 @@ impl FlirtMatcher {
     pub fn load_embedded() -> Self {
         let mut builder = FlirtSetBuilder::new();
 
-        for file in EmbeddedSignatures::iter() {
-            if let Some(embedded_file) = EmbeddedSignatures::get(&file) {
+        for file in EmbedFlirtSig::iter() {
+            if let Some(embedded_file) = EmbedFlirtSig::get(&file) {
                 let name = file.to_lowercase();
                 if name.ends_with(".sig") {
                     let _ = builder.add_sig(&embedded_file.data);
@@ -102,7 +104,7 @@ impl FlirtMatcher {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             for set in &self.sets {
                 if let Some(name) = set.match_public_name(function_bytes) {
-                    return Some(normalize_symbol(name));
+                    return Some(Self::normalize_symbol(name));
                 }
             }
             None
@@ -132,6 +134,111 @@ impl FlirtMatcher {
                 None
             })
             .collect()
+    }
+
+    /// Normalizes and demangles symbol names returned by the FLIRT engine.
+    pub fn normalize_symbol(name: &str) -> String {
+        let mut name = name.to_owned();
+
+        // 1. Demangle MSVC C++ symbols (start with '?')
+        if name.starts_with('?') {
+            if let Ok(demangled) =
+                msvc_demangler::demangle(&name, msvc_demangler::DemangleFlags::llvm())
+            {
+                name = demangled;
+            }
+        }
+        // 2. Demangle GCC/Clang/Itanium C++ symbols (start with '_Z')
+        else if name.starts_with("_Z")
+            && let Ok(sym) = cpp_demangle::Symbol::new(&name)
+        {
+            name = sym.to_string();
+        }
+
+        // 3. Remove common compiler-specific prefixes
+        if let Some(stripped) = name.strip_prefix("__imp___") {
+            name = stripped.to_owned();
+        } else if let Some(stripped) = name.strip_prefix("__imp_") {
+            name = stripped.to_owned();
+        }
+
+        // Strip leading underscore commonly added by C compilers for x86 platform symbols
+        if name.starts_with('_') && !name.starts_with("__") && name.len() > 1 {
+            name = name[1..].to_owned();
+        }
+
+        name
+    }
+
+    /// Discovers potential function entry points from symbols, exports, and call destinations.
+    pub fn collect_entry_points(
+        binary_object: &object::File,
+        instructions: &[InstructionInfo],
+        arch: &BinaryArch,
+        entry_addr: u64,
+    ) -> FxHashSet<u64> {
+        let mut entry_points = FxHashSet::default();
+        entry_points.insert(entry_addr);
+
+        // Collect from call instructions
+        for insn in instructions {
+            if insn.class(arch) == InstructionClass::Call
+                && let Some(target) = insn.branch_target()
+            {
+                entry_points.insert(target);
+            }
+        }
+
+        for sym in binary_object.symbols() {
+            if sym.address() > 0 && sym.kind() == object::SymbolKind::Text {
+                entry_points.insert(sym.address());
+            }
+        }
+        for sym in binary_object.dynamic_symbols() {
+            if sym.address() > 0 && sym.kind() == object::SymbolKind::Text {
+                entry_points.insert(sym.address());
+            }
+        }
+        if let Ok(exports) = binary_object.exports() {
+            for export in exports {
+                if export.address() > 0 {
+                    entry_points.insert(export.address());
+                }
+            }
+        }
+
+        entry_points
+    }
+
+    /// Traces execution from a start address to find the semantic end address of a function.
+    pub fn find_function_range(
+        start_addr: u64,
+        instructions: &[InstructionInfo],
+        all_entry_points: &FxHashSet<u64>,
+        arch: &BinaryArch,
+    ) -> (u64, u64) {
+        let start_idx = match instructions.binary_search_by_key(&start_addr, |insn| insn.address())
+        {
+            Ok(idx) => idx,
+            Err(_) => {
+                return (start_addr, start_addr);
+            }
+        };
+
+        let mut end_addr = start_addr;
+        for insn in instructions.iter().skip(start_idx) {
+            if insn.address() != start_addr && all_entry_points.contains(&insn.address()) {
+                break;
+            }
+
+            end_addr = insn.address();
+
+            if insn.class(arch) == InstructionClass::Return {
+                break;
+            }
+        }
+
+        (start_addr, end_addr)
     }
 }
 

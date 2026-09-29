@@ -17,13 +17,13 @@
 //! use rbat::core::traits::HeuristicPlugin;
 //! use std::sync::Arc;
 //! use rbat::core::types::NeedleIndex;
-//! use rbat::utils::flirt::collect_function_entry_points;
+//! use rbat::core::FlirtMatcher;
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let buffer = vec![0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 62, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 56, 0, 1, 0, 64, 0, 0, 0, 0, 0];
 //! let obj = File::parse(buffer.as_slice())?;
 //! let section_ranges = vec![];
-//! let entry_points = collect_function_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
+//! let entry_points = FlirtMatcher::collect_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
 //!
 //! let needle = Arc::new(NeedleIndex::build_from_rules(&[]));
 //! let ctx = AnalysisContext {
@@ -52,11 +52,14 @@
 //! ```
 
 use crate::core::heuristics::disassemble_section;
+use crate::core::heuristics::{packer_sig_check, string_check};
 use crate::core::traits::HeuristicPlugin;
+use crate::core::types::BinaryMetadata;
 use crate::core::types::RbatResult;
-use crate::core::{AnalysisContext, AnalysisProgress, parser::Parser};
-use crate::core::{packer_sig_check, string_check};
-use crate::utils::get_metadata::get_binary_metadata;
+use crate::core::{
+    parser::Parser,
+    types::{AnalysisContext, AnalysisProgress},
+};
 use crate::utils::hashing::compute_hashes;
 use std::sync::Arc;
 
@@ -242,7 +245,7 @@ impl HeuristicPlugin for MetadataPlugin {
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
     ) -> RbatResult<AnalysisProgress<'buf>> {
-        let results = get_binary_metadata(ctx.binary_object)?;
+        let results = BinaryMetadata::from_object(ctx.binary_object)?;
         Ok(AnalysisProgress::BinaryMetadata(results))
     }
 }
@@ -267,8 +270,11 @@ impl HeuristicPlugin for CfgPlugin {
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
-    use crate::core::{BinaryArch, BinaryOS};
-    use crate::utils::flirt::collect_function_entry_points;
+    use crate::core::{
+        flirt::FlirtMatcher,
+        parser::{BinaryArch, BinaryOS},
+        types::SectionRange,
+    };
     use crate::utils::test_helpers::test_helpers;
     use object::File;
     use std::fs;
@@ -282,8 +288,8 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
-        let section_ranges = crate::utils::section_offset::build_section_map(&obj).unwrap();
-        let entry_points = collect_function_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
+        let section_ranges = SectionRange::build_map(&obj).unwrap();
+        let entry_points = FlirtMatcher::collect_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
 
         let ctx = AnalysisContext {
             buffer: &buffer,
@@ -316,8 +322,8 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
-        let section_ranges = crate::utils::section_offset::build_section_map(&obj).unwrap();
-        let entry_points = collect_function_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
+        let section_ranges = SectionRange::build_map(&obj).unwrap();
+        let entry_points = FlirtMatcher::collect_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
 
         let ctx = AnalysisContext {
             buffer: &buffer,
@@ -350,7 +356,7 @@ mod tests {
 
         let buffer = fs::read(&path).unwrap();
         let obj = File::parse(buffer.as_slice()).unwrap();
-        let section_ranges = crate::utils::section_offset::build_section_map(&obj).unwrap();
+        let section_ranges = SectionRange::build_map(&obj).unwrap();
 
         let text_bytes = vec![0x90; 128];
         let instructions = vec![
@@ -366,7 +372,7 @@ mod tests {
         ];
 
         let entry_points =
-            collect_function_entry_points(&obj, &instructions, &BinaryArch::X64, 0x1000);
+            FlirtMatcher::collect_entry_points(&obj, &instructions, &BinaryArch::X64, 0x1000);
 
         let ctx = AnalysisContext {
             buffer: &buffer,

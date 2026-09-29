@@ -10,7 +10,7 @@
 //! `tlsh`) used for family clustering. Unavailable values (e.g. TLSH on inputs
 //! below its ~50-byte minimum) are empty strings, never errors.
 
-use crate::core::BinaryHashes;
+use crate::core::types::BinaryHashes;
 use md5::Md5;
 use sha1::Sha1;
 use sha2::{Digest, Sha256};

@@ -20,10 +20,7 @@
 //! ```
 
 use crate::{
-    core::{
-        IatMap, ParsedBinaryContext,
-        types::{RbatError, RbatResult},
-    },
+    core::types::{RbatError, RbatResult},
     utils::entropy::calculate_entropy,
 };
 use ahash::AHashMap;
@@ -32,8 +29,11 @@ use object::{
     SectionKind,
     pe::{ImageNtHeaders32, ImageNtHeaders64},
 };
+use rustc_hash::FxHashMap;
+use std::sync::Arc;
 
-use super::{BinaryArch, BinaryOS};
+/// Maps IAT virtual addresses to their resolved API names.
+pub(crate) type IatMap = FxHashMap<u64, Arc<str>>;
 
 /// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
 /// It holds the raw binary buffer and the parsed object from the `object` crate.
@@ -128,7 +128,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
         })
     }
 
-    /// Builds a map of Absolute Address -> Imported API name (Arc<str>) for resolving thunks.
+    /// Builds a map of Absolute Address -> Imported API name (`Arc<str>`) for resolving thunks.
     pub fn build_iat_map(&self) -> IatMap {
         let mut map = IatMap::default();
 
@@ -258,6 +258,40 @@ impl<'data, 'obj> Parser<'data, 'obj> {
 
         Ok(exports_list)
     }
+}
+
+/// Supported target operating systems for assembly syntax style selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOS {
+    /// Windows operating system.
+    Win,
+    /// Linux operating system.
+    Linux,
+    /// macOS operating system.
+    Mac,
+}
+
+/// Supported CPU architectures for disassembly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryArch {
+    /// 32-bit x86 architecture.
+    X86,
+    /// 64-bit x86-64 architecture.
+    X64,
+    /// 32-bit ARM architecture.
+    Arm,
+    /// 64-bit ARM (AArch64) architecture.
+    Arm64,
+}
+
+/// Context extracted from parsing the binary's basic executable headers.
+#[derive(Debug, Clone)]
+pub struct ParsedBinaryContext {
+    pub os: BinaryOS,
+    pub arch: BinaryArch,
+    pub entry_addr: u64,
+    pub text_bytes: Vec<u8>,
+    pub iat_map: IatMap,
 }
 
 #[cfg(test)]

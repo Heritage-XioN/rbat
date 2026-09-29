@@ -1,25 +1,9 @@
-//! # Utility Submodule Groupings
+//! # Standalone Algorithmic Utilities
 //!
-//! This module groups all helper utilities (such as formats, scoring calculations, SVG visualizations,
-//! text asset parsers, and test fixture generators) supporting the library.
+//! Truly standalone mathematical and algorithmic helpers used across the static analysis library.
 
-pub mod cfg;
-pub mod csv;
 pub mod entropy;
-pub mod flirt;
-pub mod get_metadata;
 pub mod hashing;
-pub mod json;
-pub mod pdf;
-pub mod raw_padding;
-pub mod rules;
-pub mod rules_cli;
-pub mod scoring;
-pub mod section_offset;
-pub mod severity;
-pub mod stream_error_helper;
-pub mod terminal_report;
-/// Module containing helper functions specifically used for unit testing.
+
 #[cfg(test)]
 pub mod test_helpers;
-pub mod viz;

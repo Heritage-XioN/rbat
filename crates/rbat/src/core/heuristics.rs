@@ -7,11 +7,11 @@ use ahash::AHashMap;
 use std::sync::OnceLock;
 
 use crate::core::{
-    SectionRange, YaraMatches, disassembler::InstructionInfo, types::RbatResult,
-    yarahandler::YaraHandler,
+    disassembler::InstructionInfo,
+    types::RbatResult,
+    types::SectionRange,
+    yarahandler::{YaraHandler, YaraMatches},
 };
-
-use crate::utils::raw_padding::scan_raw_padding;
 
 static SUSPICIOUS_STRINGS_RULES: OnceLock<yara::Rules> = OnceLock::new();
 static PACKER_SIGNATURES_RULES: OnceLock<yara::Rules> = OnceLock::new();
@@ -87,7 +87,7 @@ pub fn string_check<'buf>(
     buffer: &'buf [u8],
     section_ranges: &[SectionRange<'buf>],
 ) -> RbatResult<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
-    let handler = YaraHandler::new("yara/suspicious_strings.yar".to_owned());
+    let handler = YaraHandler::new("suspicious_strings.yar".to_owned());
     let rules = SUSPICIOUS_STRINGS_RULES.get_or_init(|| {
         handler
             .compile_yara_rule()
@@ -105,7 +105,7 @@ pub fn packer_sig_check<'buf>(
     buffer: &'buf [u8],
     section_ranges: &[SectionRange<'buf>],
 ) -> RbatResult<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
-    let handler = YaraHandler::new("yara/packer_signatures.yar".to_owned());
+    let handler = YaraHandler::new("packer_signatures.yar".to_owned());
     let rules = PACKER_SIGNATURES_RULES.get_or_init(|| {
         handler
             .compile_yara_rule()
@@ -115,9 +115,72 @@ pub fn packer_sig_check<'buf>(
     Ok(results)
 }
 
+/// Scans a byte slice for consecutive runs of `target_byte` of length at least `min_length`.
+/// Returns the absolute virtual memory addresses of all bytes within the matching runs.
+pub(crate) fn scan_raw_padding(
+    bytes: &[u8],
+    target_byte: u8,
+    min_length: usize,
+    text_section_offset: u64,
+) -> Vec<u64> {
+    let mut addresses = Vec::new();
+    let mut start_idx = None;
+    let mut count = 0;
+
+    for (idx, &b) in bytes.iter().enumerate() {
+        if b == target_byte {
+            if start_idx.is_none() {
+                start_idx = Some(idx);
+            }
+            count += 1;
+        } else {
+            if count >= min_length
+                && let Some(start) = start_idx
+            {
+                for i in 0..count {
+                    addresses.push(text_section_offset + (start + i) as u64);
+                }
+            }
+            start_idx = None;
+            count = 0;
+        }
+    }
+
+    if count >= min_length
+        && let Some(start) = start_idx
+    {
+        for i in 0..count {
+            addresses.push(text_section_offset + (start + i) as u64);
+        }
+    }
+    addresses
+}
+
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_scan_raw_padding_nulls() {
+        let mut bytes = vec![0x90; 100];
+        bytes[40..70].fill(0x00);
+
+        let results = scan_raw_padding(&bytes, 0x00, 30, 0x1000);
+        assert_eq!(results.len(), 30);
+        assert_eq!(results[0], 0x1000 + 40);
+        assert_eq!(results[29], 0x1000 + 69);
+    }
+
+    #[test]
+    fn test_scan_raw_padding_int3() {
+        let mut bytes = vec![0x90; 100];
+        bytes[20..55].fill(0xCC);
+
+        let results = scan_raw_padding(&bytes, 0xCC, 30, 0x1000);
+        assert_eq!(results.len(), 35);
+        assert_eq!(results[0], 0x1000 + 20);
+        assert_eq!(results[34], 0x1000 + 54);
+    }
 
     #[test]
     fn test_disassemble_section_no_early_breakout() {

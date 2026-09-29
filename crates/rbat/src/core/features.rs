@@ -3,9 +3,10 @@
 //! This module implements the `FeatureSet` structure which extracts and flattens
 //! binary analysis results into fast-lookup sets and maps for rule evaluation.
 
-use crate::core::disassembler::InstructionInfo;
-use crate::core::{AnalysisResult, BasicBlock};
-use crate::utils::flirt::find_function_range;
+use crate::core::{
+    cfg::BasicBlock, disassembler::InstructionInfo, flirt::FlirtMatcher, parser::BinaryArch,
+    types::AnalysisResult,
+};
 use ahash::{AHashMap, AHashSet, HashMapExt, HashSetExt};
 use aho_corasick::PatternID;
 use petgraph::unionfind::UnionFind;
@@ -59,17 +60,17 @@ impl<'buf> FeatureSet<'buf> {
                     res.library_functions.keys().copied().collect();
 
                 let arch_enum = match arch_name.as_str() {
-                    "x86_64" => crate::core::BinaryArch::X64,
-                    "x86" => crate::core::BinaryArch::X86,
-                    "arm" => crate::core::BinaryArch::Arm,
-                    _ => crate::core::BinaryArch::Arm64,
+                    "x86_64" => BinaryArch::X64,
+                    "x86" => BinaryArch::X86,
+                    "arm" => BinaryArch::Arm,
+                    _ => BinaryArch::Arm64,
                 };
 
                 let ranges = res
                     .library_functions
                     .keys()
                     .map(|&lib_addr| {
-                        find_function_range(
+                        FlirtMatcher::find_function_range(
                             lib_addr,
                             &cfg.instructions,
                             &all_entry_points,
@@ -261,8 +262,8 @@ impl<'buf> FeatureSet<'buf> {
 mod tests {
     use super::*;
     use crate::core::{
-        disassembler::InstructionInfo,
-        types::{AnalysisResult, YaraMatches},
+        cfg::InstructionClass, disassembler::InstructionInfo, parser::BinaryArch,
+        types::AnalysisResult, yarahandler::YaraMatches,
     };
 
     #[test]
@@ -348,7 +349,7 @@ mod tests {
             },
         ];
 
-        let cfg = ControlFlowGraph::new(insns.into(), &crate::core::BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(insns.into(), &BinaryArch::X64);
         res.cfg = Some(cfg);
 
         // Add library function at 0x2000
@@ -389,7 +390,7 @@ mod tests {
                 op_str: "".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
-                inst_class: crate::core::InstructionClass::Return,
+                inst_class: InstructionClass::Return,
             },
             // Function 2
             InstructionInfo {
@@ -406,7 +407,7 @@ mod tests {
                 op_str: "0x2006".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
-                inst_class: crate::core::InstructionClass::ConditionalJump,
+                inst_class: InstructionClass::ConditionalJump,
             },
             InstructionInfo {
                 address: 0x2004,
@@ -422,11 +423,11 @@ mod tests {
                 op_str: "".into(),
                 api_resolution: None,
                 matched: smallvec::SmallVec::new(),
-                inst_class: crate::core::InstructionClass::Return,
+                inst_class: InstructionClass::Return,
             },
         ];
 
-        let cfg = ControlFlowGraph::new(insns.into(), &crate::core::BinaryArch::X64);
+        let cfg = ControlFlowGraph::new(insns.into(), &BinaryArch::X64);
         res.cfg = Some(cfg);
 
         let fs = FeatureSet::from_analysis_result(&res);

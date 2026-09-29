@@ -3,9 +3,11 @@
 //! This module defines the common interfaces used for disassembling binaries
 //! and executing heuristic plugins.
 
-use crate::core::disassembler::InstructionInfo;
-use crate::core::types::{IatMap, RbatResult};
-use crate::core::{AnalysisContext, AnalysisProgress};
+use crate::core::{
+    disassembler::InstructionInfo,
+    parser::IatMap,
+    types::{AnalysisContext, AnalysisProgress, RbatResult},
+};
 
 /// Interface for configuring and instantiating the Capstone disassembly engine.
 pub trait Disassembler {

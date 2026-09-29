@@ -3,15 +3,12 @@
 //! This module analyzes linear disassembler output to reconstruct basic blocks and
 //! model directed control flow transitions using graph topologies.
 
+use crate::core::{disassembler::InstructionInfo, parser::BinaryArch};
 use ahash::{HashMapExt, HashSetExt};
 use petgraph::graph::DiGraph;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-use crate::core::{
-    BasicBlock, BinaryArch, EdgeType, disassembler::InstructionInfo, types::InstructionClass,
-};
 
 /// A serialized and queryable model of a binary's Control Flow Graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,16 +224,130 @@ impl ControlFlowGraph {
     pub fn block_instructions(&self, block: &BasicBlock) -> &[InstructionInfo] {
         &self.instructions[block.start_idx..block.end_idx]
     }
+
+    /// Parses a branch target virtual address from an instruction operand string.
+    pub fn parse_target_address(op_str: &str) -> Option<u64> {
+        let trimmed = op_str.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let cleaned: String = trimmed
+            .chars()
+            .filter(|&c| c.is_alphanumeric() || c == 'x' || c == 'X' || c == '-' || c == '+')
+            .collect();
+
+        if cleaned.starts_with("0x") || cleaned.starts_with("0X") {
+            u64::from_str_radix(&cleaned[2..], 16).ok()
+        } else {
+            cleaned.parse::<u64>().ok()
+        }
+    }
+
+    /// Classifies a disassembled instruction mnemonic into its control-flow role.
+    pub fn classify_instruction(mnemonic: &str, arch: &BinaryArch) -> InstructionClass {
+        InstructionClass::classify(mnemonic, arch)
+    }
+}
+
+/// Represents a basic block: a straight-line sequence of execution with a single entry and exit.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BasicBlock {
+    /// The start virtual memory address of the block.
+    pub start_address: u64,
+    /// The end virtual memory address of the block.
+    pub end_address: u64,
+    /// Start index (inclusive) into the parent instruction array.
+    pub start_idx: usize,
+    /// End index (exclusive) into the parent instruction array.
+    pub end_idx: usize,
+}
+
+impl BasicBlock {
+    /// Returns this block's instruction slice from the given backing store.
+    #[inline]
+    pub fn instructions<'inon>(
+        &self,
+        source: &'inon [InstructionInfo],
+    ) -> &'inon [InstructionInfo] {
+        &source[self.start_idx..self.end_idx]
+    }
+
+    /// Number of instructions in this block.
+    #[inline]
+    pub fn instruction_count(&self) -> usize {
+        self.end_idx - self.start_idx
+    }
+}
+
+/// Types of control flow edges connecting basic blocks.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum EdgeType {
+    /// Sequential execution continuation.
+    FallThrough,
+    /// Taken branch of a conditional jump.
+    ConditionalTrue,
+    /// Not-taken branch of a conditional jump.
+    ConditionalFalse,
+    /// Unconditional jump target.
+    Unconditional,
+    /// Subroutine call target.
+    Call,
+}
+
+/// Categorizes an instruction into control flow classes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum InstructionClass {
+    /// Normal sequential instruction.
+    #[default]
+    Normal,
+    /// Conditional branching instruction.
+    ConditionalJump,
+    /// Unconditional branching instruction.
+    UnconditionalJump,
+    /// Subroutine call instruction.
+    Call,
+    /// Subroutine return instruction.
+    Return,
+}
+
+impl InstructionClass {
+    /// Classifies a disassembled instruction mnemonic into its control-flow role.
+    pub fn classify(mnemonic: &str, arch: &BinaryArch) -> Self {
+        match arch {
+            BinaryArch::X86 | BinaryArch::X64 => match mnemonic {
+                "jmp" => Self::UnconditionalJump,
+                "ret" | "retf" | "retn" | "iret" | "iretd" | "sysret" => Self::Return,
+                "call" => Self::Call,
+                m if m.starts_with('j') => Self::ConditionalJump,
+                _ => Self::Normal,
+            },
+            BinaryArch::Arm | BinaryArch::Arm64 => match mnemonic {
+                "b" => Self::UnconditionalJump,
+                "br" | "bx" | "ret" => Self::Return,
+                "bl" | "blx" => Self::Call,
+                m if m.starts_with("b.")
+                    || m.starts_with("cbz")
+                    || m.starts_with("cbnz")
+                    || m.starts_with("tbz")
+                    || m.starts_with("tbnz") =>
+                {
+                    Self::ConditionalJump
+                }
+                _ => Self::Normal,
+            },
+        }
+    }
 }
 
 #[cfg(all(test, feature = "backend-capstone"))]
 mod tests {
     use super::*;
-    use crate::core::{BinaryArch, EdgeType, disassembler::InstructionInfo};
+    use crate::core::disassembler::InstructionInfo;
 
     /// Helper to build an `InstructionInfo` with minimal boilerplate.
     fn insn_arch(address: u64, mnemonic: &str, op_str: &str, arch: &BinaryArch) -> InstructionInfo {
-        let inst_class = crate::utils::cfg::classify_instruction(mnemonic, arch);
+        let inst_class = InstructionClass::classify(mnemonic, arch);
         InstructionInfo {
             address,
             mnemonic: mnemonic.into(),

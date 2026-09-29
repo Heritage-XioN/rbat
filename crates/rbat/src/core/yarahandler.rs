@@ -3,16 +3,17 @@
 //! This module coordinates compiling rules from embedded assets (e.g. `yara/api_hooking.yar`)
 //! and scanning raw byte buffers to extract signature matches with section offsets.
 
-use super::{Asset, YaraMatches};
-use crate::{
-    core::{
-        SectionRange,
-        types::{RbatError, RbatResult},
-    },
-    utils::section_offset::get_section_for_offset,
-};
+use crate::core::types::{RbatError, RbatResult, SectionRange};
 use ahash::AHashMap;
+use rust_embed::RustEmbed;
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use yara::{Compiler, Rules};
+
+/// Built-in binary assets embedded directly into the library compilation.
+#[derive(RustEmbed)]
+#[folder = "./assets/yara/"]
+struct EmbedYaraRule;
 
 /// A handler for loading, compiling, and executing YARA rule scans against in-memory buffers.
 ///
@@ -41,8 +42,8 @@ impl YaraHandler {
     /// Returns `RbatError::MissingAsset` if the rule file does not exist in the embedded directory,
     /// or `RbatError::YaraCompileError` if the rule string contains syntax errors.
     pub fn compile_yara_rule(&self) -> RbatResult<Rules> {
-        let file =
-            Asset::get(&self.path).ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
+        let file = EmbedYaraRule::get(&self.path)
+            .ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
         let rules = String::from_utf8(file.data.to_vec())?;
         let compiler = Compiler::new()?.add_rules_str(&rules)?;
         let compiled_rule_file = compiler.compile_rules()?;
@@ -72,7 +73,8 @@ impl YaraHandler {
                     }
 
                     for m in yr_string.matches {
-                        let section_name = get_section_for_offset(section_ranges, m.offset);
+                        let section_name =
+                            SectionRange::get_section_for_offset(section_ranges, m.offset);
                         let matched_bytes = &buffer[m.offset..m.offset + m.length];
                         let decoded_string = String::from_utf8_lossy(matched_bytes);
 
@@ -93,6 +95,21 @@ impl YaraHandler {
     }
 }
 
+/// Details of a single YARA rule signature match within a binary section.
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct YaraMatches<'buf> {
+    /// File offset where the match starts.
+    pub offset: usize,
+    /// Name of the binary section where the match was located.
+    #[serde(borrow)]
+    pub section: &'buf str,
+    /// Length of the matching byte sequence.
+    pub length: usize,
+    /// Human-readable representation of the matched data.
+    #[serde(borrow)]
+    pub data: Cow<'buf, str>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,7 +117,7 @@ mod tests {
     #[test]
     fn test_compile_yara_rule_valid() {
         // Use an existing rule file from assets
-        let handler = YaraHandler::new("yara/api_hooking.yar".to_string());
+        let handler = YaraHandler::new("api_hooking.yar".to_string());
         let result = handler.compile_yara_rule();
         assert!(result.is_ok());
     }
