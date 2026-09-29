@@ -1,6 +1,6 @@
 pub use clap::{Parser, Subcommand};
 use color_eyre::Result;
-use rbat::core::Rule;
+use rbat::core::rule::Rule;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -56,8 +56,8 @@ fn collect_rule_files(dir: &Path, files: &mut Vec<PathBuf>) {
 fn bundle_rules() -> Result<()> {
     let start = Instant::now();
     let root = workspace_root();
-    let rules_dir = root.join("crates/rbat-core/assets/capa-rules");
-    let out_path = root.join("crates/rbat-core/assets/embedded_rules.mp");
+    let rules_dir = root.join("crates/rbat/assets/capa-rules");
+    let out_path = root.join("crates/rbat/assets/embedded_rules.mp");
 
     if !rules_dir.exists() {
         eprintln!(

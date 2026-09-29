@@ -2901,37 +2901,24 @@ dependencies = [
 
 [[package]]
 name = "rbat"
-version = "1.0.1"
+version = "0.3.0"
 dependencies = [
  "ahash 0.8.12",
  "aho-corasick",
- "askama",
- "assert_cmd",
  "capstone",
  "chrono",
- "clap",
- "clap_complete",
- "color-eyre",
- "comfy-table",
  "compact_str",
  "cpp_demangle",
- "crossterm",
- "csv",
  "dhat",
  "fast-flirt",
  "fast-tlsh",
- "fullbleed",
  "fuzzyhash",
  "iced-x86",
- "indicatif",
- "lightningcss",
  "md-5",
  "msvc-demangler",
  "object 0.39.1",
  "petgraph",
- "predicates",
  "proptest",
- "ratatui",
  "rayon",
  "rmp-serde",
  "rust-embed",
@@ -2944,9 +2931,34 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "toml",
- "tui-banner",
  "yaml_serde",
  "yara",
+]
+
+[[package]]
+name = "rbat-cli"
+version = "0.1.0"
+dependencies = [
+ "ahash 0.8.12",
+ "askama",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "color-eyre",
+ "comfy-table",
+ "crossterm",
+ "csv",
+ "fullbleed",
+ "indicatif",
+ "lightningcss",
+ "predicates",
+ "ratatui",
+ "rbat",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tui-banner",
 ]
 
 [[package]]
