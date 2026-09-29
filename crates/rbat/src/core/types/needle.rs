@@ -1,6 +1,6 @@
 //! Aho-Corasick needle index for instruction/feature matching.
 
-use crate::core::{Rule, RuleCondition, cfg::ControlFlowGraph};
+use crate::core::{cfg::ControlFlowGraph, rule::Rule, rule::RuleCondition};
 use ahash::{AHashMap, AHashSet};
 use aho_corasick::{AhoCorasick, PatternID};
 use std::sync::Arc;

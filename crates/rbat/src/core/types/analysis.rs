@@ -1,11 +1,16 @@
 //! Analysis result, context, and reporting structures.
 
-use crate::core::disassembler::InstructionInfo;
-use crate::core::{BinaryArch, BinaryOS, ControlFlowGraph, FlirtMatcher, NeedleIndex};
+use crate::core::{
+    cfg::ControlFlowGraph,
+    disassembler::InstructionInfo,
+    flirt::FlirtMatcher,
+    parser::{BinaryArch, BinaryOS},
+    types::NeedleIndex,
+    yarahandler::YaraMatches,
+};
 use ahash::AHashMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Represents the progress updates emitted during static analysis.
@@ -30,21 +35,6 @@ pub enum AnalysisProgress<'buf> {
     CFG(ControlFlowGraph),
     /// Matched library functions mapped by start virtual address.
     LibraryFunctions(FxHashMap<u64, String>),
-}
-
-/// Details of a single YARA rule signature match within a binary section.
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
-pub struct YaraMatches<'buf> {
-    /// File offset where the match starts.
-    pub offset: usize,
-    /// Name of the binary section where the match was located.
-    #[serde(borrow)]
-    pub section: &'buf str,
-    /// Length of the matching byte sequence.
-    pub length: usize,
-    /// Human-readable representation of the matched data.
-    #[serde(borrow)]
-    pub data: Cow<'buf, str>,
 }
 
 /// Cryptographic digest and fuzzy hashes identifying the analyzed binary,
@@ -131,6 +121,36 @@ impl BinaryMetadata {
             _ => format!("Unknown (0x{:04X})", self.architecture),
         }
     }
+
+    /// Extracts high-level metadata (architecture type, entry address, name) from a parsed object.
+    pub fn from_object(binary_object: &object::File) -> crate::core::types::RbatResult<Self> {
+        use object::{Architecture, BinaryFormat, Object};
+        let binary_type = match binary_object.format() {
+            BinaryFormat::Elf => "Linux ELF",
+            BinaryFormat::Pe | BinaryFormat::Coff => "Windows PE",
+            BinaryFormat::MachO => "Mach-O",
+            _ => {
+                return Err(crate::core::types::RbatError::UnsupportedBinaryFormat(
+                    "Unsupported format".to_string(),
+                ));
+            }
+        }
+        .to_string();
+
+        let architecture = match binary_object.architecture() {
+            Architecture::X86_64 | Architecture::X86_64_X32 => 0x3e,
+            Architecture::I386 => 0x03,
+            Architecture::Arm => 0x28,
+            Architecture::Aarch64 | Architecture::Aarch64_Ilp32 => 0xb7,
+            _ => 0,
+        };
+
+        Ok(BinaryMetadata {
+            binary_type,
+            entry_point: binary_object.entry(),
+            architecture,
+        })
+    }
 }
 
 /// Shared context providing read-only access to binary structures across parallel heuristic plugins.
@@ -193,6 +213,65 @@ pub struct SectionRange<'buf> {
     /// Name of the binary section (e.g. `".text"`, `"__TEXT"`).
     #[serde(borrow)]
     pub name: &'buf str,
+}
+
+impl<'buf> SectionRange<'buf> {
+    /// Builds a cached mapping of file offset boundaries for all sections in a parsed binary object.
+    pub fn build_map(
+        binary_object: &object::File<'buf, &'buf [u8]>,
+    ) -> crate::core::types::RbatResult<Vec<Self>> {
+        use object::{Object, ObjectSection};
+        let mut ranges = Vec::new();
+        for section in binary_object.sections() {
+            if let Some((start, size)) = section.file_range() {
+                let start = start as usize;
+                let end = start.saturating_add(size as usize);
+                let name = section.name().unwrap_or("<unnamed>");
+                ranges.push(SectionRange { start, end, name });
+            }
+        }
+        Ok(ranges)
+    }
+
+    /// Finds the section name containing the given file offset.
+    pub fn find_section(ranges: &[SectionRange<'buf>], offset: usize) -> Option<&'buf str> {
+        for range in ranges {
+            if offset >= range.start && offset < range.end {
+                return Some(range.name);
+            }
+        }
+        None
+    }
+
+    /// Finds the section name containing the given file offset, returning `"<unknown>"` if not found.
+    pub fn get_section_for_offset(ranges: &[SectionRange<'buf>], offset: usize) -> &'buf str {
+        Self::find_section(ranges, offset).unwrap_or("<unknown>")
+    }
+}
+
+/// Strongly typed code cave findings replacing `AHashMap<&str, Vec<u64>>`
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodeCaves {
+    /// Consecutive NOP instruction addresses (>= 128 instructions).
+    pub nop_sleds: Vec<u64>,
+    /// Consecutive NULL padding addresses (>= 128 bytes).
+    pub null_padding: Vec<u64>,
+    /// Consecutive INT3/trap padding addresses (>= 128 bytes).
+    pub trap_padding: Vec<u64>,
+}
+
+impl CodeCaves {
+    pub fn is_empty(&self) -> bool {
+        self.nop_sleds.is_empty() && self.null_padding.is_empty() && self.trap_padding.is_empty()
+    }
+
+    pub fn total_caves(&self) -> usize {
+        self.nop_sleds.len() + self.null_padding.len() + self.trap_padding.len()
+    }
+
+    pub fn len(&self) -> usize {
+        self.total_caves()
+    }
 }
 
 #[cfg(test)]

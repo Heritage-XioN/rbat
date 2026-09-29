@@ -1,29 +1,24 @@
-//! # Severity Classification Engine
+//! # Risk Scoring and Severity Classification Engine
 //!
-//! Maps matched capa rules to [`SeverityClass`] values using a precedence chain:
+//! Maps matched capa rules to [`SeverityClass`] values and aggregates findings into a single
+//! risk score using **noisy-OR probabilistic combination**:
 //!
-//! 1. Explicit `severity` field on the rule (custom/user-authored rules win)
-//! 2. Per-rule overrides from the TOML table (`assets/capa-overrides.toml` or a user file)
-//! 3. Namespace-root defaults from the same table (e.g. `compiler/` → Informational)
-//! 4. Built-in ATT&CK tactic / MBC objective inference — with a demotion for pure
-//!    cryptographic primitives (`data-manipulation` namespace + `Cryptography`
-//!    MBC objectives only), whose presence is ubiquitous in benign software
+//! ```text
+//! score = 100 · (1 − Π (1 − pᵢ))
+//! ```
 //!
-//! The TOML table ships embedded but can be extended at runtime via
-//! [`SeverityClassifier::merge_from_file`], letting operators retune classifications
-//! without recompiling.
-//!
-//! This module also owns the shared MITRE ATT&CK tactic vocabulary and ID
-//! extraction helpers reused by the scoring engine.
+//! where `pᵢ` is the per-finding probability derived from its [`SeverityClass`].
+//! Classification honors explicit rule severities, TOML override tables, namespace defaults,
+//! and built-in ATT&CK/MBC inference.
 
-use crate::core::RuleMeta;
-use crate::core::types::SeverityClass;
-use serde::Deserialize;
+use crate::core::rule::RuleMeta;
+use crate::core::types::{RbatError, RbatResult};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Embedded default override table shipped with the binary.
-const EMBEDDED_OVERRIDES: &str = include_str!("../../assets/capa-overrides.toml");
+const EMBEDDED_OVERRIDES: &str = include_str!("../../../assets/capa-overrides.toml");
 
 /// MITRE ATT&CK tactics recognized by the classification/scoring engines, in slug form.
 const KNOWN_TACTICS: &[&str] = &[
@@ -64,6 +59,12 @@ const NEUTRAL_CRYPTO_OBJECTIVE: &str = "cryptography";
 /// Namespace root under which neutral cryptographic primitive rules live.
 const CRYPTO_NAMESPACE_ROOT: &str = "data-manipulation";
 
+/// Noisy-OR probability weights per non-neutral [`SeverityClass`].
+pub const LOW_PROBABILITY: f64 = 0.02;
+pub const MEDIUM_PROBABILITY: f64 = 0.08;
+pub const HIGH_PROBABILITY: f64 = 0.25;
+pub const CRITICAL_PROBABILITY: f64 = 0.4;
+
 /// Raw deserialized shape of the TOML override table.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -72,6 +73,58 @@ struct OverrideTable {
     namespace_defaults: BTreeMap<String, String>,
     /// Exact rule name → class string.
     overrides: BTreeMap<String, String>,
+}
+
+/// Behavioral classification of a matched rule, driving both risk weighting and presentation.
+///
+/// Ordered from least to most severe; the derived [`Ord`] implementation powers
+/// sort-by-severity rendering. `Informational` and `Capability` classes describe what a
+/// binary *does* without asserting hostile intent and carry zero risk weight, while
+/// `Low` through `Critical` are genuine threat indicators.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SeverityClass {
+    /// Build/compiler artifact or other non-behavioral match (e.g. `compiler/msvc`).
+    #[default]
+    Informational,
+    /// Ordinary capability common in benign software (file ops, sockets, threads...).
+    Capability,
+    /// Weak threat indicator with high false-positive potential.
+    Low,
+    /// Notable indicator of potentially hostile behavior.
+    Medium,
+    /// Strong indicator of hostile behavior (evasion, credential access, impact...).
+    High,
+    /// Direct indicator of active evasion or hijacking techniques.
+    Critical,
+}
+
+impl SeverityClass {
+    /// Per-finding probability used by the noisy-OR risk aggregation.
+    ///
+    /// `Informational` and `Capability` findings contribute no probability mass and are
+    /// excluded from the product entirely, so capability-heavy benign software trends
+    /// toward a zero score.
+    pub fn probability(self) -> f64 {
+        match self {
+            Self::Informational | Self::Capability => 0.0,
+            Self::Low => LOW_PROBABILITY,
+            Self::Medium => MEDIUM_PROBABILITY,
+            Self::High => HIGH_PROBABILITY,
+            Self::Critical => CRITICAL_PROBABILITY,
+        }
+    }
+
+    /// Short uppercase label suitable for badge columns.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Informational => "INFO",
+            Self::Capability => "CAPABILITY",
+            Self::Low => "LOW",
+            Self::Medium => "MEDIUM",
+            Self::High => "HIGH",
+            Self::Critical => "CRITICAL",
+        }
+    }
 }
 
 /// Classifies matched rules into [`SeverityClass`] values for scoring and rendering.
@@ -89,9 +142,9 @@ impl SeverityClassifier {
 
     /// Builds a standalone classifier from a TOML string. Returns an error describing
     /// the offending entry if the table cannot be parsed.
-    pub fn from_toml_str(src: &str) -> Result<Self, String> {
-        let table: OverrideTable =
-            toml::from_str(src).map_err(|e| format!("invalid override table: {e}"))?;
+    pub fn from_toml_str(src: &str) -> RbatResult<Self> {
+        let table: OverrideTable = toml::from_str(src)
+            .map_err(|e| RbatError::ConfigError(format!("invalid override table: {e}")))?;
         Ok(Self::from_table(table))
     }
 
@@ -119,11 +172,12 @@ impl SeverityClassifier {
     ///
     /// # Errors
     /// Returns an error if the file cannot be read or parsed.
-    pub fn merge_from_file(&mut self, path: &Path) -> Result<(), String> {
-        let src = std::fs::read_to_string(path)
-            .map_err(|e| format!("cannot read override file {}: {e}", path.display()))?;
-        let table: OverrideTable =
-            toml::from_str(&src).map_err(|e| format!("invalid override file: {e}"))?;
+    pub fn merge_from_file(&mut self, path: &Path) -> RbatResult<()> {
+        let src = std::fs::read_to_string(path).map_err(|e| {
+            RbatError::ConfigError(format!("cannot read override file {}: {e}", path.display()))
+        })?;
+        let table: OverrideTable = toml::from_str(&src)
+            .map_err(|e| RbatError::ConfigError(format!("invalid override file: {e}")))?;
 
         for (key, class) in table.namespace_defaults {
             if let Some(c) = Self::parse_class(&class) {
@@ -269,7 +323,7 @@ impl SeverityClassifier {
     /// Returns `None` when the entry does not resolve to a known tactic, either
     /// because it lacks the `::` tactic prefix entirely or because the prefix is
     /// unrecognized.
-    pub(crate) fn tactic_slug(entry: &str) -> Option<String> {
+    pub fn tactic_slug(entry: &str) -> Option<String> {
         let candidate = match entry.split_once("::") {
             Some((prefix, _)) => prefix,
             None => entry,
@@ -294,8 +348,18 @@ impl SeverityClassifier {
 
 #[cfg(test)]
 mod tests {
+    use crate::core::rule::StringOrVec;
+
     use super::*;
-    use crate::utils::rules::StringOrVec;
+
+    fn crypto_primitive_rule(namespace: &str, mitre: &str) -> RuleMeta {
+        let mut r = rule("encrypt data using AES via x86 extensions", Some(namespace));
+        r.mbc = Some(StringOrVec::Single(
+            "Cryptography::Encrypt Data [C0027.001]".to_string(),
+        ));
+        r.mitre_attack = Some(StringOrVec::Single(mitre.to_string()));
+        r
+    }
 
     fn rule(name: &str, namespace: Option<&str>) -> RuleMeta {
         RuleMeta {
@@ -418,19 +482,8 @@ mod tests {
         assert_eq!(classifier.classify(&med), SeverityClass::Medium);
     }
 
-    fn crypto_primitive_rule(namespace: &str, mitre: &str) -> RuleMeta {
-        let mut r = rule("encrypt data using AES via x86 extensions", Some(namespace));
-        r.mbc = Some(StringOrVec::Single(
-            "Cryptography::Encrypt Data [C0027.001]".to_string(),
-        ));
-        r.mitre_attack = Some(StringOrVec::Single(mitre.to_string()));
-        r
-    }
-
     #[test]
     fn test_pure_crypto_primitive_demoted_to_low() {
-        // ffmpeg-style case: AES-NI usage mapped to Defense Evasion (T1027/T1140)
-        // is primitive usage, not evasion evidence.
         let classifier = SeverityClassifier::embedded();
         assert_eq!(
             classifier.classify(&crypto_primitive_rule(
@@ -455,7 +508,6 @@ mod tests {
             "Defense Evasion::Obfuscated Files or Information [T1027]",
         );
         r.namespace = Some("data-manipulation/encryption/aes".to_string());
-        // Pairing with an anti-analysis objective overrides the demotion.
         r.mbc = Some(StringOrVec::List(vec![
             "Anti-Static Analysis::Executable Code Obfuscation [B0032]".to_string(),
             "Cryptography::Encrypt Data [C0027.001]".to_string(),
@@ -469,8 +521,6 @@ mod tests {
 
     #[test]
     fn test_crypto_outside_data_manipulation_namespace_unchanged() {
-        // Same mapping shape, but living under communication/c2 keeps the
-        // tactic-ladder verdict (High).
         let classifier = SeverityClassifier::embedded();
         assert_eq!(
             classifier.classify(&crypto_primitive_rule(
@@ -483,8 +533,6 @@ mod tests {
 
     #[test]
     fn test_crypto_with_high_threat_tactic_not_demoted() {
-        // Crypto mapped to Credential Access is exfiltration-adjacent, not a
-        // neutral primitive — ladder verdict stands.
         let classifier = SeverityClassifier::embedded();
         assert_eq!(
             classifier.classify(&crypto_primitive_rule(
@@ -497,8 +545,6 @@ mod tests {
 
     #[test]
     fn test_crypto_without_mbc_mapping_not_demoted() {
-        // No explicit Cryptography objective → policy does not fire; bare
-        // defense_evasion tactic still yields High via the ladder.
         let mut r = rule("obfuscate payload", Some("data-manipulation/encryption"));
         r.mitre_attack = Some(StringOrVec::Single(
             "Defense Evasion::Obfuscated Files or Information [T1027]".to_string(),

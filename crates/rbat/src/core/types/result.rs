@@ -1,7 +1,7 @@
 //! # Custom Result and Error Types
 //!
 //! This module defines the [`RbatResult`] type and the [`RbatError`] enum which encapsulates all
-//! classification, disassembling, scanning, template rendering, and file I/O error states and Results outputs
+//! classification, disassembling, scanning, and file I/O error states and Results outputs
 //! produced by the RBAT core library.
 
 use serde::Serialize;
@@ -66,14 +66,6 @@ pub enum RbatError {
         serde_json::Error,
     ),
 
-    /// CLI argument parser validation failure.
-    #[error("CLI error")]
-    CliError(
-        #[from]
-        #[serde(serialize_with = "serialize_to_string")]
-        clap::error::Error,
-    ),
-
     /// Non-supported formats or corrupted machine layouts.
     #[error("Unsupported binary format: {0}")]
     UnsupportedBinaryFormat(String),
@@ -102,33 +94,17 @@ pub enum RbatError {
         std::string::FromUtf8Error,
     ),
 
-    /// CSV formatter error.
-    #[error("csv creation error")]
-    ErrorCreatingCsv(
-        #[from]
-        #[serde(serialize_with = "serialize_to_string")]
-        csv::Error,
-    ),
+    /// Configuration or override table parse error.
+    #[error("Configuration or override error: {0}")]
+    ConfigError(String),
+
+    /// Rule parsing or validation error.
+    #[error("Rule error: {0}")]
+    RuleError(String),
 
     /// Pipeline cancellation indicator.
     #[error("an error occurred which resulted in the cancellation of the analysis process")]
     ErrorAnalysisCancelled,
-
-    /// Askama HTML template compilation failure.
-    #[error("HTML template rendering error: {0}")]
-    TemplateError(String),
-
-    /// Fullbleed PDF compilation failure.
-    #[error("PDF rendering error: {0}")]
-    PdfRenderError(String),
-
-    /// JSON serialization failure.
-    #[error("JSON error: {0}")]
-    JsonError(String),
-
-    /// CSV writer output failure.
-    #[error("CSV error: {0}")]
-    CsvError(String),
 }
 
 fn serialize_to_string<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>

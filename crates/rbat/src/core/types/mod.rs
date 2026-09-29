@@ -6,19 +6,9 @@
 //! The module is split into focused submodules (each re-exported here)
 
 pub mod analysis;
-pub mod binary;
-pub mod block;
 pub mod needle;
 pub mod result;
-pub mod risk;
-pub mod rule;
-pub mod rule_condition;
 
 pub use analysis::*;
-pub use binary::*;
-pub use block::*;
 pub use needle::*;
 pub use result::*;
-pub use risk::*;
-pub use rule::*;
-pub use rule_condition::*;
