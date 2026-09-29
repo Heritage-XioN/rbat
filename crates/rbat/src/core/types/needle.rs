@@ -34,8 +34,9 @@ impl NeedleIndex {
             }
         }
 
-        // Convert to a deterministic ordered vec so PatternID indices are stable
-        let patterns: Vec<&'rule str> = pattern_set.into_iter().collect();
+        // Convert to a deterministic ordered vec so PatternID indices are stable.
+        let mut patterns: Vec<&'rule str> = pattern_set.into_iter().collect();
+        patterns.sort_unstable();
 
         let mut lookup = AHashMap::with_capacity(patterns.len());
         for (idx, &pat) in patterns.iter().enumerate() {

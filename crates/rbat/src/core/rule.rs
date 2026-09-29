@@ -146,7 +146,7 @@ impl Rule {
         // Pass 2..N: Iteratively evaluate only remaining dependent rules until fixpoint
         let mut pending_deps = dep_rules;
         while !pending_deps.is_empty() {
-            let (newly_matched, still_pending): (Vec<_>, Vec<_>) = pending_deps
+            let (newly_matched, mut still_pending): (Vec<_>, Vec<_>) = pending_deps
                 .into_par_iter()
                 .partition(|(_, rule)| rule.matches(features, needle, &matched_names));
 
@@ -158,6 +158,8 @@ impl Rule {
                 matched_indices.insert(idx);
                 matched_names.insert(rule.rule.meta.name.as_str());
             }
+            // Restore deterministic ordering after Rayon's unordered partition
+            still_pending.sort_unstable_by_key(|(i, _)| *i);
             pending_deps = still_pending;
         }
 

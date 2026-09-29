@@ -110,11 +110,12 @@ impl<'buf> FeatureSet<'buf> {
         // ---- Non lib code blocks and graph metrics ----
         let (blocks, has_loop, max_cyclomatic_complexity) = match res.cfg.as_ref() {
             Some(cfg) => {
-                let blocks: Vec<&'buf BasicBlock> = cfg
+                let mut blocks: Vec<&'buf BasicBlock> = cfg
                     .blocks
                     .values()
                     .filter(|block| !is_lib_block(block.start_address))
                     .collect();
+                blocks.sort_unstable_by_key(|b| b.start_address);
 
                 if blocks.is_empty() {
                     (blocks, false, 0)
