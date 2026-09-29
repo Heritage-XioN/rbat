@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use rbat::core::FeatureSet;
+use rbat::core::features::FeatureSet;
 use smallvec::SmallVec;
 
 proptest! {
