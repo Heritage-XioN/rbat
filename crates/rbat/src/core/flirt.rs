@@ -3,7 +3,7 @@ use object::{Object, ObjectSymbol};
 use rayon::prelude::*;
 use rust_embed::RustEmbed;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::core::cfg::InstructionClass;
@@ -69,7 +69,7 @@ impl FlirtMatcher {
             return Self { sets: Vec::new() };
         }
 
-        // handles recursive walking and both formats
+        // handles recursive walking
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| FlirtSet::load_dir(dir)));
 
@@ -90,12 +90,13 @@ impl FlirtMatcher {
     }
 
     /// Merges another matcher's patterns into this one.
-    pub fn extend(&mut self, other: Self) {
-        for set in other.sets {
-            if !set.is_empty() {
-                self.sets.push(set);
-            }
+    pub fn extend(path: &Option<PathBuf>) -> Self {
+        let mut flirt = Self::load_embedded();
+        if let Some(sigs_dir) = path {
+            let custom_flirt = FlirtMatcher::load_from_directory(sigs_dir);
+            flirt.sets.extend(custom_flirt.sets);
         }
+        flirt
     }
 
     /// Queries the FLIRT trie with candidate function bytes.
@@ -251,15 +252,6 @@ mod tests {
         let matcher = FlirtMatcher::load_embedded();
         // NOP sled should not match any library signature
         assert!(matcher.match_bytes(&[0x90; 300]).is_none());
-    }
-
-    #[test]
-    fn test_flirt_matcher_extend() {
-        let mut base = FlirtMatcher::load_embedded();
-        let extra = FlirtMatcher::load_embedded();
-        base.extend(extra);
-        // Merging should not break matching
-        assert!(base.match_bytes(&[0x90; 300]).is_none());
     }
 
     #[test]

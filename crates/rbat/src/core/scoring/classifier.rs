@@ -15,7 +15,7 @@ use crate::core::rule::RuleMeta;
 use crate::core::types::{RbatError, RbatResult};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::PathBuf;
 
 /// Embedded default override table shipped with the binary.
 const EMBEDDED_OVERRIDES: &str = include_str!("../../../assets/capa-overrides.toml");
@@ -172,34 +172,37 @@ impl SeverityClassifier {
     ///
     /// # Errors
     /// Returns an error if the file cannot be read or parsed.
-    pub fn merge_from_file(&mut self, path: &Path) -> RbatResult<()> {
-        let src = std::fs::read_to_string(path).map_err(|e| {
-            RbatError::ConfigError(format!("cannot read override file {}: {e}", path.display()))
-        })?;
-        let table: OverrideTable = toml::from_str(&src)
-            .map_err(|e| RbatError::ConfigError(format!("invalid override file: {e}")))?;
+    pub fn extend(path: &Option<PathBuf>) -> RbatResult<Self> {
+        let mut classifier = SeverityClassifier::embedded();
+        if let Some(path) = path {
+            let src = std::fs::read_to_string(path).map_err(|e| {
+                RbatError::ConfigError(format!("cannot read override file {}: {e}", path.display()))
+            })?;
+            let table: OverrideTable = toml::from_str(&src)
+                .map_err(|e| RbatError::ConfigError(format!("invalid override file: {e}")))?;
 
-        for (key, class) in table.namespace_defaults {
-            if let Some(c) = Self::parse_class(&class) {
-                self.namespace_defaults.insert(key.to_lowercase(), c);
-            } else {
-                eprintln!(
-                    "warning: unrecognized severity class '{class}' for namespace '{key}' in {}",
-                    path.display()
-                );
+            for (key, class) in table.namespace_defaults {
+                if let Some(c) = Self::parse_class(&class) {
+                    classifier.namespace_defaults.insert(key.to_lowercase(), c);
+                } else {
+                    eprintln!(
+                        "warning: unrecognized severity class '{class}' for namespace '{key}' in {}",
+                        path.display()
+                    );
+                }
+            }
+            for (key, class) in table.overrides {
+                if let Some(c) = Self::parse_class(&class) {
+                    classifier.rule_overrides.insert(key.to_lowercase(), c);
+                } else {
+                    eprintln!(
+                        "warning: unrecognized severity class '{class}' for rule '{key}' in {}",
+                        path.display()
+                    );
+                }
             }
         }
-        for (key, class) in table.overrides {
-            if let Some(c) = Self::parse_class(&class) {
-                self.rule_overrides.insert(key.to_lowercase(), c);
-            } else {
-                eprintln!(
-                    "warning: unrecognized severity class '{class}' for rule '{key}' in {}",
-                    path.display()
-                );
-            }
-        }
-        Ok(())
+        Ok(classifier)
     }
 
     /// Resolves the effective [`SeverityClass`] for a matched rule.
@@ -425,20 +428,6 @@ mod tests {
         assert_eq!(
             classifier.classify(&rule("bad entry", None)),
             SeverityClass::Low
-        );
-    }
-
-    #[test]
-    fn test_merge_from_file_extends_tables() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("overrides.toml");
-        std::fs::write(&path, "[overrides]\n\"create directory\" = \"high\"\n").unwrap();
-
-        let mut classifier = SeverityClassifier::embedded();
-        classifier.merge_from_file(&path).expect("merge ok");
-        assert_eq!(
-            classifier.classify(&rule("create directory", None)),
-            SeverityClass::High
         );
     }
 

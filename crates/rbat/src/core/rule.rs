@@ -11,6 +11,7 @@ use crate::core::{
 use ahash::{AHashMap, AHashSet};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 /// Embedded capa rules message pack bytes
@@ -66,6 +67,15 @@ impl Rule {
             Err(e) => eprintln!("Warning: Failed to decode pre-compiled rules: {e}"),
         }
         Vec::new()
+    }
+
+    pub fn extend(path: &Option<PathBuf>) -> Vec<Self> {
+        let mut rules = Self::load_embedded();
+        if let Some(rules_dir) = path {
+            let custom_rules = Rule::load_from_directory(rules_dir);
+            rules.extend(custom_rules);
+        }
+        rules
     }
 
     /// Loads custom JSON and YAML rules from a directory on the local filesystem.

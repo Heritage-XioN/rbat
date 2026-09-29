@@ -6,6 +6,7 @@
 
 use object::File;
 use rayon;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -242,21 +243,24 @@ impl AnalyzerBuilder {
     }
 
     /// Sets a custom FLIRT matcher.
-    pub fn with_flirt(mut self, flirt: FlirtMatcher) -> Self {
+    pub fn with_flirt(mut self, path: &Option<PathBuf>) -> Self {
+        let flirt = FlirtMatcher::extend(path);
         self.config.custom_flirt = Some(flirt);
         self
     }
 
     /// Sets custom capa rules.
-    pub fn with_rules(mut self, rules: Vec<Rule>) -> Self {
-        self.config.custom_rules = Some(rules);
+    pub fn with_rules(mut self, path: &Option<PathBuf>) -> Self {
+        let ext_rules = Rule::extend(path);
+        self.config.custom_rules = Some(ext_rules);
         self
     }
 
     /// Sets a custom severity classifier.
-    pub fn with_classifier(mut self, classifier: SeverityClassifier) -> Self {
+    pub fn with_classifier(mut self, path: &Option<PathBuf>) -> RbatResult<Self> {
+        let classifier = SeverityClassifier::extend(path)?;
         self.config.classifier = Some(classifier);
-        self
+        Ok(self)
     }
 
     /// Constructs the [`Analyzer`] instance, pre-building rule indices.
@@ -265,11 +269,11 @@ impl AnalyzerBuilder {
             Some(r) => Arc::new(r),
             None => Arc::new(Rule::load_embedded()),
         };
+        let classifier = match self.config.classifier {
+            Some(s) => s,
+            None => SeverityClassifier::embedded(),
+        };
         let needle = Arc::new(NeedleIndex::build_from_rules(&rules));
-        let classifier = self
-            .config
-            .classifier
-            .unwrap_or_else(SeverityClassifier::embedded);
         Ok(Analyzer {
             rules,
             needle,
