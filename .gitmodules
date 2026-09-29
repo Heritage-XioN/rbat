@@ -1,9 +1,9 @@
 [submodule "rbat-core/assets/capa-rules"]
-	path = crates/rbat-core/assets/capa-rules
+	path = crates/rbat/assets/capa-rules
 	url = https://github.com/mandiant/capa-rules.git
 [submodule "rbat-core/assets/flirtdb"]
-	path = crates/rbat-core/assets/flirtdb
+	path = crates/rbat/assets/flirtdb
 	url = https://github.com/Maktm/FLIRTDB
 [submodule "tests/capa-testfiles"]
-	path = crates/rbat-core/tests/capa-testfiles
+	path = crates/rbat/tests/capa-testfiles
 	url = https://github.com/mandiant/capa-testfiles
