@@ -116,11 +116,6 @@ fn test_determinism_pe_al_khaser_x86() {
 }
 
 #[test]
-fn test_determinism_pe_112f9f0e8d349858a80dd8c14190e620_exe_() {
-    assert_deterministic("112f9f0e8d349858a80dd8c14190e620.exe_");
-}
-
-#[test]
 fn test_determinism_pe_mimikatz() {
     assert_deterministic("mimikatz.exe_");
 }

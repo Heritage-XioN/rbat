@@ -286,7 +286,7 @@ impl AnalyzerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{core::rule::RuleMeta, utils::test_helpers::test_helpers};
+    use crate::utils::test_helpers::test_helpers;
     use std::fs;
     use tempfile::tempdir;
 
@@ -338,22 +338,21 @@ mod tests {
         let buffer = fs::read(path).unwrap();
 
         let analyzer = Analyzer::builder().build().unwrap();
-        let (analysis, _assessment) = analyzer.batch(&buffer).unwrap();
+        let (_, assessment) = analyzer.batch(&buffer).unwrap();
 
-        let rules = Rule::load_embedded();
-        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
-        needle.populate_cfg(&mut analysis.cfg.clone().unwrap());
-        let features = crate::core::features::FeatureSet::from_analysis_result(&analysis);
-        let matched: Vec<&RuleMeta> = Rule::evaluate(&features, &rules, &needle);
+        let names: Vec<&[u8]> = assessment
+            .findings
+            .iter()
+            .map(|f| f.indicator.as_bytes())
+            .collect();
 
-        let names: Vec<&str> = matched.iter().map(|m| m.name.as_str()).collect();
         assert!(
-            names.contains(&"encrypt data using AES via x86 extensions"),
+            names.contains(&"encrypt data using AES via x86 extensions".as_bytes()),
             "expected AES encrypt rule to match; matched={:?}",
             names
         );
         assert!(
-            names.contains(&"decrypt data using AES via x86 extensions"),
+            names.contains(&"decrypt data using AES via x86 extensions".as_bytes()),
             "expected AES decrypt rule to match; matched={:?}",
             names
         );
