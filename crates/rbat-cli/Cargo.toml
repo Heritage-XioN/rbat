@@ -1,0 +1,39 @@
+[package]
+name = "rbat-cli"
+version = "0.1.0"
+edition = "2024"
+authors = ["Heritage-XioN"]
+description = "A terminal-native binary analysis tool and interactive dashboard for security researchers and reverse engineers."
+license = "Apache-2.0"
+repository = "https://github.com/Heritage-XioN/rbat"
+readme = "README.md"
+keywords = ["binary-analysis", "security", "reverse-engineering", "tui", "disassembly"]
+categories = ["command-line-utilities", "security"]
+
+[[bin]]
+name = "rbat"
+path = "src/main.rs"
+
+[dependencies]
+rbat = { path = "../rbat", features = ["backend-iced"] }
+clap = { workspace = true }
+clap_complete = "4.5"
+color-eyre = { workspace = true }
+indicatif = { workspace = true }
+tui-banner = { workspace = true }
+crossterm = "0.29.0"
+ratatui = "0.30.0"
+comfy-table = "7.1.4"
+askama = "0.16.0"
+fullbleed = "0.6.11"
+lightningcss = "=1.0.0-alpha.70"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+csv = "1.4.0"
+ahash = "0.8"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
+tempfile = "3.10"
