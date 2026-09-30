@@ -110,103 +110,80 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     let mut analysis_result = AnalysisResult::default();
     let start_time = std::time::Instant::now();
 
-    let analysis_res = std::thread::scope(|s| {
-        let handle = s.spawn(move || {
-            analyzer.streaming(buffer_ref, move |event| {
-                let _ = tx.send(event);
-            })
-        });
-
-        // Event loop receiving real-time progress events
-        for event in rx {
-            match event {
-                AnalysisProgress::Hashes(hashes) => {
-                    analysis_result.hashes = hashes;
-                    spinner.set_message("Computed binary digests & fuzzy hashes");
-                }
-                AnalysisProgress::Disassembly(code_cave) => {
-                    analysis_result.code_cave = code_cave;
-                    spinner.set_message(format!(
-                        "Disassembled section (code caves: {})",
-                        analysis_result.code_cave.len()
-                    ));
-                }
-                AnalysisProgress::Strings(string_values) => {
-                    let len = string_values.len();
-                    analysis_result.string_values = string_values;
-                    spinner.set_message(format!("Extracted {} suspicious string matches", len));
-                }
-                AnalysisProgress::PackerSigs(packer_signatures) => {
-                    let len = packer_signatures.len();
-                    analysis_result.packer_signatures = packer_signatures;
-                    spinner.set_message(format!("Identified {} packer signatures", len));
-                }
-                AnalysisProgress::Entropy(section_entropy) => {
-                    analysis_result.section_entropy = section_entropy;
-                    spinner.set_message(format!(
-                        "Calculated Shannon entropy for {} sections",
-                        analysis_result.section_entropy.len()
-                    ));
-                }
-                AnalysisProgress::Imports(imports) => {
-                    analysis_result.imports = imports;
-                    spinner.set_message(format!(
-                        "Extracted {} imported symbols",
-                        analysis_result.imports.len()
-                    ));
-                }
-                AnalysisProgress::Exports(exports) => {
-                    analysis_result.exports = exports;
-                    spinner.set_message(format!(
-                        "Extracted {} exported symbols",
-                        analysis_result.exports.len()
-                    ));
-                }
-                AnalysisProgress::BinaryMetadata(metadata) => {
-                    analysis_result.metadata = metadata;
-                    spinner.set_message("Parsed binary headers & section bounds");
-                }
-                AnalysisProgress::CFG(cfg) => {
-                    analysis_result.cfg = Some(cfg);
-                    spinner.set_message("Reconstructed Control Flow Graph");
-                }
-                AnalysisProgress::LibraryFunctions(library_functions) => {
-                    analysis_result.library_functions = library_functions;
-                    spinner.set_message(format!(
-                        "Matched {} library functions via FLIRT",
-                        analysis_result.library_functions.len()
-                    ));
-                }
-            }
-        }
-
-        handle.join()
+    let result = analyzer.streaming(buffer_ref, move |event| {
+        let _ = tx.send(event);
     });
 
-    // Check analysis thread result
-    match analysis_res {
-        Ok(analysis_result_inner) => match analysis_result_inner {
-            Ok(_) => {
-                spinner.set_message("Plugin analysis complete!");
+    // Event loop receiving real-time progress events
+    for event in &rx {
+        match event {
+            AnalysisProgress::Hashes(hashes) => {
+                analysis_result.hashes = hashes;
+                spinner.set_message("Computed binary digests & fuzzy hashes");
             }
-            Err(e) => {
-                spinner.finish_with_message("Analysis failed! ❌");
-                return Err(color_eyre::eyre::eyre!(e));
+            AnalysisProgress::Disassembly(code_cave) => {
+                analysis_result.code_cave = code_cave;
+                spinner.set_message(format!(
+                    "Disassembled section (code caves: {})",
+                    analysis_result.code_cave.len()
+                ));
             }
-        },
-        Err(join_panic) => {
-            spinner.finish_with_message("Analysis thread panicked! ❌");
-            let panic_msg = if let Some(s) = join_panic.downcast_ref::<&str>() {
-                *s
-            } else if let Some(s) = join_panic.downcast_ref::<String>() {
-                s.as_str()
-            } else {
-                "Unknown panic reason"
-            };
-            return Err(color_eyre::eyre::eyre!(
-                "Analysis thread panicked: {}",
-                panic_msg
-            ));
+            AnalysisProgress::Strings(string_values) => {
+                let len = string_values.len();
+                analysis_result.string_values = string_values;
+                spinner.set_message(format!("Extracted {} suspicious string matches", len));
+            }
+            AnalysisProgress::PackerSigs(packer_signatures) => {
+                let len = packer_signatures.len();
+                analysis_result.packer_signatures = packer_signatures;
+                spinner.set_message(format!("Identified {} packer signatures", len));
+            }
+            AnalysisProgress::Entropy(section_entropy) => {
+                analysis_result.section_entropy = section_entropy;
+                spinner.set_message(format!(
+                    "Calculated Shannon entropy for {} sections",
+                    analysis_result.section_entropy.len()
+                ));
+            }
+            AnalysisProgress::Imports(imports) => {
+                analysis_result.imports = imports;
+                spinner.set_message(format!(
+                    "Extracted {} imported symbols",
+                    analysis_result.imports.len()
+                ));
+            }
+            AnalysisProgress::Exports(exports) => {
+                analysis_result.exports = exports;
+                spinner.set_message(format!(
+                    "Extracted {} exported symbols",
+                    analysis_result.exports.len()
+                ));
+            }
+            AnalysisProgress::BinaryMetadata(metadata) => {
+                analysis_result.metadata = metadata;
+                spinner.set_message("Parsed binary headers & section bounds");
+            }
+            AnalysisProgress::CFG(cfg) => {
+                analysis_result.cfg = Some(cfg);
+                spinner.set_message("Reconstructed Control Flow Graph");
+            }
+            AnalysisProgress::LibraryFunctions(library_functions) => {
+                analysis_result.library_functions = library_functions;
+                spinner.set_message(format!(
+                    "Matched {} library functions via FLIRT",
+                    analysis_result.library_functions.len()
+                ));
+            }
+        }
+    }
+
+    match result {
+        Ok(_) => {
+            spinner.set_message("Plugin analysis complete!");
+        }
+        Err(e) => {
+            spinner.finish_with_message("Analysis failed! ❌");
+            return Err(color_eyre::eyre::eyre!(e));
         }
     }
 

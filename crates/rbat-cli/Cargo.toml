@@ -14,8 +14,14 @@ categories = ["command-line-utilities", "security"]
 name = "rbat"
 path = "src/main.rs"
 
+[features]
+default = ["backend-capstone"]
+backend-capstone = ["rbat/backend-capstone"]
+backend-iced = ["rbat/backend-iced"]
+dhat-heap = ["rbat/dhat-heap"]
+
 [dependencies]
-rbat = { path = "../rbat", features = ["backend-iced"] }
+rbat = { path = "../rbat", default-features = false }
 clap = { workspace = true }
 clap_complete = "4.5"
 color-eyre = { workspace = true }
