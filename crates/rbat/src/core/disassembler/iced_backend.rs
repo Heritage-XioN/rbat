@@ -1,11 +1,13 @@
 //! iced_x86 based disassembler implementation
 
-use crate::core::InstructionClass;
-use crate::core::traits::Disassembler;
-use crate::core::types::{RbatError, RbatResult};
-use crate::core::{BinaryArch, IatMap};
+use crate::core::{
+    cfg::InstructionClass,
+    parser::{BinaryArch, IatMap},
+    traits::Disassembler,
+    types::{RbatError, RbatResult},
+};
 use aho_corasick::PatternID;
-use iced_x86::{Code, Decoder, DecoderOptions};
+use iced_x86::{Code, Decoder, DecoderOptions, FlowControl};
 use smallvec::SmallVec;
 use std::sync::Arc;
 
@@ -73,13 +75,11 @@ impl InstructionInfo {
     }
 
     /// Classifies this instruction's control-flow role without allocating a string.
-    pub fn class(&self, _arch: &crate::core::BinaryArch) -> InstructionClass {
+    pub fn class(&self, _arch: &BinaryArch) -> InstructionClass {
         self.inst_class
     }
 
     fn classify_flow(flow: iced_x86::FlowControl) -> InstructionClass {
-        use crate::core::InstructionClass;
-        use iced_x86::FlowControl;
         match flow {
             FlowControl::UnconditionalBranch => InstructionClass::UnconditionalJump,
             FlowControl::ConditionalBranch => InstructionClass::ConditionalJump,
@@ -203,15 +203,17 @@ impl Disassembler for DisassemblerImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::BinaryArch;
-    use crate::core::traits::Disassembler;
+    use crate::core::{
+        parser::{BinaryArch, IatMap},
+        traits::Disassembler,
+    };
 
     #[test]
     fn test_iced_disasm_factory_x64_intel() {
         let disasm = DisassemblerImpl::new(BinaryArch::X64);
         // NOP, RET
         let bytes = &[0x90, 0xC3];
-        let iat_map = crate::core::types::IatMap::default();
+        let iat_map = IatMap::default();
         let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 2);
 
@@ -227,7 +229,7 @@ mod tests {
         let disasm = DisassemblerImpl::new(BinaryArch::X86);
         // MOV EAX, 1
         let bytes = &[0xB8, 0x01, 0x00, 0x00, 0x00];
-        let iat_map = crate::core::types::IatMap::default();
+        let iat_map = IatMap::default();
         let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
 
@@ -247,7 +249,7 @@ mod tests {
         let disasm = DisassemblerImpl::new(BinaryArch::X64);
         // 0xFF 0xFF is an invalid x86 instruction
         let bytes = &[0xFF, 0xFF];
-        let iat_map = crate::core::types::IatMap::default();
+        let iat_map = IatMap::default();
         let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
         // Iced decodes it as an INVALID instruction and we skip it in our loop,
         // but let's check what it outputs, probably 0 instructions.

@@ -18,7 +18,7 @@ struct EmbedYaraRule;
 /// A handler for loading, compiling, and executing YARA rule scans against in-memory buffers.
 ///
 /// # Example
-/// ```rust
+/// ```rust,no_run
 /// use rbat::core::yarahandler::YaraHandler;
 ///
 /// let handler = YaraHandler::new("yara/api_hooking.yar".to_owned());

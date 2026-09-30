@@ -1,9 +1,11 @@
 //! capstone based disassembler implementation
 
-use crate::core::InstructionClass;
 use crate::core::traits::Disassembler;
 use crate::core::types::RbatResult;
-use crate::core::{BinaryArch, IatMap};
+use crate::core::{
+    cfg::{ControlFlowGraph, InstructionClass},
+    parser::{BinaryArch, IatMap},
+};
 use aho_corasick::PatternID;
 use capstone::prelude::*;
 use compact_str::CompactString;
@@ -75,13 +77,13 @@ impl InstructionInfo {
     /// Returns the branch target address if this is a branch/call to a direct address.
     /// Falls back to string parsing for capstone backend.
     pub fn branch_target(&self) -> Option<u64> {
-        crate::utils::cfg::parse_target_address(&self.op_str)
+        ControlFlowGraph::parse_target_address(&self.op_str)
     }
 
     /// Classifies this instruction's control-flow role.
     /// Uses the precise class resolved from Capstone detail when available,
     /// otherwise falls back to the string-based mnemonic heuristic.
-    pub fn class(&self, _arch: &crate::core::BinaryArch) -> InstructionClass {
+    pub fn class(&self, _arch: &BinaryArch) -> InstructionClass {
         self.inst_class
     }
 }
@@ -163,7 +165,7 @@ impl Disassembler for DisassemblerImpl {
                 }
                 let inst_class = match &detail {
                     Some(d) => instruction_class_from_detail(insn, d),
-                    None => crate::utils::cfg::classify_instruction(
+                    None => ControlFlowGraph::classify_instruction(
                         insn.mnemonic().unwrap_or(""),
                         &self.arch,
                     ),
@@ -214,13 +216,16 @@ fn instruction_class_from_detail(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::BinaryArch;
-    use crate::core::traits::Disassembler;
+    use crate::core::{
+        cfg::InstructionClass,
+        parser::{BinaryArch, IatMap},
+        traits::Disassembler,
+    };
 
     #[test]
     fn test_disasm_factory_x64_intel() {
         let disasm = DisassemblerImpl::new(BinaryArch::X64);
-        let iat_map = crate::core::types::IatMap::default();
+        let iat_map = IatMap::default();
         let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "nop");
@@ -229,7 +234,7 @@ mod tests {
     #[test]
     fn test_disasm_factory_x86_att() {
         let disasm = DisassemblerImpl::new(BinaryArch::X86);
-        let iat_map = crate::core::types::IatMap::default();
+        let iat_map = IatMap::default();
         let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "nop");
@@ -243,7 +248,7 @@ mod tests {
 
         #[cfg(feature = "backend-capstone")]
         {
-            let iat_map = crate::core::types::IatMap::default();
+            let iat_map = IatMap::default();
             let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
             assert_eq!(insns.len(), 1);
             assert_eq!(insns[0].format_mnemonic(), "nop");
@@ -258,7 +263,7 @@ mod tests {
 
         #[cfg(feature = "backend-capstone")]
         {
-            let iat_map = crate::core::types::IatMap::default();
+            let iat_map = IatMap::default();
             let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
             assert_eq!(insns.len(), 1);
             assert_eq!(insns[0].format_mnemonic(), "nop");
@@ -267,9 +272,6 @@ mod tests {
 
     #[test]
     fn test_capstone_precise_control_flow_class() {
-        use crate::core::traits::Disassembler;
-        use crate::core::types::IatMap;
-        use crate::core::{BinaryArch, InstructionClass};
         let disasm = DisassemblerImpl::new(BinaryArch::X64);
         let iat_map = IatMap::default();
         // call rel32 ; ret ; jmp short ; je short ; rdtsc ; aesenc xmm0,xmm0
@@ -293,9 +295,6 @@ mod tests {
 
     #[test]
     fn test_capstone_arm_unconditional_branch_class() {
-        use crate::core::traits::Disassembler;
-        use crate::core::types::IatMap;
-        use crate::core::{BinaryArch, InstructionClass};
         let disasm = DisassemblerImpl::new(BinaryArch::Arm);
         let iat_map = IatMap::default();
         // b #0 (ARM32 little endian: 0x00, 0x00, 0x00, 0xEA)
@@ -312,7 +311,6 @@ mod tests {
 
     #[test]
     fn test_capstone_resumes_after_invalid_bytes() {
-        use crate::core::types::IatMap;
         let disasm = DisassemblerImpl::new(BinaryArch::X64);
         let iat_map = IatMap::default();
         // nop ; 0x06 (invalid in long mode) ; rdtsc ; aesenc xmm0, xmm0

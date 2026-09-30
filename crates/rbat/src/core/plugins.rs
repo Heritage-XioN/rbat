@@ -12,12 +12,14 @@
 //! ```rust
 //! use std::path::Path;
 //! use object::File;
-//! use rbat::core::{AnalysisContext, BinaryArch, BinaryOS, AnalysisProgress};
+//! use rbat::core::types::{AnalysisContext, AnalysisProgress};
+//! use rbat::core::parser::BinaryArch;
+//! use rbat::core::parser::BinaryOS;
 //! use rbat::core::plugins::MetadataPlugin;
 //! use rbat::core::traits::HeuristicPlugin;
 //! use std::sync::Arc;
 //! use rbat::core::types::NeedleIndex;
-//! use rbat::core::FlirtMatcher;
+//! use rbat::core::flirt::FlirtMatcher;
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let buffer = vec![0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 62, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 56, 0, 1, 0, 64, 0, 0, 0, 0, 0];
