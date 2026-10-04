@@ -1,14 +1,56 @@
+//! # FLIRT Library Function Identification
+//!
+//! Implements Fast Library Identification and Recognition Technology (FLIRT) signature
+//! matching for identifying statically-linked library functions in stripped binaries using
+//! the [`fast_flirt`] lib.
+//!
+//! ## Core Types
+//!
+//! - [`FlirtMatcher`]: Trie-based signature matcher for recognizing standard library function prefixes.
+//!   it directly wraps [`fast_flirt::FlirtSet`].
+//!
+//! ## Overview
+//!
+//! Stripped binaries often contain hundreds of statically linked standard library functions
+//! (e.g. from `libc`, `libstdc++`, or `MSVCRT`). Without debugging symbols, these functions
+//! appear as arbitrary user code, which inflates false-positive detections in heuristic and
+//! capability rule engines.
+//!
+//! FLIRT solves this by matching initial byte sequences against signature sets generated
+//! from compiler runtime libraries:
+//! 1. **Embedded Bundles**: Compressed `.sig` and `.pat` database files embedded into the
+//!    binary at compile time via `RustEmbed`, parsed and cached process-wide in a [`OnceLock`].
+//! 2. **Extensible Signatures**: External directories containing user-provided `.sig` or `.pat`
+//!    files can be loaded and merged on top of embedded assets using [`FlirtMatcher::extend`].
+//! 3. **Symbol Demangling & Normalization**: Strips compiler-specific prefixes (`__imp_`, `__imp___`,
+//!    leading `_`) and automatically demangles MSVC (`?`) and GCC/Clang/Itanium (`_Z`) symbol names.
+//!
+//! ## Examples
+//!
+//! Checking byte slices against bundled library signatures:
+//!
+//! ```rust
+//! use rbat::core::flirt::FlirtMatcher;
+//!
+//! let matcher = FlirtMatcher::load_embedded();
+//! // NOP sled will not match any library signatures
+//! assert!(matcher.match_bytes(&[0x90; 64]).is_none());
+//! ```
+
+use crate::core::{
+    cfg::InstructionClass, disassembler::InstructionInfo, parser::BinaryArch,
+    types::result::RbatResult,
+};
 use fast_flirt::{FlirtSet, FlirtSetBuilder};
 use object::{Object, ObjectSymbol};
 use rayon::prelude::*;
 use rust_embed::RustEmbed;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-
-use crate::core::cfg::InstructionClass;
-use crate::core::disassembler::InstructionInfo;
-use crate::core::parser::BinaryArch;
+use std::{
+    panic::{AssertUnwindSafe, catch_unwind},
+    path::Path,
+    sync::OnceLock,
+};
 
 /// Embedded flirt signatures
 #[derive(RustEmbed)]
@@ -20,8 +62,20 @@ static EMBEDDED_FLIRT: OnceLock<FlirtMatcher> = OnceLock::new();
 
 /// FLIRT signature matcher for identifying statically-linked library functions.
 ///
-/// Follows the same load pattern as `Rule`: call `load_embedded()` to get the
-/// bundled signatures, then optionally `extend` with `load_from_directory()`.
+/// `FlirtMatcher` encapsulates compiled prefix tries ([`FlirtSet`]) that inspect
+/// candidate function entry points and match them against known compiler runtime libraries.
+///
+/// Use [`FlirtMatcher::load_embedded`] to obtain an owned matcher with bundled signatures,
+/// or [`FlirtMatcher::extend`] to augment it with external `.sig` / `.pat` files.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::flirt::FlirtMatcher;
+///
+/// let matcher = FlirtMatcher::load_embedded();
+/// assert!(!matcher.is_empty());
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct FlirtMatcher {
     sets: Vec<FlirtSet>,
@@ -31,25 +85,42 @@ impl FlirtMatcher {
     /// Returns a process-wide shared reference to the bundled signature database.
     ///
     /// Parses and caches [`FlirtMatcher::load_embedded`] on first use so repeated
-    /// analysis from upstream consumers (e.g. rbat-server handling many uploads) don't re-parse the
-    /// signatures every call. Use [`FlirtMatcher::load_embedded`] directly when an
-    /// owned matcher is needed for [`FlirtMatcher::extend`].
+    /// analyses avoid re-parsing embedded signature files.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::flirt::FlirtMatcher;
+    ///
+    /// let shared_matcher = FlirtMatcher::embedded_shared();
+    /// assert!(!shared_matcher.is_empty());
+    /// ```
     pub fn embedded_shared() -> &'static Self {
         EMBEDDED_FLIRT.get_or_init(Self::load_embedded)
     }
 
     /// Loads the bundled FLIRT signatures compiled into the binary at build time.
+    ///
+    /// Extracts and parses all `.sig`, `.pat`, and `.pat.gz` files from embedded assets.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::flirt::FlirtMatcher;
+    ///
+    /// let matcher = FlirtMatcher::load_embedded();
+    /// assert!(matcher.len() > 0);
+    /// ```
     pub fn load_embedded() -> Self {
         let mut builder = FlirtSetBuilder::new();
 
         for file in EmbedFlirtSig::iter() {
             if let Some(embedded_file) = EmbedFlirtSig::get(&file) {
-                let name = file.to_lowercase();
-                if name.ends_with(".sig") {
+                if file.to_lowercase().ends_with(".sig") {
                     let _ = builder.add_sig(&embedded_file.data);
-                } else if name.ends_with(".pat.gz") {
+                } else if file.to_lowercase().ends_with(".pat.gz") {
                     let _ = builder.add_pat_gz(&embedded_file.data);
-                } else if name.ends_with(".pat")
+                } else if file.to_lowercase().ends_with(".pat")
                     && let Ok(text) = std::str::from_utf8(&embedded_file.data)
                 {
                     let _ = builder.add_pat(text);
@@ -63,46 +134,81 @@ impl FlirtMatcher {
         }
     }
 
-    /// Loads FLIRT signatures (`.sig` and `.pat` files) from the given directory.
-    pub fn load_from_directory(dir: &Path) -> Self {
-        if !dir.is_dir() {
-            return Self { sets: Vec::new() };
-        }
-
-        // handles recursive walking
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| FlirtSet::load_dir(dir)));
-
-        match result {
-            Ok(Ok(set)) if !set.is_empty() => Self { sets: vec![set] },
-            _ => Self { sets: Vec::new() },
-        }
-    }
-
     /// Total number of signatures loaded across all signature sets.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::flirt::FlirtMatcher;
+    ///
+    /// let matcher = FlirtMatcher::load_embedded();
+    /// println!("Loaded {} signatures", matcher.len());
+    /// ```
     pub fn len(&self) -> usize {
         self.sets.iter().map(|s| s.len()).sum()
     }
 
     /// Checks if any signatures are loaded.
+    ///
+    /// Returns `true` if no signature sets are loaded or all contained sets are empty.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::flirt::FlirtMatcher;
+    ///
+    /// let matcher = FlirtMatcher::load_embedded();
+    /// assert!(!matcher.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.sets.iter().all(|s| s.is_empty())
     }
 
-    /// Merges another matcher's patterns into this one.
-    pub fn extend(path: &Option<PathBuf>) -> Self {
+    /// Loads external FLIRT signatures from a directory and merges them with embedded signatures.
+    ///
+    /// Recursively scans `path` for `.sig` and `.pat` files, parses them, and appends
+    /// the resulting signature sets to the bundled embedded database.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directory traversal fails or an invalid signature file is encountered.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rbat::core::flirt::FlirtMatcher;
+    ///
+    /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let matcher = FlirtMatcher::extend("path/to/custom_signatures")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn extend<P: AsRef<Path>>(path: P) -> RbatResult<Self> {
         let mut flirt = Self::load_embedded();
-        if let Some(sigs_dir) = path {
-            let custom_flirt = FlirtMatcher::load_from_directory(sigs_dir);
-            flirt.sets.extend(custom_flirt.sets);
-        }
-        flirt
+        if let Ok(r) = catch_unwind(AssertUnwindSafe(|| FlirtSet::load_dir(path.as_ref()))) {
+            let flirt_set = r?;
+            if !flirt_set.is_empty() {
+                flirt.sets.push(flirt_set);
+            }
+        };
+        Ok(flirt)
     }
 
     /// Queries the FLIRT trie with candidate function bytes.
-    /// Returns a normalized, demangled name if a signature matches.
+    ///
+    /// Returns a normalized, demangled symbol name if a signature matches the byte sequence.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::flirt::FlirtMatcher;
+    ///
+    /// let matcher = FlirtMatcher::load_embedded();
+    /// let result = matcher.match_bytes(&[0x90; 128]);
+    /// assert!(result.is_none());
+    /// ```
     pub fn match_bytes(&self, function_bytes: &[u8]) -> Option<String> {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let result = catch_unwind(AssertUnwindSafe(|| {
             for set in &self.sets {
                 if let Some(name) = set.match_public_name(function_bytes) {
                     return Some(Self::normalize_symbol(name));
@@ -113,8 +219,12 @@ impl FlirtMatcher {
         result.unwrap_or(None)
     }
 
-    /// Scans a set of function entry points against the `.text` section bytes
-    /// and returns a map of matched library function addresses to their names.
+    /// Scans a set of function entry points against `.text` section bytes.
+    ///
+    /// Concurrently checks candidate entry points in parallel using [`Rayon`] and returns
+    /// a map of virtual memory addresses to demangled library function names.
+    ///
+    /// [`Rayon`]: rayon
     pub fn identify_library_functions(
         &self,
         entry_points: &FxHashSet<u64>,
@@ -138,7 +248,7 @@ impl FlirtMatcher {
     }
 
     /// Normalizes and demangles symbol names returned by the FLIRT engine.
-    pub fn normalize_symbol(name: &str) -> String {
+    fn normalize_symbol(name: &str) -> String {
         let mut name = name.to_owned();
 
         // 1. Demangle MSVC C++ symbols (start with '?')
@@ -172,7 +282,7 @@ impl FlirtMatcher {
     }
 
     /// Discovers potential function entry points from symbols, exports, and call destinations.
-    pub fn collect_entry_points(
+    pub(crate) fn collect_entry_points(
         binary_object: &object::File,
         instructions: &[InstructionInfo],
         arch: &BinaryArch,
@@ -212,7 +322,7 @@ impl FlirtMatcher {
     }
 
     /// Traces execution from a start address to find the semantic end address of a function.
-    pub fn find_function_range(
+    pub(crate) fn find_function_range(
         start_addr: u64,
         instructions: &[InstructionInfo],
         all_entry_points: &FxHashSet<u64>,
@@ -275,13 +385,15 @@ mod tests {
         let matcher = FlirtMatcher::embedded_shared();
         assert!(matcher.match_bytes(malformed_sig).is_none());
 
-        // 2. Loading a directory containing this malformed .sig file must not panic and must return an empty matcher
+        // 2. Loading a directory containing this malformed .sig file must not panic
+        // and must safely retain the embedded signature set without crashing.
         let temp_dir = tempfile::tempdir().expect("failed to create tempdir");
         let sig_path = temp_dir.path().join("crash.sig");
         std::fs::write(&sig_path, malformed_sig).expect("failed to write crash.sig");
 
-        let loaded = FlirtMatcher::load_from_directory(temp_dir.path());
-        assert!(loaded.is_empty());
-        assert_eq!(loaded.len(), 0);
+        let embedded = FlirtMatcher::load_embedded();
+        let loaded = FlirtMatcher::extend(temp_dir.path()).unwrap();
+        assert_eq!(loaded.len(), embedded.len());
+        assert!(!loaded.is_empty());
     }
 }
