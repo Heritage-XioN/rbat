@@ -1,10 +1,36 @@
 //! # Multi-Format Binary Parser and Metadata Extractor
 //!
-//! This module defines the [`Parser`] structure, which provides a unified,
-//! format-agnostic abstraction for retrieving executable segments, OS target information,
-//! and CPU architecture across ELF, PE, and Mach-O files.
+//! Provides a unified, format-agnostic abstraction for parsing executable binaries
+//! across ELF, PE32, PE64, and Mach-O container formats.
 //!
-//! # Example
+//! ## Core Types
+//!
+//! - [`Parser`]: Primary metadata and section extractor wrapping an [`object::File`]
+//! - [`ParsedBinaryContext`]: Extracted binary context containing OS, architecture, entry point, code bytes, and IAT
+//! - [`BinaryOS`]: Target operating system classification ([`Win`], [`Linux`], [`Mac`])
+//! - [`BinaryArch`]: Target CPU architecture ([`X86`], [`X64`], [`Arm`], [`Arm64`])
+//! - [`IatMap`]: Map associating virtual memory addresses with imported API symbol names
+//!
+//! ## Overview
+//!
+//! The parser module serves as the primary intake stage of the analysis pipeline. It isolates
+//! platform-specific binary container formats and produces normalized structures consumed by
+//! disassembly, control-flow graph reconstruction, and rule matching.
+//!
+//! - **Format-Agnostic Abstraction**: Uses the [`object`] crate to parse PE, ELF, and Mach-O
+//!   structures into a single normalized [`ParsedBinaryContext`].
+//! - **Executable Code Discovery**: Identifies the primary executable text section enclosing
+//!   the entry point address. If entry point resolution is indirect or unmapped, it falls back
+//!   to the first non-empty [`SectionKind::Text`] section.
+//! - **Import Address Table (IAT) Mapping**: Traverses PE Import Directory Tables (resolving
+//!   First Thunk and Original First Thunk RVAs against the image base) and ELF dynamic relocations
+//!   to associate call-site jump targets with named API functions.
+//! - **Shannon Entropy Calculation**: Computes Shannon entropy $H = -\sum_{i=0}^{255} p_i \log_2(p_i)$
+//!   for each named section. Sections with entropy $\ge 7.5$ typically indicate compressed or
+//!   encrypted payloads indicative of packers or crypters.
+//!
+//! ## Examples
+//!
 //! ```rust
 //! use object::File;
 //! use rbat::core::parser::Parser;
@@ -13,11 +39,26 @@
 //! let obj = File::parse(buffer)?;
 //! let parser = Parser::new(&obj);
 //!
+//! // Extract normalized execution context
 //! let metadata = parser.parse_buffer()?;
+//! println!("OS: {:?}, Arch: {:?}, Entry: 0x{:x}", metadata.os, metadata.arch, metadata.entry_addr);
+//!
+//! // Measure section entropy to detect packers
 //! let entropy = parser.evaluate_section_entropy()?;
+//! for (section, score) in entropy {
+//!     println!("Section {section}: {score:.2}");
+//! }
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! [`Win`]: BinaryOS::Win
+//! [`Linux`]: BinaryOS::Linux
+//! [`Mac`]: BinaryOS::Mac
+//! [`X86`]: BinaryArch::X86
+//! [`X64`]: BinaryArch::X64
+//! [`Arm`]: BinaryArch::Arm
+//! [`Arm64`]: BinaryArch::Arm64
 
 use crate::{
     core::types::{RbatError, RbatResult},
@@ -32,11 +73,34 @@ use object::{
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-/// Maps IAT virtual addresses to their resolved API names.
-pub(crate) type IatMap = FxHashMap<u64, Arc<str>>;
+/// Maps virtual memory addresses of import table slots to resolved API symbol names.
+pub type IatMap = FxHashMap<u64, Arc<str>>;
 
-/// A central struct for binary analysis that abstracts over ELF, PE, and Mach-O formats.
-/// It holds the raw binary buffer and the parsed object from the `object` crate.
+/// Wraps a parsed [`object::File`] reference to provide format-agnostic binary metadata extraction.
+///
+/// `Parser` abstracts over container format differences between ELF, PE32, PE64, and Mach-O,
+/// providing high-level methods to inspect executable text sections, imported and exported
+/// symbols, dynamic relocation targets, and section entropy.
+///
+/// # Lifetimes
+///
+/// - `'data`: Lifetime of the raw binary byte buffer backing the parsed object.
+/// - `'obj`: Lifetime of the [`object::File`] wrapper reference.
+///
+/// # Examples
+///
+/// ```rust
+/// use object::File;
+/// use rbat::core::parser::Parser;
+///
+/// # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+/// let obj = File::parse(buffer)?;
+/// let parser = Parser::new(&obj);
+/// let context = parser.parse_buffer()?;
+/// println!("Found {} executable bytes", context.text_bytes.len());
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct Parser<'data, 'obj> {
     /// The parsed object representation.
@@ -44,14 +108,64 @@ pub struct Parser<'data, 'obj> {
 }
 
 impl<'data, 'obj> Parser<'data, 'obj> {
-    /// Creates a new `Parser` instance.
+    /// Creates a new `Parser` instance wrapping an existing [`object::File`].
+    ///
+    /// # Parameters
+    ///
+    /// - `binary_object`: Reference to an already-parsed [`object::File`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use object::File;
+    /// use rbat::core::parser::Parser;
+    ///
+    /// # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    /// let obj = File::parse(buffer)?;
+    /// let parser = Parser::new(&obj);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new(binary_object: &'obj File<'data, &'data [u8]>) -> Self {
         Parser { binary_object }
     }
 
-    /// Evaluates the Shannon entropy for each section of the binary.
+    /// Evaluates the Shannon entropy for each non-empty named section of the binary.
     ///
-    /// This is useful for identifying packed or encrypted sections where entropy is typically high (>= 7.5).
+    /// Entropy is computed according to the Shannon formula:
+    /// $$H = -\sum_{i=0}^{255} p_i \log_2(p_i)$$
+    /// where $p_i$ represents the empirical probability of byte value $i$. Sections
+    /// exhibiting high entropy (typically $\ge 7.5$) indicate compressed or encrypted
+    /// content, frequently associated with packers, crypters, or embedded payloads.
+    ///
+    /// # Returns
+    ///
+    /// Returns an [`AHashMap`] mapping section names (e.g. `".text"`, `".rsrc"`) to
+    /// their Shannon entropy score within the range $[0.0, 8.0]$.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`RbatError`] if section extraction or uncompression encounters an
+    /// unrecoverable failure.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use object::File;
+    /// use rbat::core::parser::Parser;
+    ///
+    /// # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    /// let obj = File::parse(buffer)?;
+    /// let parser = Parser::new(&obj);
+    /// let entropy = parser.evaluate_section_entropy()?;
+    /// for (section, score) in entropy {
+    ///     if score >= 7.5 {
+    ///         println!("High entropy in section {section}: {score:.2}");
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn evaluate_section_entropy(&self) -> RbatResult<AHashMap<&'data str, f64>> {
         let mut section_entropy: AHashMap<&'data str, f64> = AHashMap::new();
 
@@ -67,7 +181,47 @@ impl<'data, 'obj> Parser<'data, 'obj> {
         Ok(section_entropy)
     }
 
-    /// Parses the binary buffer for initial mapped values.
+    /// Parses the binary object into a normalized [`ParsedBinaryContext`].
+    ///
+    /// Inspects the underlying binary container format to determine:
+    /// 1. **Target Operating System**: Maps ELF to [`Linux`], PE/COFF to [`Win`],
+    ///    and Mach-O to [`Mac`].
+    /// 2. **CPU Architecture**: Identifies [`x86`], [`x86-64`], [`Arm`], and [`AArch64`] targets.
+    /// 3. **Executable Text Bytes**: Discovers the code section covering the entry point address,
+    ///    or falls back to the first non-empty [`SectionKind::Text`] section.
+    /// 4. **Import Address Table**: Builds an [`IatMap`] mapping virtual call targets to imported API names.
+    ///
+    /// # Returns
+    ///
+    /// A [`ParsedBinaryContext`] containing normalized execution metadata and executable code bytes.
+    ///
+    /// # Errors
+    ///
+    /// - [`RbatError::UnsupportedBinaryFormat`]: If the container format or CPU architecture is unrecognized.
+    /// - [`RbatError::MissingExecutableSection`]: If no suitable executable text section is present.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use object::File;
+    /// use rbat::core::parser::Parser;
+    ///
+    /// # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    /// let obj = File::parse(buffer)?;
+    /// let parser = Parser::new(&obj);
+    /// let ctx = parser.parse_buffer()?;
+    /// println!("OS: {:?}, Arch: {:?}, Entry: 0x{:x}", ctx.os, ctx.arch, ctx.entry_addr);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`Win`]: BinaryOS::Win
+    /// [`Linux`]: BinaryOS::Linux
+    /// [`Mac`]: BinaryOS::Mac
+    /// [`X86`]: BinaryArch::X86
+    /// [`X86-64`]: BinaryArch::X64
+    /// [`Arm`]: BinaryArch::Arm
+    /// [`AArch64`]: BinaryArch::Arm64
     pub fn parse_buffer(&self) -> RbatResult<ParsedBinaryContext> {
         let os = match self.binary_object.format() {
             BinaryFormat::Elf => BinaryOS::Linux,
@@ -128,7 +282,35 @@ impl<'data, 'obj> Parser<'data, 'obj> {
         })
     }
 
-    /// Builds a map of Absolute Address -> Imported API name (`Arc<str>`) for resolving thunks.
+    /// Builds a map associating absolute virtual addresses with imported API names.
+    ///
+    /// Resolves dynamic call thunks to enable direct identification of external API invocations
+    /// during disassembly and control-flow analysis:
+    /// - **PE32 / PE64**: Walks the PE Import Directory Table, following First Thunk and Original
+    ///   First Thunk descriptors. Computes the virtual memory address of each IAT slot as
+    ///   $\text{ImageBase} + \text{FirstThunk} + (\text{Index} \times \text{PointerSize})$ and maps it
+    ///   to the imported function name.
+    /// - **ELF**: Traverses dynamic relocations (e.g. `R_X86_64_JUMP_SLOT`), associating the
+    ///   relocation target address with its corresponding dynamic symbol name.
+    ///
+    /// # Returns
+    ///
+    /// An [`IatMap`] mapping virtual addresses to [`Arc<str>`] API names.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use object::File;
+    /// use rbat::core::parser::Parser;
+    ///
+    /// # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    /// let obj = File::parse(buffer)?;
+    /// let parser = Parser::new(&obj);
+    /// let iat = parser.build_iat_map();
+    /// println!("Resolved {} dynamic call targets", iat.len());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn build_iat_map(&self) -> IatMap {
         let mut map = IatMap::default();
 
@@ -215,7 +397,35 @@ impl<'data, 'obj> Parser<'data, 'obj> {
         map
     }
 
-    /// Extracts all dynamically imported symbols.
+    /// Extracts all dynamically imported symbol names from the binary.
+    ///
+    /// Gathers symbols declared in standard import tables as well as undefined dynamic symbols
+    /// that are resolved by dynamic linkers at load time.
+    ///
+    /// # Returns
+    ///
+    /// A vector of raw byte slices representing imported symbol names.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`RbatError`] if the binary's import directory or dynamic symbol table cannot be read.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use object::File;
+    /// use rbat::core::parser::Parser;
+    ///
+    /// # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    /// let obj = File::parse(buffer)?;
+    /// let parser = Parser::new(&obj);
+    /// let imports = parser.extract_imports()?;
+    /// for name in imports {
+    ///     println!("Import: {}", String::from_utf8_lossy(name));
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn extract_imports(&self) -> RbatResult<Vec<&'data [u8]>> {
         let mut imports_list = Vec::new();
 
@@ -237,7 +447,35 @@ impl<'data, 'obj> Parser<'data, 'obj> {
         Ok(imports_list)
     }
 
-    /// Extracts all exported symbols.
+    /// Extracts all exported symbol names from the binary.
+    ///
+    /// Gathers symbols declared in standard export tables as well as defined dynamic symbols
+    /// exposed for dynamic linking.
+    ///
+    /// # Returns
+    ///
+    /// A vector of raw byte slices representing exported symbol names.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`RbatError`] if the binary's export directory or dynamic symbol table cannot be read.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use object::File;
+    /// use rbat::core::parser::Parser;
+    ///
+    /// # fn run(buffer: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    /// let obj = File::parse(buffer)?;
+    /// let parser = Parser::new(&obj);
+    /// let exports = parser.extract_exports()?;
+    /// for name in exports {
+    ///     println!("Export: {}", String::from_utf8_lossy(name));
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn extract_exports(&self) -> RbatResult<Vec<&'data [u8]>> {
         let mut exports_list = Vec::new();
 
@@ -263,34 +501,39 @@ impl<'data, 'obj> Parser<'data, 'obj> {
 /// Supported target operating systems for assembly syntax style selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOS {
-    /// Windows operating system.
+    /// Microsoft Windows operating system (PE/COFF binaries).
     Win,
-    /// Linux operating system.
+    /// Linux operating system (ELF binaries).
     Linux,
-    /// macOS operating system.
+    /// Apple macOS operating system (Mach-O binaries).
     Mac,
 }
 
-/// Supported CPU architectures for disassembly.
+/// Supported CPU architectures for disassembly and instruction semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryArch {
-    /// 32-bit x86 architecture.
+    /// 32-bit x86 architecture (IA-32).
     X86,
-    /// 64-bit x86-64 architecture.
+    /// 64-bit x86-64 architecture (AMD64 / Intel 64).
     X64,
-    /// 32-bit ARM architecture.
+    /// 32-bit ARM architecture (ARMv7 / A32 / T32).
     Arm,
-    /// 64-bit ARM (AArch64) architecture.
+    /// 64-bit ARM architecture (AArch64).
     Arm64,
 }
 
-/// Context extracted from parsing the binary's basic executable headers.
+/// Contextual metadata and executable byte payload extracted from initial binary parsing.
 #[derive(Debug, Clone)]
 pub struct ParsedBinaryContext {
+    /// Target operating system classification.
     pub os: BinaryOS,
+    /// Target CPU architecture classification.
     pub arch: BinaryArch,
+    /// Virtual memory address of the executable entry point.
     pub entry_addr: u64,
+    /// Raw bytes of the primary executable code section (e.g. `.text` or `__text`).
     pub text_bytes: Vec<u8>,
+    /// Import Address Table mapping virtual addresses to resolved API symbol names.
     pub iat_map: IatMap,
 }
 
@@ -300,7 +543,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::utils::test_helpers::test_helpers;
+    use crate::utils::test_helpers;
 
     #[test]
     fn test_evaluate_section_entropy_elf() {
