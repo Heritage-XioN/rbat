@@ -862,7 +862,7 @@ impl RuleCondition {
                     return false;
                 }
                 features.blocks.iter().any(|block| {
-                    let instructions = block.instructions(&features.cfg_instructions);
+                    let instructions = block.as_instr(&features.cfg_instructions);
                     conditions
                         .iter()
                         .all(|cond| cond.matches_block(instructions, needle))
@@ -873,7 +873,7 @@ impl RuleCondition {
                     return false;
                 }
                 features.blocks.iter().any(|block| {
-                    let instructions = block.instructions(&features.cfg_instructions);
+                    let instructions = block.as_instr(&features.cfg_instructions);
                     instructions.iter().any(|insn| {
                         conditions
                             .iter()
@@ -921,7 +921,7 @@ impl RuleCondition {
                         } else {
                             let mut accumulated = 0;
                             'outer_api: for b in &features.blocks {
-                                for insn in b.instructions(&features.cfg_instructions) {
+                                for insn in b.as_instr(&features.cfg_instructions) {
                                     if insn.matched.contains(id) {
                                         accumulated += 1;
                                         if accumulated >= *count {
@@ -955,7 +955,7 @@ impl RuleCondition {
                         }
                         let mut accumulated = 0;
                         'outer_mnem: for b in &features.blocks {
-                            for insn in b.instructions(&features.cfg_instructions) {
+                            for insn in b.as_instr(&features.cfg_instructions) {
                                 if insn.matched.contains(id) {
                                     accumulated += 1;
                                     if accumulated >= *count {

@@ -1,7 +1,53 @@
-//! # Basic Block & Control Flow Graph Reconstruction
+//! # Control Flow Graph & Basic Block Reconstruction
 //!
-//! This module analyzes linear disassembler output to reconstruct basic blocks and
-//! model directed control flow transitions using graph topologies.
+//! Reconstructs basic blocks and models directed control flow graph (CFG) topologies
+//! from linear disassembly instruction streams.
+//!
+//! ## Core Types
+//!
+//! - [`ControlFlowGraph`]: Directed graph of basic blocks and control-flow transition edges.
+//! - [`BasicBlock`]: Straight-line instruction sequence with single-entry, single-exit execution.
+//! - [`EdgeType`]: Semantic classification of control-flow branch transitions.
+//! - [`InstructionClass`]: Control-flow classification of individual machine instructions.
+//!
+//! ## Overview
+//!
+//! CFG reconstruction maps linear machine code into a directed graph structure through
+//! three coordinated analysis phases:
+//!
+//! 1. **Leader Identification**: Scans disassembled instructions to identify block entry addresses
+//!    ("leaders"):
+//!    - The first instruction of the disassembly stream.
+//!    - Target addresses of conditional branches, unconditional jumps, and function calls.
+//!    - Fallthrough instructions directly succeeding branches, calls, and function returns.
+//! 2. **Basic Block Partitioning**: Partitions the instruction array into non-overlapping,
+//!    contiguous [`BasicBlock`] ranges `[start_idx..end_idx)` sorted by virtual address.
+//! 3. **Edge Resolution & Topology**: Resolves inter-block transitions by inspecting the terminator
+//!    instruction of each basic block:
+//!    - **Conditional Jumps**: Emits a [`EdgeType::ConditionalTrue`] edge to the branch target (if present)
+//!      and a [`EdgeType::ConditionalFalse`] edge to the sequential fallthrough block.
+//!    - **Unconditional Jumps**: Emits a [`EdgeType::Unconditional`] edge to the branch target.
+//!    - **Function Calls**: Emits a [`EdgeType::Call`] edge to the callee target and a [`EdgeType::FallThrough`]
+//!      edge to the return site.
+//!    - **Sequential Instructions**: Emits a [`EdgeType::FallThrough`] edge to the next contiguous block.
+//!    - **Returns**: Terminates the block with no outgoing edges.
+//!
+//! ## Examples
+//!
+//! Constructing a CFG from an instruction stream and exporting it to Graphviz DOT format:
+//!
+//! ```rust
+//! use rbat::core::cfg::ControlFlowGraph;
+//! use rbat::core::parser::BinaryArch;
+//! use std::sync::Arc;
+//!
+//! let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+//! assert!(cfg.blocks.is_empty());
+//! assert!(cfg.edges.is_empty());
+//!
+//! let dot = cfg.to_dot();
+//! assert!(dot.starts_with("digraph CFG {"));
+//! ```
 
 use crate::core::{disassembler::InstructionInfo, parser::BinaryArch};
 use ahash::{HashMapExt, HashSetExt};
@@ -10,7 +56,36 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// A serialized and queryable model of a binary's Control Flow Graph.
+/// Directed Control Flow Graph of an executable binary.
+///
+/// `ControlFlowGraph` models code execution paths by partitioning machine code into discrete,
+/// single-entry single-exit [`BasicBlock`] nodes and connecting them with directed [`EdgeType`] edges.
+/// It retains a shared handle to the backing instruction array to allow zero-copy slicing of
+/// individual block instructions during heuristic analysis and rule matching.
+///
+/// # Invariants
+///
+/// - Every [`BasicBlock`] mapped in `blocks` references valid half-open slice bounds
+///   `[start_idx..end_idx)` into `instructions`.
+/// - Block start virtual addresses in `blocks` match their corresponding `BasicBlock::start_address`.
+/// - Graph edges reference source and destination block start addresses.
+///
+/// # Serialization
+///
+/// `ControlFlowGraph` implements [`Serialize`] and [`Deserialize`]. The backing `instructions`
+/// array is annotated with `#[serde(skip)]` to avoid serializing redundant instruction bytes;
+/// serialized outputs contain the block mapping and edge topology.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::cfg::ControlFlowGraph;
+/// use rbat::core::parser::BinaryArch;
+/// use std::sync::Arc;
+///
+/// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+/// assert_eq!(cfg.blocks.len(), 0);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlFlowGraph {
     /// Shared backing instruction store.
@@ -24,6 +99,22 @@ pub struct ControlFlowGraph {
 
 impl ControlFlowGraph {
     /// Analyzes an instruction list to partition basic blocks and map execution transitions.
+    ///
+    /// Identifies leader instructions based on branch targets and sequential boundaries,
+    /// groups instructions into [`BasicBlock`] ranges, and resolves directed control-flow
+    /// [`EdgeType`] transitions for the specified target CPU architecture.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::ControlFlowGraph;
+    /// use rbat::core::parser::BinaryArch;
+    /// use std::sync::Arc;
+    ///
+    /// let instructions = Arc::from([]);
+    /// let cfg = ControlFlowGraph::new(instructions, &BinaryArch::X64);
+    /// assert!(cfg.blocks.is_empty());
+    /// ```
     pub fn new(instructions: Arc<[InstructionInfo]>, arch: &BinaryArch) -> Self {
         let mut leaders = FxHashSet::with_capacity(instructions.len());
         if !instructions.is_empty() {
@@ -157,6 +248,25 @@ impl ControlFlowGraph {
     }
 
     /// Converts the control flow graph into a Graphviz DOT representation.
+    ///
+    /// Generates a styled Graphviz `digraph` with:
+    /// - Dark-mode background (`#0C0C0C`) and Courier terminal monospace fonts.
+    /// - Blocks labeled with their virtual address and disassembled instruction listing.
+    /// - Color-coded edges: green for [`EdgeType::ConditionalTrue`], red for [`EdgeType::ConditionalFalse`],
+    ///   blue for [`EdgeType::Unconditional`], purple for [`EdgeType::Call`], and gray for [`EdgeType::FallThrough`].
+    /// - Deterministic node ordering sorted by ascending block virtual memory address.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::ControlFlowGraph;
+    /// use rbat::core::parser::BinaryArch;
+    /// use std::sync::Arc;
+    ///
+    /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+    /// let dot = cfg.to_dot();
+    /// assert!(dot.contains("digraph CFG"));
+    /// ```
     pub fn to_dot(&self) -> String {
         let mut dot = String::new();
         dot.push_str("digraph CFG {\n");
@@ -171,7 +281,7 @@ impl ControlFlowGraph {
         for (addr, block) in sorted_blocks {
             let mut label = format!("Block 0x{:X}\\l", addr);
             label.push_str("-----------------\\l");
-            for insn in self.block_instructions(block) {
+            for insn in self.as_block_instr(block) {
                 label.push_str(&format!(
                     "0x{:X}: {:<6} {}\\l",
                     insn.address(),
@@ -201,6 +311,23 @@ impl ControlFlowGraph {
     }
 
     /// Builds a `petgraph::graph::DiGraph` representation of the control flow graph.
+    ///
+    /// Constructs an owned [`DiGraph`] where each node contains a cloned [`BasicBlock`]
+    /// and each directed edge is annotated with its corresponding [`EdgeType`].
+    /// Useful for running external graph algorithms such as dominator trees, reachability,
+    /// and topological traversals.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::ControlFlowGraph;
+    /// use rbat::core::parser::BinaryArch;
+    /// use std::sync::Arc;
+    ///
+    /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+    /// let graph = cfg.to_petgraph();
+    /// assert_eq!(graph.node_count(), 0);
+    /// ```
     pub fn to_petgraph(&self) -> DiGraph<BasicBlock, EdgeType> {
         let mut graph = DiGraph::new();
         let mut indices = FxHashMap::default();
@@ -220,13 +347,50 @@ impl ControlFlowGraph {
     }
 
     /// Returns the instruction slice for a given basic block.
+    ///
+    /// Borrows the block's instruction range directly from the
+    /// [`Shared backing instruction store`] using the block's
+    /// `[start_idx..end_idx)` indices.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::{BasicBlock, ControlFlowGraph};
+    /// use rbat::core::parser::BinaryArch;
+    /// use std::sync::Arc;
+    ///
+    /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+    /// let block = BasicBlock {
+    ///     start_address: 0x1000,
+    ///     end_address: 0x1000,
+    ///     start_idx: 0,
+    ///     end_idx: 0,
+    /// };
+    /// assert_eq!(cfg.as_block_instr(&block).len(), 0);
+    /// ```
+    ///
+    /// [`Shared backing instruction store`]: ControlFlowGraph::instructions
     #[inline]
-    pub fn block_instructions(&self, block: &BasicBlock) -> &[InstructionInfo] {
+    pub fn as_block_instr(&self, block: &BasicBlock) -> &[InstructionInfo] {
         &self.instructions[block.start_idx..block.end_idx]
     }
 
     /// Parses a branch target virtual address from an instruction operand string.
-    pub fn parse_target_address(op_str: &str) -> Option<u64> {
+    ///
+    /// Extracts hexadecimal (`0x...`) or decimal target offsets from operand strings,
+    /// stripping punctuation and comment decorators common in disassembler outputs
+    /// (e.g. `"#0x1004"` -> `Some(0x1004)`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use rbat::core::cfg::ControlFlowGraph;
+    ///
+    /// assert_eq!(ControlFlowGraph::parse_target_addr("0x401000"), Some(0x401000));
+    /// assert_eq!(ControlFlowGraph::parse_target_addr("#0x2000"), Some(0x2000));
+    /// assert_eq!(ControlFlowGraph::parse_target_addr("rax"), None);
+    /// ```
+    pub(crate) fn parse_target_addr(op_str: &str) -> Option<u64> {
         let trimmed = op_str.trim();
         if trimmed.is_empty() {
             return None;
@@ -245,12 +409,51 @@ impl ControlFlowGraph {
     }
 
     /// Classifies a disassembled instruction mnemonic into its control-flow role.
-    pub fn classify_instruction(mnemonic: &str, arch: &BinaryArch) -> InstructionClass {
+    ///
+    /// Convenience forwarding function for [`InstructionClass::classify`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use rbat::core::cfg::{ControlFlowGraph, InstructionClass};
+    /// use rbat::core::parser::BinaryArch;
+    ///
+    /// assert_eq!(
+    ///     ControlFlowGraph::classify_instr("jmp", &BinaryArch::X64),
+    ///     InstructionClass::UnconditionalJump
+    /// );
+    /// assert_eq!(
+    ///     ControlFlowGraph::classify_instr("ret", &BinaryArch::X64),
+    ///     InstructionClass::Return
+    /// );
+    /// ```
+    pub(crate) fn classify_instr(mnemonic: &str, arch: &BinaryArch) -> InstructionClass {
         InstructionClass::classify(mnemonic, arch)
     }
 }
 
 /// Represents a basic block: a straight-line sequence of execution with a single entry and exit.
+///
+/// A basic block is a fundamental unit of control-flow analysis. Execution enters only at the
+/// first instruction (`start_address`) and leaves only at the final instruction (`end_address`)
+/// without halting or branching except at the end.
+///
+/// Instructions within the block are indexed into the parent instruction array using the half-open
+/// range `[start_idx..end_idx)`.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::cfg::BasicBlock;
+///
+/// let block = BasicBlock {
+///     start_address: 0x1000,
+///     end_address: 0x1008,
+///     start_idx: 0,
+///     end_idx: 3,
+/// };
+/// assert_eq!(block.instruction_count(), 3);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BasicBlock {
     /// The start virtual memory address of the block.
@@ -265,54 +468,105 @@ pub struct BasicBlock {
 
 impl BasicBlock {
     /// Returns this block's instruction slice from the given backing store.
+    ///
+    /// Slices `source[self.start_idx..self.end_idx]`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::BasicBlock;
+    ///
+    /// let block = BasicBlock {
+    ///     start_address: 0x1000,
+    ///     end_address: 0x1000,
+    ///     start_idx: 0,
+    ///     end_idx: 0,
+    /// };
+    /// assert!(block.as_instr(&[]).is_empty());
+    /// ```
     #[inline]
-    pub fn instructions<'inon>(
-        &self,
-        source: &'inon [InstructionInfo],
-    ) -> &'inon [InstructionInfo] {
+    pub fn as_instr<'inon>(&self, source: &'inon [InstructionInfo]) -> &'inon [InstructionInfo] {
         &source[self.start_idx..self.end_idx]
     }
 
-    /// Number of instructions in this block.
+    /// Number of instructions in this block (`end_idx - start_idx`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::BasicBlock;
+    ///
+    /// let block = BasicBlock {
+    ///     start_address: 0x1000,
+    ///     end_address: 0x1004,
+    ///     start_idx: 2,
+    ///     end_idx: 5,
+    /// };
+    /// assert_eq!(block.instr_count(), 3);
+    /// ```
     #[inline]
-    pub fn instruction_count(&self) -> usize {
+    pub fn instr_count(&self) -> usize {
         self.end_idx - self.start_idx
     }
 }
 
-/// Types of control flow edges connecting basic blocks.
+/// Types of control flow edges connecting basic blocks in a [`ControlFlowGraph`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum EdgeType {
-    /// Sequential execution continuation.
+    /// Sequential execution continuation to the next contiguous block.
     FallThrough,
-    /// Taken branch of a conditional jump.
+    /// Taken branch path of a conditional jump instruction.
     ConditionalTrue,
-    /// Not-taken branch of a conditional jump.
+    /// Not-taken fallthrough path of a conditional jump instruction.
     ConditionalFalse,
-    /// Unconditional jump target.
+    /// Unconditional jump target path.
     Unconditional,
-    /// Subroutine call target.
+    /// Subroutine call target path.
     Call,
 }
 
-/// Categorizes an instruction into control flow classes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+/// Categorizes machine instructions into functional control-flow roles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum InstructionClass {
-    /// Normal sequential instruction.
+    /// Normal sequential instruction with no control-flow redirection.
     #[default]
     Normal,
-    /// Conditional branching instruction.
+    /// Conditional branching instruction (e.g. `je`, `jne`, `b.eq`).
     ConditionalJump,
-    /// Unconditional branching instruction.
+    /// Unconditional branching instruction (e.g. `jmp`, `b`).
     UnconditionalJump,
-    /// Subroutine call instruction.
+    /// Subroutine call instruction (e.g. `call`, `bl`).
     Call,
-    /// Subroutine return instruction.
+    /// Subroutine return instruction (e.g. `ret`, `sysret`).
     Return,
 }
 
 impl InstructionClass {
     /// Classifies a disassembled instruction mnemonic into its control-flow role.
+    ///
+    /// Recognizes architecture-specific mnemonics for:
+    /// - **x86 / x86-64**: `jmp`, `call`, `ret`/`sysret`/`iret`, and `j*` conditional branches.
+    /// - **ARM / ARM64**: `b`, `bl`/`blx`, `ret`/`br`/`bx`, and `b.*`/`cbz`/`cbnz`/`tbz`/`tbnz` branches.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::InstructionClass;
+    /// use rbat::core::parser::BinaryArch;
+    ///
+    /// assert_eq!(
+    ///     InstructionClass::classify("je", &BinaryArch::X64),
+    ///     InstructionClass::ConditionalJump
+    /// );
+    /// assert_eq!(
+    ///     InstructionClass::classify("b.ne", &BinaryArch::Arm64),
+    ///     InstructionClass::ConditionalJump
+    /// );
+    /// assert_eq!(
+    ///     InstructionClass::classify("mov", &BinaryArch::X64),
+    ///     InstructionClass::Normal
+    /// );
+    /// ```
     pub fn classify(mnemonic: &str, arch: &BinaryArch) -> Self {
         match arch {
             BinaryArch::X86 | BinaryArch::X64 => match mnemonic {
@@ -385,7 +639,7 @@ mod tests {
         let block = &cfg.blocks[&0x1000];
         assert_eq!(block.start_address, 0x1000);
         assert_eq!(block.end_address, 0x1004);
-        assert_eq!(block.instruction_count(), 3);
+        assert_eq!(block.instr_count(), 3);
     }
 
     #[test]
@@ -409,13 +663,13 @@ mod tests {
         assert!(cfg.blocks.contains_key(&0x1004));
 
         // Block 0x1000 should contain [cmp, je]
-        assert_eq!(cfg.blocks[&0x1000].instruction_count(), 2);
+        assert_eq!(cfg.blocks[&0x1000].instr_count(), 2);
 
         // Block 0x1003 should contain [nop]
-        assert_eq!(cfg.blocks[&0x1003].instruction_count(), 1);
+        assert_eq!(cfg.blocks[&0x1003].instr_count(), 1);
 
         // Block 0x1004 should contain [mov]
-        assert_eq!(cfg.blocks[&0x1004].instruction_count(), 1);
+        assert_eq!(cfg.blocks[&0x1004].instr_count(), 1);
 
         // Should have a ConditionalTrue edge from 0x1000 -> 0x1004
         assert!(
@@ -537,8 +791,8 @@ mod tests {
         assert_eq!(cfg.blocks.len(), 2);
         assert!(cfg.blocks.contains_key(&0x1000));
         assert!(cfg.blocks.contains_key(&0x1002));
-        assert_eq!(cfg.blocks[&0x1000].instruction_count(), 1);
-        assert_eq!(cfg.blocks[&0x1002].instruction_count(), 2);
+        assert_eq!(cfg.blocks[&0x1000].instr_count(), 1);
+        assert_eq!(cfg.blocks[&0x1002].instr_count(), 2);
     }
 
     #[test]
@@ -603,7 +857,7 @@ mod tests {
         let block = &cfg.blocks[&0x1000];
         assert_eq!(block.start_address, 0x1000);
         assert_eq!(block.end_address, 0x1000);
-        assert_eq!(block.instruction_count(), 1);
+        assert_eq!(block.instr_count(), 1);
     }
 
     #[test]
