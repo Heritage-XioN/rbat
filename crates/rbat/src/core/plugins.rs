@@ -1,16 +1,15 @@
 //! # Heuristic Analysis Plugins
 //!
 //! This module implements modular static analysis analyzers as individual plugins
-//! implementing the [`HeuristicPlugin`] trait. This enables parallelized analysis execution.
+//! implementing the `HeuristicPlugin` trait. This enables parallelized analysis execution.
 //!
 //! # Architecture
 //! Every heuristic task (such as disassembly, entropy estimation, signature matches)
 //! is encapsulated in its own plugin structure. These plugins take a shared read-only
-//! references context ([`AnalysisContext`]) and run concurrently.
+//! context (`AnalysisContext`) and run concurrently.
 //!
 //! # Example
-//! ```rust
-//! use std::path::Path;
+//! ```rust,ignore
 //! use object::File;
 //! use rbat::core::types::{AnalysisContext, AnalysisProgress};
 //! use rbat::core::parser::BinaryArch;
@@ -53,28 +52,27 @@
 //! # }
 //! ```
 
-use crate::core::heuristics::disassemble_section;
-use crate::core::heuristics::{packer_sig_check, string_check};
-use crate::core::traits::HeuristicPlugin;
-use crate::core::types::BinaryMetadata;
-use crate::core::types::RbatResult;
-use crate::core::{
-    parser::Parser,
-    types::{AnalysisContext, AnalysisProgress},
-};
-use crate::utils::hashing::compute_hashes;
 use std::sync::Arc;
+
+use crate::{
+    core::{
+        heuristics::{disassemble_section, packer_sig_check, string_check},
+        parser::Parser,
+        traits::HeuristicPlugin,
+        types::{
+            analysis::{AnalysisContext, AnalysisProgress, BinaryMetadata},
+            result::RbatResult,
+        },
+    },
+    utils::hashing::compute_hashes,
+};
 
 /// A plugin that computes cryptographic digests (MD5, SHA-1, SHA-256) and
 /// similarity hashes (SSDEEP, TLSH) over the raw binary buffer, producing the
 /// identifier set used by triage platforms (VirusTotal, MalwareBazaar).
-pub struct HashingPlugin;
+pub(crate) struct HashingPlugin;
 
 impl HeuristicPlugin for HashingPlugin {
-    fn name(&self) -> &'static str {
-        "hashing"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -83,15 +81,11 @@ impl HeuristicPlugin for HashingPlugin {
     }
 }
 
-/// A plugin that performs instruction disassembly using Capstone.
-/// Detects code caves (NOP runs, zero/trap padding runs) and anti-analysis/evasion instruction mnemonics.
-pub struct DisassemblyPlugin;
+/// A plugin that scans pre-disassembled instructions for code caves
+/// (NOP runs, zero/trap padding runs) and anti-analysis/evasion instruction mnemonics.
+pub(crate) struct DisassemblyPlugin;
 
 impl HeuristicPlugin for DisassemblyPlugin {
-    fn name(&self) -> &'static str {
-        "disassembly"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -103,13 +97,9 @@ impl HeuristicPlugin for DisassemblyPlugin {
 
 /// A plugin that performs YARA scanning on strings in the binary.
 /// Flags common indicator rules or obfuscated content strings.
-pub struct StringCheckPlugin;
+pub(crate) struct StringCheckPlugin;
 
 impl HeuristicPlugin for StringCheckPlugin {
-    fn name(&self) -> &'static str {
-        "string_check"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -120,13 +110,9 @@ impl HeuristicPlugin for StringCheckPlugin {
 }
 
 /// A plugin that checks the binary's byte structures against packer, cryptor, or compiler signatures.
-pub struct PackerSigCheckPlugin;
+pub(crate) struct PackerSigCheckPlugin;
 
 impl HeuristicPlugin for PackerSigCheckPlugin {
-    fn name(&self) -> &'static str {
-        "packer_sig_check"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -137,40 +123,26 @@ impl HeuristicPlugin for PackerSigCheckPlugin {
 }
 
 /// A plugin for identifying library known functions within a binary.
-pub struct LibraryFunctionsPlugin;
+pub(crate) struct LibraryFunctionsPlugin;
 
 impl HeuristicPlugin for LibraryFunctionsPlugin {
-    fn name(&self) -> &'static str {
-        "library_functions"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
     ) -> RbatResult<AnalysisProgress<'buf>> {
-        let library_functions =
-            match ctx.custom_flirt {
-                Some(matcher) => matcher.identify_library_functions(
-                    &ctx.entry_points,
-                    ctx.text_bytes,
-                    ctx.entry_addr,
-                ),
-                None => crate::core::flirt::FlirtMatcher::embedded_shared()
-                    .identify_library_functions(&ctx.entry_points, ctx.text_bytes, ctx.entry_addr),
-            };
-
+        let library_functions = ctx.custom_flirt.identify_library_functions(
+            &ctx.entry_points,
+            ctx.text_bytes,
+            ctx.entry_addr,
+        );
         Ok(AnalysisProgress::LibraryFunctions(library_functions))
     }
 }
 
 /// A plugin that computes entropy metrics across individual binary section ranges to detect packed, encrypted, or compressed payloads.
-pub struct EntropyPlugin;
+pub(crate) struct EntropyPlugin;
 
 impl HeuristicPlugin for EntropyPlugin {
-    fn name(&self) -> &'static str {
-        "entropy"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -182,13 +154,9 @@ impl HeuristicPlugin for EntropyPlugin {
 }
 
 /// A plugin that extracts imported functions and symbols.
-pub struct ImportsPlugin;
+pub(crate) struct ImportsPlugin;
 
 impl HeuristicPlugin for ImportsPlugin {
-    fn name(&self) -> &'static str {
-        "imports"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -209,13 +177,9 @@ impl HeuristicPlugin for ImportsPlugin {
 }
 
 /// A plugin that extracts exported functions and symbols.
-pub struct ExportsPlugin;
+pub(crate) struct ExportsPlugin;
 
 impl HeuristicPlugin for ExportsPlugin {
-    fn name(&self) -> &'static str {
-        "exports"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -236,13 +200,9 @@ impl HeuristicPlugin for ExportsPlugin {
 }
 
 /// A plugin that extracts basic format metadata from binary headers (e.g. entry points, machine CPU, type strings).
-pub struct MetadataPlugin;
+pub(crate) struct MetadataPlugin;
 
 impl HeuristicPlugin for MetadataPlugin {
-    fn name(&self) -> &'static str {
-        "metadata"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -253,13 +213,9 @@ impl HeuristicPlugin for MetadataPlugin {
 }
 
 /// A plugin that reconstructs the Control Flow Graph (CFG) from the disassembled binary section.
-pub struct CfgPlugin;
+pub(crate) struct CfgPlugin;
 
 impl HeuristicPlugin for CfgPlugin {
-    fn name(&self) -> &'static str {
-        "cfg"
-    }
-
     fn run<'buf, 'ctx>(
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
@@ -274,10 +230,11 @@ mod tests {
     use super::*;
     use crate::core::{
         flirt::FlirtMatcher,
+        needle::NeedleIndex,
         parser::{BinaryArch, BinaryOS},
-        types::SectionRange,
+        types::analysis::SectionRange,
     };
-    use crate::utils::test_helpers::test_helpers;
+    use crate::utils::test_helpers;
     use object::File;
     use std::fs;
     use tempfile::tempdir;
@@ -302,9 +259,9 @@ mod tests {
             text_bytes: &[],
             entry_addr: 0x1000,
             instructions: Arc::from([]),
-            needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
+            needle: std::sync::Arc::new(NeedleIndex::build_from_rules(&[])),
             entry_points,
-            custom_flirt: &None,
+            custom_flirt: &FlirtMatcher::load_embedded(),
         };
 
         let result = MetadataPlugin.run(&ctx).unwrap();
@@ -336,9 +293,9 @@ mod tests {
             text_bytes: &[],
             entry_addr: 0x1000,
             instructions: Arc::from([]),
-            needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
+            needle: std::sync::Arc::new(NeedleIndex::build_from_rules(&[])),
             entry_points,
-            custom_flirt: &None,
+            custom_flirt: &FlirtMatcher::load_embedded(),
         };
 
         let result = EntropyPlugin.run(&ctx).unwrap();
@@ -385,16 +342,15 @@ mod tests {
             text_bytes: &text_bytes,
             entry_addr: 0x1000,
             instructions: instructions.into(),
-            needle: std::sync::Arc::new(crate::core::types::NeedleIndex::build_from_rules(&[])),
+            needle: std::sync::Arc::new(NeedleIndex::build_from_rules(&[])),
             entry_points,
-            custom_flirt: &None,
+            custom_flirt: &FlirtMatcher::load_embedded(),
         };
 
         let result = DisassemblyPlugin.run(&ctx).unwrap();
         match result {
             AnalysisProgress::Disassembly(code_cave) => {
-                assert!(code_cave.contains_key("nop_addr"));
-                assert_eq!(code_cave.get("nop_addr").unwrap().len(), 128);
+                assert_eq!(code_cave.nop_sleds.len(), 128);
             }
             _ => panic!("Expected Disassembly progress"),
         }

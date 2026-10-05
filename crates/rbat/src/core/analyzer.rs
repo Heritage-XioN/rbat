@@ -21,8 +21,7 @@
 //! ### Streaming Analysis
 //!
 //! ```rust,no_run
-//! use rbat::core::analyzer::Analyzer;
-//! use rbat::core::types::AnalysisProgress;
+//! use rbat::core::{analyzer::Analyzer, types::analysis::AnalysisProgress};
 //! use std::fs;
 //! use std::sync::mpsc;
 //!
@@ -74,13 +73,14 @@ use crate::core::{
     disassembler::{DisassemblerImpl, InstructionInfo},
     features::FeatureSet,
     flirt::FlirtMatcher,
+    needle::NeedleIndex,
     parser::{ParsedBinaryContext, Parser},
     rule::Rule,
     scoring::{RiskAssessment, SeverityClassifier},
     traits::{Disassembler, HeuristicPlugin},
     types::{
-        AnalysisContext, AnalysisProgress, AnalysisResult, NeedleIndex, RbatError, RbatResult,
-        SectionRange,
+        analysis::{AnalysisContext, AnalysisProgress, AnalysisResult, SectionRange},
+        result::{RbatError, RbatResult},
     },
 };
 
@@ -163,8 +163,7 @@ impl Analyzer {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use rbat::core::analyzer::Analyzer;
-    /// use rbat::core::types::AnalysisProgress;
+    /// use rbat::core::{analyzer::Analyzer, types::analysis::AnalysisProgress};
     /// use std::sync::mpsc;
     ///
     /// # fn run() -> Result<(), Box<dyn std::error::Error>> {

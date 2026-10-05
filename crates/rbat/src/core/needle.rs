@@ -12,14 +12,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// (api names, imports, exports, strings, mnemonics, match targets) into a
 /// single finite-state automaton. The automaton is then run once per instruction
 /// to populate `InstructionInfo::matched`, turning subsequent rule evaluation
-/// lookups into O(1) `HashSet::contains` checks.
+/// lookups into O(k) `SmallVec::contains` checks where k is the number of matched patterns per instruction.
+#[derive(Debug)]
 pub struct NeedleIndex {
     /// The compiled Aho-Corasick automaton.
-    pub automaton: AhoCorasick,
+    pub(crate) automaton: AhoCorasick,
     /// A mapping from a text string to its PatternID.
-    pub lookup: AHashMap<String, PatternID>,
+    pub(crate) lookup: AHashMap<String, PatternID>,
     /// A bitmask array tracking which PatternIDs were found anywhere in the CFG.
-    pub present: Vec<AtomicBool>,
+    pub(crate) present: Vec<AtomicBool>,
 }
 
 impl NeedleIndex {
@@ -106,7 +107,6 @@ impl NeedleIndex {
             RuleCondition::Count { condition, .. } => {
                 Self::collect_patterns(condition, patterns);
             }
-            RuleCondition::Other(_) => {}
             _ => {}
         }
     }
@@ -117,7 +117,7 @@ impl NeedleIndex {
         use rayon::prelude::*;
 
         // InstructionInfo is an Arc<[T]> (shared type)
-        // this line helps upload exclusive &mut access.
+        // this line helps obtain exclusive &mut access.
         // clone on write behaviour, helps prevent data
         // races in instances where an arc cloned value
         // was passed. read the Arc::make_mut() docs for

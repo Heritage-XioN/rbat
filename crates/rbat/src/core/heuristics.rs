@@ -1,38 +1,37 @@
 //! # Binary Evasion and Padding Heuristics
 //!
-//! This module implements core static disassembly heuristics using the Capstone disassembler
-//! to detect anti-analysis techniques, code caves, NOP sleds, and common signature matching rules.
+//! This module implements core static analysis heuristics using pre-disassembled instruction
+//! streams to detect anti-analysis techniques, code caves, NOP sleds, and common signature
+//! matching rules.
 
 use ahash::AHashMap;
 use std::sync::OnceLock;
 
 use crate::core::{
     disassembler::InstructionInfo,
-    types::RbatResult,
-    types::SectionRange,
+    types::{
+        analysis::{CodeCaves, SectionRange},
+        result::RbatResult,
+    },
     yarahandler::{YaraHandler, YaraMatches},
 };
 
 static SUSPICIOUS_STRINGS_RULES: OnceLock<yara::Rules> = OnceLock::new();
 static PACKER_SIGNATURES_RULES: OnceLock<yara::Rules> = OnceLock::new();
 
-/// Disassembles the executable section of a binary and scans for code caves and evasion mnemonics.
+/// Scans pre-disassembled instructions and raw bytes for code caves and evasion mnemonics.
 ///
 /// Code caves are identified as:
-/// - Sequences of 128 or more consecutive `nop` instructions (returned as `"nop_addr"`).
-/// - Runs of 128 or more consecutive `0x00` padding bytes (returned as `"null_addr"`).
-/// - Runs of 128 or more consecutive `0xCC` trap/INT3 bytes (returned as `"int3_addr"`).
-///
-/// # Errors
-/// Returns `RbatError::DisassemblerError` if Capstone initialization or disassembly fails.
-pub fn disassemble_section<'buf>(
+/// - Sequences of 128 or more consecutive `nop` instructions.
+/// - Runs of 128 or more consecutive `0x00` padding bytes.
+/// - Runs of 128 or more consecutive `0xCC` trap/INT3 bytes.
+pub(crate) fn disassemble_section(
     instructions: &[InstructionInfo],
     bytes: &[u8],
     entry_addr: u64,
-) -> RbatResult<AHashMap<&'buf str, Vec<u64>>> {
-    let mut code_cave = AHashMap::new();
-    let mut nop_addr: Vec<u64> = vec![];
-    let mut counter: i32 = 0;
+) -> RbatResult<CodeCaves> {
+    let mut code_caves = CodeCaves::default();
+    let mut nop_run: Vec<u64> = vec![];
 
     let mut buf_m = String::new();
     for i in instructions {
@@ -41,23 +40,17 @@ pub fn disassemble_section<'buf>(
 
         // Accumulate NOP sleds
         if mnemonic == "nop" {
-            nop_addr.push(i.address());
-            counter += 1;
+            nop_run.push(i.address());
         } else {
-            if counter >= 128 {
-                let mut existing: Vec<u64> = code_cave.remove("nop_addr").unwrap_or_default();
-                existing.extend(&nop_addr);
-                code_cave.insert("nop_addr", existing);
+            if nop_run.len() >= 128 {
+                code_caves.nop_sleds.extend(&nop_run);
             }
-            counter = 0;
-            nop_addr.clear();
+            nop_run.clear();
         }
     }
 
-    if counter >= 128 {
-        let mut existing = code_cave.remove("nop_addr").unwrap_or_default();
-        existing.extend(&nop_addr);
-        code_cave.insert("nop_addr", existing);
+    if nop_run.len() >= 128 {
+        code_caves.nop_sleds.extend(&nop_run);
     }
 
     // Scan raw bytes for consecutive 0x00 runs, ignoring trailing alignment padding
@@ -65,25 +58,20 @@ pub fn disassemble_section<'buf>(
     while null_scan_len > 0 && bytes[null_scan_len - 1] == 0x00 {
         null_scan_len -= 1;
     }
-    let null_caves = scan_raw_padding(&bytes[..null_scan_len], 0x00, 128, entry_addr);
-    if !null_caves.is_empty() {
-        code_cave.insert("null_addr", null_caves);
-    }
+    code_caves.null_padding = scan_raw_padding(&bytes[..null_scan_len], 0x00, 128, entry_addr);
 
     // Scan raw bytes for consecutive 0xCC runs
-    let int3_caves = scan_raw_padding(bytes, 0xCC, 128, entry_addr);
-    if !int3_caves.is_empty() {
-        code_cave.insert("int3_addr", int3_caves);
-    }
+    code_caves.trap_padding = scan_raw_padding(bytes, 0xCC, 128, entry_addr);
 
-    Ok(code_cave)
+    Ok(code_caves)
 }
 
-/// Helper function to perform YARA string detection.
+/// Performs YARA string detection against binary section data.
 ///
 /// # Errors
-/// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if object fails to parse the file format.
-pub fn string_check<'buf>(
+/// Returns `RbatError::YaraCompileError` if the embedded rule fails to compile,
+/// or `RbatError::YaraIO` if the scan engine encounters a runtime error.
+pub(crate) fn string_check<'buf>(
     buffer: &'buf [u8],
     section_ranges: &[SectionRange<'buf>],
 ) -> RbatResult<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
@@ -97,11 +85,12 @@ pub fn string_check<'buf>(
     Ok(results)
 }
 
-/// Helper function to check packer and compiler signatures.
+/// Checks the binary against packer and compiler signature rules.
 ///
 /// # Errors
-/// Returns `RbatError::Io` if reading the file fails, or `RbatError::ParseError` if object fails to parse the file format.
-pub fn packer_sig_check<'buf>(
+/// Returns `RbatError::YaraCompileError` if the embedded rule fails to compile,
+/// or `RbatError::YaraIO` if the scan engine encounters a runtime error.
+pub(crate) fn packer_sig_check<'buf>(
     buffer: &'buf [u8],
     section_ranges: &[SectionRange<'buf>],
 ) -> RbatResult<AHashMap<&'buf str, Vec<YaraMatches<'buf>>>> {
@@ -156,7 +145,7 @@ pub(crate) fn scan_raw_padding(
     addresses
 }
 
-#[cfg(all(test, feature = "backend-capstone"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -182,6 +171,7 @@ mod tests {
         assert_eq!(results[34], 0x1000 + 54);
     }
 
+    #[cfg(feature = "backend-capstone")]
     #[test]
     fn test_disassemble_section_no_early_breakout() {
         let mut instructions = Vec::new();
@@ -205,8 +195,6 @@ mod tests {
         });
 
         let code_cave = disassemble_section(&instructions, &[], 0x1000).unwrap();
-
-        assert!(code_cave.contains_key("nop_addr"));
-        assert_eq!(code_cave.get("nop_addr").unwrap().len(), 128);
+        assert_eq!(code_cave.nop_sleds.len(), 128);
     }
 }

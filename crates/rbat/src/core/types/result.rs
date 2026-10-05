@@ -1,7 +1,7 @@
 //! # Custom Result and Error Types
 //!
 //! This module defines the [`RbatResult`] type and the [`RbatError`] enum which encapsulates all
-//! classification, disassembling, scanning, and file I/O error states and Results outputs
+//! classification, disassembling, scanning, and file I/O error states and result outputs
 //! produced by the RBAT core library.
 
 use serde::Serialize;
@@ -87,11 +87,19 @@ pub enum RbatError {
     MissingAnalysisData(String),
 
     /// UTF8 decoding failure.
-    #[error("Invalid UTF-8 in embedded asset")]
+    #[error("Invalid UTF-8 in embedded asset: {0}")]
     Utf8Error(
         #[from]
         #[serde(serialize_with = "serialize_to_string")]
         std::string::FromUtf8Error,
+    ),
+
+    /// UTF-8 slice decoding failure.
+    #[error("Invalid UTF-8 sequence: {0}")]
+    StrUtf8Error(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        std::str::Utf8Error,
     ),
 
     /// Configuration or override table parse error.
@@ -103,8 +111,16 @@ pub enum RbatError {
     RuleError(String),
 
     /// Pipeline cancellation indicator.
-    #[error("an error occurred which resulted in the cancellation of the analysis process")]
-    ErrorAnalysisCancelled,
+    #[error("An error occurred which resulted in the cancellation of the analysis process")]
+    AnalysisCancelled,
+
+    /// Pipeline cancellation indicator.
+    #[error("An error occurred which resulted in the cancellation of the analysis process")]
+    FlirtMatcherError(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        fast_flirt::Error,
+    ),
 }
 
 fn serialize_to_string<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>

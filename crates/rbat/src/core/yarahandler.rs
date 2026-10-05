@@ -3,7 +3,10 @@
 //! This module coordinates compiling rules from embedded assets (e.g. `yara/api_hooking.yar`)
 //! and scanning raw byte buffers to extract signature matches with section offsets.
 
-use crate::core::types::{RbatError, RbatResult, SectionRange};
+use crate::core::types::{
+    analysis::SectionRange,
+    result::{RbatError, RbatResult},
+};
 use ahash::AHashMap;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -18,21 +21,21 @@ struct EmbedYaraRule;
 /// A handler for loading, compiling, and executing YARA rule scans against in-memory buffers.
 ///
 /// # Example
-/// ```rust,no_run
+/// ```rust,ignore
 /// use rbat::core::yarahandler::YaraHandler;
 ///
-/// let handler = YaraHandler::new("yara/api_hooking.yar".to_owned());
+/// let handler = YaraHandler::new("api_hooking.yar".to_owned());
 /// let rules = handler.compile_yara_rule().unwrap();
 /// let matches = handler.scan_mem(&rules, &[0x00; 100], &[]).unwrap();
 /// ```
 #[derive(Debug)]
-pub struct YaraHandler {
+pub(crate) struct YaraHandler {
     path: String,
 }
 
 impl YaraHandler {
     /// Creates a new `YaraHandler` for the specified embedded YARA rule asset filename.
-    pub fn new(path: String) -> Self {
+    pub(crate) fn new(path: String) -> Self {
         YaraHandler { path }
     }
 
@@ -41,11 +44,11 @@ impl YaraHandler {
     /// # Errors
     /// Returns `RbatError::MissingAsset` if the rule file does not exist in the embedded directory,
     /// or `RbatError::YaraCompileError` if the rule string contains syntax errors.
-    pub fn compile_yara_rule(&self) -> RbatResult<Rules> {
+    pub(crate) fn compile_yara_rule(&self) -> RbatResult<Rules> {
         let file = EmbedYaraRule::get(&self.path)
             .ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
-        let rules = String::from_utf8(file.data.to_vec())?;
-        let compiler = Compiler::new()?.add_rules_str(&rules)?;
+        let rules = std::str::from_utf8(&file.data)?;
+        let compiler = Compiler::new()?.add_rules_str(rules)?;
         let compiled_rule_file = compiler.compile_rules()?;
         Ok(compiled_rule_file)
     }
@@ -55,7 +58,7 @@ impl YaraHandler {
     ///
     /// # Errors
     /// Returns `RbatError::YaraIO` if the scan engine encounters a runtime scanning error.
-    pub fn scan_mem<'buf>(
+    pub(crate) fn scan_mem<'buf>(
         &self,
         compiled_rules: &'buf Rules,
         buffer: &'buf [u8],

@@ -61,7 +61,7 @@
 //! [`Arm64`]: BinaryArch::Arm64
 
 use crate::{
-    core::types::{RbatError, RbatResult},
+    core::types::result::{RbatError, RbatResult},
     utils::entropy::calculate_entropy,
 };
 use ahash::AHashMap;

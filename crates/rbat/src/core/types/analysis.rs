@@ -4,8 +4,9 @@ use crate::core::{
     cfg::ControlFlowGraph,
     disassembler::InstructionInfo,
     flirt::FlirtMatcher,
+    needle::NeedleIndex,
     parser::{BinaryArch, BinaryOS},
-    types::NeedleIndex,
+    types::result::{RbatError, RbatResult},
     yarahandler::YaraMatches,
 };
 use ahash::AHashMap;
@@ -17,8 +18,8 @@ use std::sync::Arc;
 pub enum AnalysisProgress<'buf> {
     /// Digest and fuzzy hashes of the raw binary buffer.
     Hashes(BinaryHashes),
-    /// Disassembly results: code caves mapped by pattern type (`"nop_addr"`, `"null_addr"`, `"int3_addr"`)
-    Disassembly(AHashMap<&'buf str, Vec<u64>>),
+    /// Disassembly results: code caves detected across executable sections.
+    Disassembly(CodeCaves),
     /// Extracted strings matched by YARA rules.
     Strings(AHashMap<&'buf str, Vec<YaraMatches<'buf>>>),
     /// Packer and compiler signatures matched by YARA rules.
@@ -61,9 +62,8 @@ pub struct AnalysisResult<'buf> {
     pub metadata: BinaryMetadata,
     /// Cryptographic and fuzzy hashes computed over the raw buffer.
     pub hashes: BinaryHashes,
-    /// List of consecutive padding/cave virtual memory addresses.
-    #[serde(borrow)]
-    pub code_cave: AHashMap<&'buf str, Vec<u64>>,
+    /// Code cave findings (NOP sleds, null padding, trap padding).
+    pub code_cave: CodeCaves,
     /// Dynamically imported APIs and symbols.
     pub imports: Vec<usize>,
     /// Exported symbols and functions.
@@ -123,14 +123,14 @@ impl BinaryMetadata {
     }
 
     /// Extracts high-level metadata (architecture type, entry address, name) from a parsed object.
-    pub fn from_object(binary_object: &object::File) -> crate::core::types::RbatResult<Self> {
+    pub fn from_object(binary_object: &object::File) -> RbatResult<Self> {
         use object::{Architecture, BinaryFormat, Object};
         let binary_type = match binary_object.format() {
             BinaryFormat::Elf => "Linux ELF",
             BinaryFormat::Pe | BinaryFormat::Coff => "Windows PE",
             BinaryFormat::MachO => "Mach-O",
             _ => {
-                return Err(crate::core::types::RbatError::UnsupportedBinaryFormat(
+                return Err(RbatError::UnsupportedBinaryFormat(
                     "Unsupported format".to_string(),
                 ));
             }
@@ -142,6 +142,10 @@ impl BinaryMetadata {
             Architecture::I386 => 0x03,
             Architecture::Arm => 0x28,
             Architecture::Aarch64 | Architecture::Aarch64_Ilp32 => 0xb7,
+            Architecture::Riscv32 | Architecture::Riscv64 => 243,
+            Architecture::Mips | Architecture::Mips64 => 8,
+            Architecture::PowerPc => 20,
+            Architecture::PowerPc64 => 21,
             _ => 0,
         };
 
@@ -171,36 +175,40 @@ impl BinaryMetadata {
 ///     buffer: &buffer,
 ///     binary_object: unsafe { std::mem::zeroed() },
 ///     section_ranges: &section_ranges,
+///     entry_points: rustc_hash::FxHashSet::default(),
+///     custom_flirt: &None,
 ///     os: BinaryOS::Linux,
 ///     arch: BinaryArch::X64,
 ///     text_bytes: &buffer,
 ///     entry_addr: 0x1000,
 ///     instructions: std::sync::Arc::from([]),
+///     needle: std::sync::Arc::new(rbat::core::types::NeedleIndex::build_from_rules(&[])),
 /// };
 /// ```
-pub struct AnalysisContext<'buf, 'ctx> {
+pub(crate) struct AnalysisContext<'buf, 'ctx> {
     /// Raw bytes of the target binary file.
-    pub buffer: &'buf [u8],
+    pub(crate) buffer: &'buf [u8],
     /// Parsed representation of the executable headers and sections.
-    pub binary_object: &'ctx object::File<'buf, &'buf [u8]>,
+    pub(crate) binary_object: &'ctx object::File<'buf, &'buf [u8]>,
     /// Cached mappings of section offsets to names.
-    pub section_ranges: &'ctx [SectionRange<'buf>],
-    /// collection of potential entry points in a binary
-    pub entry_points: FxHashSet<u64>,
-    /// Optional custom FLIRT signatures; borrows the analysis-scoped lifetime
-    pub custom_flirt: &'ctx Option<FlirtMatcher>,
+    pub(crate) section_ranges: &'ctx [SectionRange<'buf>],
+    /// Collection of potential entry points in the binary.
+    pub(crate) entry_points: FxHashSet<u64>,
+    /// Optional custom FLIRT signatures; borrows the analysis-scoped lifetime.
+    pub(crate) custom_flirt: &'ctx FlirtMatcher,
     /// Target operating system preference.
-    pub os: BinaryOS,
+    #[allow(dead_code)]
+    pub(crate) os: BinaryOS,
     /// Target CPU architecture.
-    pub arch: BinaryArch,
+    pub(crate) arch: BinaryArch,
     /// Raw instruction bytes extracted from the executable section.
-    pub text_bytes: &'ctx [u8],
+    pub(crate) text_bytes: &'ctx [u8],
     /// Raw binary entry point.
-    pub entry_addr: u64,
+    pub(crate) entry_addr: u64,
     /// Parsed instruction list for the code section.
-    pub instructions: Arc<[InstructionInfo]>,
+    pub(crate) instructions: Arc<[InstructionInfo]>,
     /// The global NeedleIndex automaton for pattern matching.
-    pub needle: Arc<NeedleIndex>,
+    pub(crate) needle: Arc<NeedleIndex>,
 }
 
 /// Cached mapping representing a binary section's file offset boundaries.
@@ -217,9 +225,7 @@ pub struct SectionRange<'buf> {
 
 impl<'buf> SectionRange<'buf> {
     /// Builds a cached mapping of file offset boundaries for all sections in a parsed binary object.
-    pub fn build_map(
-        binary_object: &object::File<'buf, &'buf [u8]>,
-    ) -> crate::core::types::RbatResult<Vec<Self>> {
+    pub fn build_map(binary_object: &object::File<'buf, &'buf [u8]>) -> RbatResult<Vec<Self>> {
         use object::{Object, ObjectSection};
         let mut ranges = Vec::new();
         for section in binary_object.sections() {
@@ -261,14 +267,17 @@ pub struct CodeCaves {
 }
 
 impl CodeCaves {
+    /// Returns `true` if no code caves of any type were found.
     pub fn is_empty(&self) -> bool {
         self.nop_sleds.is_empty() && self.null_padding.is_empty() && self.trap_padding.is_empty()
     }
 
+    /// Returns the total count of cave addresses across all categories.
     pub fn total_caves(&self) -> usize {
         self.nop_sleds.len() + self.null_padding.len() + self.trap_padding.len()
     }
 
+    /// Alias for [`CodeCaves::total_caves`].
     pub fn len(&self) -> usize {
         self.total_caves()
     }
