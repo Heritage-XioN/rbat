@@ -1,23 +1,116 @@
 //! # Declarative Threat Detection Rules
 //!
-//! This module implements the `Rule` struct, nested logic conditions,
-//! rule evaluation, and embedded template loader.
+//! Provides declarative security rule definition, nested boolean logic conditions,
+//! two-tier fixpoint rule evaluation, and embedded asset loading compatible with the
+//! Mandiant `capa` rule specification.
+//!
+//! ## Core Types
+//!
+//! - [`Rule`]: Top-level security rule entity encapsulating metadata and evaluation conditions
+//! - [`RuleInner`]: Inner structure containing rule metadata ([`RuleMeta`]) and condition trees ([`RuleCondition`])
+//! - [`RuleMeta`]: Rule metadata including namespace, authors, MITRE ATT&CK techniques, and severity
+//! - [`RuleCondition`]: Untagged AST node representing boolean logic, feature assertions, and localized scopes
+//! - [`RuleTag`]: Pre-defined heuristic capability tags (code caves, packers, loops)
+//! - [`StringOrVec`]: Deserialization helper accepting either a scalar string or a string vector
+//!
+//! ## Overview
+//!
+//! Declarative rules allow analysts and automated pipelines to express malware capability
+//! signatures without hardcoding disassembly checks.
+//!
+//! - **Capa Specification Alignment**: Implements the Mandiant `capa` format across YAML,
+//!   JSON, and compiled MessagePack representations. Supports standard logic operators
+//!   (`and`, `or`, `not`), feature checks (`api`, `string`, `mnemonic`, `number`, `offset`),
+//!   and contextual scopes (`basic block`, `call`).
+//! - **Embedded Rule Assets**: Packages a pre-compiled MessagePack bundle providing instant
+//!   offline capability detection with zero runtime filesystem dependency.
+//! - **Two-Tier Partitioned Evaluation**: To optimize evaluation throughput and correctly
+//!   handle interdependent capability hierarchies:
+//!   1. *Pass 1 (Parallel Evaluation)*: Independent rules (without `match:` directives) are
+//!      evaluated concurrently across [`Rayon`] worker threads.
+//!   2. *Pass 2..N (Dependent Fixpoint)*: Dependent rules containing `match:` directives are
+//!      iteratively evaluated against the accumulating set of satisfied rules until no new
+//!      matches occur (fixpoint reached).
+//! - **Library Rule Exclusion**: Intermediary rules marked with `lib: true` participate in
+//!   dependency matching but are automatically excluded from the final reported findings.
+//!
+//! ## Examples
+//!
+//! ```rust
+//! use rbat::core::{
+//!   rule::Rule,
+//!   features::FeatureSet,
+//!   types::analysis::{AnalysisResult,SectionRange},
+//!   needle::NeedleIndex,
+//! };
+//!
+//! // Parse a custom YAML capability rule
+//! let rule_yaml = r#"
+//! rule:
+//!   meta:
+//!     name: create process suspended
+//!     namespace: host-interaction/process/create
+//!     severity: Medium
+//!   features:
+//!     - and:
+//!       - api: CreateProcessA
+//!       - number: 0x4 = CREATE_SUSPENDED
+//! "#;
+//!
+//! let rule = Rule::from_slice(rule_yaml.as_bytes()).unwrap();
+//! assert_eq!(rule.rule.meta.name, "create process suspended");
+//!
+//! // Evaluate rules against extracted binary features
+//! let rules = vec![rule];
+//! let result = AnalysisResult::default();
+//! let features = FeatureSet::from_analysis_result(&result);
+//! let needle = NeedleIndex::build_from_rules(&rules);
+//!
+//! let matches = Rule::evaluate(&features, &rules, &needle);
+//! println!("Matched {} rules", matches.len());
+//! ```
+//!
+//! [`Rayon`]: rayon
 
 use crate::core::disassembler::InstructionInfo;
 use crate::core::{
     features::FeatureSet,
-    types::{NeedleIndex, RbatError},
+    needle::NeedleIndex,
+    types::result::{RbatError, RbatResult},
 };
 use ahash::{AHashMap, AHashSet};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 
 /// Embedded capa rules message pack bytes
 const CAPA_RULES_MP: &[u8] = include_bytes!("../../assets/embedded_rules.mp");
 
-/// The unified top-level structure starting with the standard `rule:` key.
+/// Top-level declarative security rule entity adhering to the Mandiant `capa` specification.
+///
+/// Encapsulates metadata, classification tags, and conditional boolean expressions
+/// used to detect malicious or suspicious software capabilities within analyzed binaries.
+/// Rules can be parsed from YAML/JSON definitions, loaded from disk directories, or decoded
+/// from the embedded MessagePack bundle.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::rule::Rule;
+///
+/// let rule_yaml = r#"
+/// rule:
+///   meta:
+///     name: test capability
+///     severity: High
+///   features:
+///     - string: "cmd.exe"
+/// "#;
+///
+/// let rule = Rule::from_slice(rule_yaml.as_bytes()).unwrap();
+/// assert_eq!(rule.rule.meta.name, "test capability");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rule {
     /// The inner rule structure containing metadata and evaluation conditions.
@@ -25,8 +118,34 @@ pub struct Rule {
 }
 
 impl Rule {
-    /// Parses a Rule from raw bytes, supporting native JSON and YAML Capa rules.
-    pub fn from_slice(bytes: &[u8]) -> crate::core::types::RbatResult<Self> {
+    /// Parses a rule from raw bytes, supporting both YAML and JSON Capa rule definitions.
+    ///
+    /// The parser attempts YAML deserialization first, falling back to JSON. Upon successful
+    /// deserialization, the condition tree is sanitized to remove inline descriptions and
+    /// prune empty boolean expressions.
+    ///
+    /// # Parameters
+    ///
+    /// - `bytes`: Raw UTF-8 byte slice of the rule document.
+    ///
+    /// # Returns
+    ///
+    /// Returns the parsed and sanitized [`Rule`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RbatError::RuleError`] if deserialization fails for both YAML and JSON parsers.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::rule::Rule;
+    ///
+    /// let yaml = b"rule:\n  meta:\n    name: test rule\n  features:\n    - string: evil\n";
+    /// let rule = Rule::from_slice(yaml).unwrap();
+    /// assert_eq!(rule.rule.meta.name, "test rule");
+    /// ```
+    pub fn from_slice(bytes: &[u8]) -> RbatResult<Self> {
         let mut rule_var = if let Ok(rule) = yaml_serde::from_slice::<Rule>(bytes) {
             rule
         } else {
@@ -42,12 +161,53 @@ impl Rule {
         Ok(rule_var)
     }
 
-    /// Evaluates if the feature set matches this rule's conditions given previously matched rule dependencies.
+    /// Evaluates whether the extracted features satisfy this rule's conditions given previously matched rules.
+    ///
+    /// # Parameters
+    ///
+    /// - [`features`]: Extracted binary features from disassembler and structural analyzers.
+    /// - [`needle`]: Precomputed literal substring search index.
+    /// - `matched_rules`: Set of previously matched rule names used to resolve `match:` conditions.
+    ///
+    /// # Returns
+    ///
+    /// `true` if all top-level conditions in this rule are satisfied; otherwise `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   rule::Rule,
+    ///   features::FeatureSet,
+    ///   types::analysis::{AnalysisResult,SectionRange},
+    ///   needle::NeedleIndex,
+    /// };
+    /// use ahash::AHashSet;
+    ///
+    /// let rule_yaml = r#"
+    /// rule:
+    ///   meta:
+    ///     name: basic rule
+    ///   features:
+    ///     - string: "evil_function"
+    /// "#;
+    /// let rule = Rule::from_slice(rule_yaml.as_bytes()).unwrap();
+    /// let rules = vec![rule.clone()];
+    /// let result = AnalysisResult::default();
+    /// let features = FeatureSet::from_analysis_result(&result);
+    /// let needle = NeedleIndex::build_from_rules(&rules);
+    /// let matched_rules = AHashSet::new();
+    ///
+    /// assert!(!rule.matches(&features, &needle, &matched_rules));
+    /// ```
+    ///
+    /// [`features`]: FeatureSet
+    /// [`needle`]: NeedleIndex
     pub fn matches(
         &self,
         features: &FeatureSet,
-        needle: &crate::core::types::NeedleIndex,
-        matched_rules: &ahash::AHashSet<&str>,
+        needle: &NeedleIndex,
+        matched_rules: &AHashSet<&str>,
     ) -> bool {
         self.rule
             .features
@@ -55,30 +215,103 @@ impl Rule {
             .all(|c| c.matches(features, needle, matched_rules))
     }
 
-    /// Returns true if this rule contains any `match:` rule dependencies.
+    /// Returns `true` if this rule directly or recursively contains a `match:` rule dependency.
+    ///
+    /// Used by [`Rule::evaluate`] to partition rules into independent rules (evaluated in parallel
+    /// during Pass 1) and dependent rules (evaluated iteratively during Pass 2..N).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::rule::Rule;
+    ///
+    /// let rule_yaml = r#"
+    /// rule:
+    ///   meta:
+    ///     name: dependent rule
+    ///   features:
+    ///     - match: host-interaction/process/create
+    /// "#;
+    /// let rule = Rule::from_slice(rule_yaml.as_bytes()).unwrap();
+    /// assert!(rule.has_match_dependency());
+    /// ```
     pub fn has_match_dependency(&self) -> bool {
         self.rule.features.iter().any(|c| c.has_match_dependency())
     }
 
     /// Loads all embedded Capa rules from the pre-compiled MessagePack bundle.
+    ///
+    /// Decodes the pre-compiled asset. If decoding fails, logs a warning
+    /// to stderr and returns an empty vector without panicking.
+    ///
+    /// # Returns
+    ///
+    /// A vector of parsed embedded [`Rule`] instances.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::rule::Rule;
+    ///
+    /// let rules = Rule::load_embedded();
+    /// assert!(!rules.is_empty());
+    /// ```
     pub fn load_embedded() -> Vec<Self> {
-        match rmp_serde::from_slice::<Vec<Rule>>(CAPA_RULES_MP) {
-            Ok(rules) => return rules,
-            Err(e) => eprintln!("Warning: Failed to decode pre-compiled rules: {e}"),
-        }
-        Vec::new()
+        rmp_serde::from_slice::<Vec<Rule>>(CAPA_RULES_MP).unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to decode pre-compiled rules: {e}");
+            Vec::new()
+        })
     }
 
-    pub fn extend(path: &Option<PathBuf>) -> Vec<Self> {
+    /// Loads the embedded Capa rules and merges additional custom rules from a directory.
+    ///
+    /// Reads and deserializes all custom YAML and JSON rules from `path` recursively,
+    /// appending them to the embedded rule set.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Path to a filesystem directory containing custom `.json`, `.yaml`, or `.yml` rules.
+    ///
+    /// # Returns
+    ///
+    /// A vector containing both embedded and custom [`Rule`] instances.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rbat::core::rule::Rule;
+    ///
+    /// let rules = Rule::extend("path/to/custom/rules");
+    /// assert!(!rules.is_empty());
+    /// ```
+    pub fn extend<P: AsRef<Path>>(path: P) -> Vec<Self> {
         let mut rules = Self::load_embedded();
-        if let Some(rules_dir) = path {
-            let custom_rules = Rule::load_from_directory(rules_dir);
-            rules.extend(custom_rules);
-        }
+        let custom_rules = Rule::load_from_directory(path.as_ref());
+        rules.extend(custom_rules);
         rules
     }
 
-    /// Loads custom JSON and YAML rules from a directory on the local filesystem.
+    /// Loads custom JSON and YAML rules recursively from a directory on the local filesystem.
+    ///
+    /// Recursively scans `dir`, skipping hidden files/directories (names beginning with `.`),
+    /// and deserializes all files ending with `.json`, `.yaml`, or `.yml`.
+    ///
+    /// # Parameters
+    ///
+    /// - `dir`: Directory path to inspect for rule definitions.
+    ///
+    /// # Returns
+    ///
+    /// A vector of parsed [`Rule`] instances.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use std::path::Path;
+    /// use rbat::core::rule::Rule;
+    ///
+    /// let rules = Rule::load_from_directory(Path::new("path/to/rules"));
+    /// ```
     pub fn load_from_directory(dir: &std::path::Path) -> Vec<Self> {
         let mut rules = Vec::new();
         Self::load_from_directory_recursive(dir, &mut rules);
@@ -113,14 +346,61 @@ impl Rule {
         }
     }
 
-    /// Evaluates a set of rules against the feature set and returns matching rule metadata.
-    /// Uses two-tier partitioned evaluation:
-    /// 1. Evaluates all independent rules (no `match:` dependency) once in parallel via Rayon.
-    /// 2. Iteratively evaluates only the remaining dependent rules until fixpoint.
+    /// Evaluates candidate rules against extracted binary features using two-tier partitioned fixpoint iteration.
+    ///
+    /// # Evaluation Strategy
+    ///
+    /// 1. **Pass 1 (Parallel Independent Evaluation)**: Rules without `match:` dependencies are evaluated
+    ///    concurrently in parallel via [`rayon`]. Satisfied rule names are gathered into a matched set.
+    /// 2. **Pass 2..N (Iterative Dependent Fixpoint)**: Remaining rules containing `match:` dependencies
+    ///    are evaluated against the accumulated matched set. The loop continues until no new rules match.
+    /// 3. **Library Filtering**: Any rule marked with `lib: true` is treated strictly as an intermediate
+    ///    dependency and excluded from the returned metadata.
+    ///
+    /// # Parameters
+    ///
+    /// - [`features`]: Extracted binary features from control-flow graphs, imports, and metadata.
+    /// - [`rules`]: Slice of candidate security rules to evaluate.
+    /// - [`needle`]: Precomputed literal search index for fast substring/mnemonic filtering.
+    ///
+    /// # Returns
+    ///
+    /// A vector of references to [`RuleMeta`] for all matching standalone rules.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   rule::Rule,
+    ///   features::FeatureSet,
+    ///   types::analysis::{AnalysisResult,SectionRange},
+    ///   needle::NeedleIndex,
+    /// };
+    ///
+    /// let rule_yaml = r#"
+    /// rule:
+    ///   meta:
+    ///     name: sample rule
+    ///   features:
+    ///     - string: "target_string"
+    /// "#;
+    /// let rule = Rule::from_slice(rule_yaml.as_bytes()).unwrap();
+    /// let rules = vec![rule];
+    /// let result = AnalysisResult::default();
+    /// let features = FeatureSet::from_analysis_result(&result);
+    /// let needle = NeedleIndex::build_from_rules(&rules);
+    ///
+    /// let matches = Rule::evaluate(&features, &rules, &needle);
+    /// assert!(matches.is_empty());
+    /// ```
+    ///
+    /// [`features`]: FeatureSet
+    /// [`needle`]: NeedleIndex
+    /// [`rules`]: Rule
     pub fn evaluate<'rule>(
         features: &FeatureSet,
         rules: &'rule [Self],
-        needle: &crate::core::types::NeedleIndex,
+        needle: &NeedleIndex,
     ) -> Vec<&'rule RuleMeta> {
         let mut matched_names: ahash::AHashSet<&str> = ahash::AHashSet::new();
         let mut matched_indices: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
@@ -172,12 +452,14 @@ impl Rule {
     }
 }
 
-/// The inner structure of the rules struct containing rule metadata and feature triggers.
+/// Core contents of a security rule encapsulating metadata and condition trees.
+///
+/// Corresponds to the mapping under the root `rule:` key in a capa YAML or JSON rule definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleInner {
-    /// The rule metadata.
+    /// Associated rule metadata, scope annotations, and technique mappings.
     pub meta: RuleMeta,
-    /// The condition tree/features to evaluate.
+    /// Boolean condition tree of feature assertions that determine a match.
     pub features: Vec<RuleCondition>,
 }
 
@@ -387,7 +669,7 @@ impl RuleCondition {
     }
 
     /// Recursively sanitizes the condition tree to remove informational description-only nodes.
-    pub fn sanitize(self) -> Option<Self> {
+    fn sanitize(self) -> Option<Self> {
         match self {
             Self::And { and } => {
                 let sanitized: Vec<RuleCondition> =
@@ -530,7 +812,7 @@ impl RuleCondition {
     }
 
     /// Recursively evaluates the condition against the feature set and previously matched rule dependencies.
-    pub fn matches(
+    fn matches(
         &self,
         features: &FeatureSet,
         needle: &NeedleIndex,
@@ -697,15 +979,13 @@ impl RuleCondition {
                 }
                 _ => false,
             },
-            // this represents a catch all condition for the features
-            // that are currently unhandled or supported
-            Self::Other(_) => false,
+            // Catch-all for currently unhandled or unsupported conditions.
             _ => false,
         }
     }
 
     /// Evaluates the condition directly against a single instruction via the pre-computed NeedleIndex match set.
-    pub fn matches_instruction(&self, insn: &InstructionInfo, needle: &NeedleIndex) -> bool {
+    fn matches_instruction(&self, insn: &InstructionInfo, needle: &NeedleIndex) -> bool {
         match self {
             Self::And { and } => and.iter().all(|c| c.matches_instruction(insn, needle)),
             Self::Or { or } => or.iter().any(|c| c.matches_instruction(insn, needle)),
@@ -737,13 +1017,12 @@ impl RuleCondition {
                 };
                 actual >= *count
             }
-            Self::Other(_) => false,
             _ => false,
         }
     }
 
     /// Evaluates the condition directly against a basic block via the pre-computed NeedleIndex match sets.
-    pub fn matches_block(&self, instructions: &[InstructionInfo], needle: &NeedleIndex) -> bool {
+    fn matches_block(&self, instructions: &[InstructionInfo], needle: &NeedleIndex) -> bool {
         match self {
             Self::And { and } => and.iter().all(|c| c.matches_block(instructions, needle)),
             Self::Or { or } => or.iter().any(|c| c.matches_block(instructions, needle)),
@@ -787,13 +1066,12 @@ impl RuleCondition {
                 }
                 actual >= *count
             }
-            Self::Other(_) => false,
             _ => false,
         }
     }
 
     /// Checks if the condition has a chance of matching based on globally present NeedleIndex patterns.
-    pub fn is_present(&self, needle: &NeedleIndex) -> bool {
+    fn is_present(&self, needle: &NeedleIndex) -> bool {
         match self {
             Self::And { and } => and.iter().all(|c| c.is_present(needle)),
             Self::Or { or } => or.iter().any(|c| c.is_present(needle)),
@@ -818,13 +1096,12 @@ impl RuleCondition {
                 .get(number)
                 .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed)),
             Self::Count { condition, .. } => condition.is_present(needle),
-            Self::Other(_) => true,
             _ => true,
         }
     }
 
     /// Returns true if this condition tree contains any `match:` rule dependencies.
-    pub fn has_match_dependency(&self) -> bool {
+    fn has_match_dependency(&self) -> bool {
         match self {
             Self::Match { .. } => true,
             Self::And { and } => and.iter().any(|c| c.has_match_dependency()),
@@ -851,19 +1128,38 @@ pub enum RuleTag {
     Loop,
 }
 
-/// Helper enum to deserialize either a single String or a `Vec<String>` from Serde
+/// Helper enum to deserialize either a single string scalar or a list of strings from Serde.
+///
+/// Many capa metadata fields (such as `authors`, `att&ck`, or `mbc`) permit either a single
+/// string value (e.g. `author: "mandiant"`) or an array of strings (e.g. `author: ["mandiant", "analyst"]`).
+/// `StringOrVec` transparently deserializes both forms into a unified representation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum StringOrVec {
-    /// Single string value.
+    /// Single string scalar.
     Single(String),
-    /// List of string values.
+    /// Vector of strings.
     List(Vec<String>),
 }
 
 impl StringOrVec {
-    /// Returns the contents as a `Vec<String>`.
-    pub fn as_vec(&self) -> Vec<String> {
+    /// Returns the wrapped values as a `Vec<String>`.
+    ///
+    /// If `self` is [`StringOrVec::Single`], wraps the scalar in a single-element vector.
+    /// If `self` is [`StringOrVec::List`], clones the inner vector.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::rule::StringOrVec;
+    ///
+    /// let single = StringOrVec::Single("persistence".into());
+    /// assert_eq!(single.to_vec(), vec!["persistence"]);
+    ///
+    /// let list = StringOrVec::List(vec!["discovery".into(), "lateral-movement".into()]);
+    /// assert_eq!(list.to_vec(), vec!["discovery", "lateral-movement"]);
+    /// ```
+    pub(crate) fn to_vec(&self) -> Vec<String> {
         match self {
             Self::Single(s) => vec![s.clone()],
             Self::List(v) => v.clone(),
@@ -872,7 +1168,7 @@ impl StringOrVec {
 
     /// Extracts a MITRE ATT&CK technique ID from a single formatted string such as
     /// `"Execution::Command Shell [T1059.003]"` or raw `"T1059.003"`.
-    pub fn extract_mitre_id_from(entry: &str) -> String {
+    pub(crate) fn extract_mitre_id_from(entry: &str) -> String {
         if let Some(start) = entry.find('[')
             && let Some(end) = entry[start..].find(']')
         {
@@ -882,7 +1178,7 @@ impl StringOrVec {
     }
 
     /// Parses threshold count values (e.g. `"2 or more"`, `3`, or raw integers) from rule condition properties.
-    pub fn parse_count_threshold(val: &serde_json::Value) -> usize {
+    fn parse_count_threshold(val: &serde_json::Value) -> usize {
         if let Some(n) = val.as_u64() {
             return n as usize;
         }
@@ -901,7 +1197,7 @@ impl StringOrVec {
     }
 
     /// Parses number constraints (e.g. `"1 = HANDLE_FLAG_INHERIT"`, `-1`, or raw integers) from rule condition constants.
-    pub fn parse_number_constant(val: &serde_json::Value) -> String {
+    fn parse_number_constant(val: &serde_json::Value) -> String {
         if let Some(n) = val.as_u64() {
             return n.to_string();
         }
@@ -929,6 +1225,7 @@ mod tests {
     use crate::core::{
         cfg::{BasicBlock, ControlFlowGraph},
         disassembler::InstructionInfo,
+        needle::NeedleIndex,
     };
 
     use super::*;
@@ -991,7 +1288,7 @@ mod tests {
         };
 
         let rules = vec![rule_api, rule_entropy];
-        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::build_from_rules(&rules);
         let matches = Rule::evaluate(&features, &rules, &needle);
 
         assert_eq!(matches.len(), 2);
@@ -1082,7 +1379,7 @@ mod tests {
         };
 
         let rules = vec![rule_cfg, rule_scope];
-        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::build_from_rules(&rules);
 
         // Manually populate matched sets since we bypass CFG in this test
         for insn in insns.iter_mut() {
@@ -1145,7 +1442,7 @@ mod tests {
         let rule_elf = RuleCondition::Format {
             format: "elf".to_owned(),
         };
-        let needle = crate::core::types::NeedleIndex::build_from_rules(&[]);
+        let needle = NeedleIndex::build_from_rules(&[]);
 
         let empty_set = ahash::AHashSet::new();
         assert!(rule_pe.matches(&features, &needle, &empty_set));
@@ -1187,7 +1484,7 @@ mod tests {
         };
 
         let rules = vec![consumer_rule, lib_rule];
-        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::build_from_rules(&rules);
 
         let empty_entropy = AHashMap::new();
         let mut api_pattern = None;
@@ -1240,7 +1537,7 @@ mod tests {
         };
 
         let rules = vec![rule_count];
-        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::build_from_rules(&rules);
         let alloc_id = *needle.lookup.get("VirtualAlloc").unwrap();
 
         let mut insn1 = InstructionInfo {
@@ -1322,7 +1619,7 @@ mod tests {
         };
 
         let rules = vec![rule_short, rule_long];
-        let needle = crate::core::types::NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::build_from_rules(&rules);
 
         let insn = InstructionInfo {
             address: 0x1000,
