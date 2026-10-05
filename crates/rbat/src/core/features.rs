@@ -1,11 +1,48 @@
 //! # Structural Feature Extraction
 //!
-//! This module implements the `FeatureSet` structure which extracts and flattens
-//! binary analysis results into fast-lookup sets and maps for rule evaluation.
+//! Flattens and normalizes raw static binary analysis findings into structured,
+//! high-speed lookup sets for capa behavioral rule evaluation.
+//!
+//! ## Core Types
+//!
+//! - [`FeatureSet`]: Normalized container of APIs, strings, section entropies, and CFG metrics.
+//!
+//! ## Overview
+//!
+//! Feature extraction bridges raw disassembler, parser, and plugin outputs to the declarative
+//! rule evaluation engine (`Rule::evaluate`). Extraction proceeds through several coordinated stages:
+//!
+//! 1. **FLIRT Library Range Filtering**: Discovers compiler runtime and standard library functions
+//!    (e.g., libc, MSVCRT) and traces their address ranges. Basic blocks falling within library
+//!    boundaries are excluded from rule evaluation to prevent false-positive capability matches on
+//!    standard library code.
+//! 2. **Interval Compaction**: Sorts and compacts identified library ranges with [`FeatureSet::merge_ranges`]
+//!    to enable $O(\log K)$ partition-point binary searches per basic block.
+//! 3. **API & String Normalization**: Flattens imported and exported APIs into Aho-Corasick [`PatternID`]
+//!    sets, and extracts lowercased string literals discovered across binary data sections.
+//! 4. **Graph Topometrics & Complexity**: Constructs an adjacency graph over non-library basic blocks,
+//!    deduplicates parallel edges, detects execution loops using an iterative 3-state DFS
+//!    ([`FeatureSet::has_cycle`]), and calculates McCabe cyclomatic complexity per weakly connected
+//!    component ([`FeatureSet::max_cyclomatic_complexity`]).
+//!
+//! ## Examples
+//!
+//! Extracting a `FeatureSet` from aggregated analysis results:
+//!
+//! ```rust
+//! use rbat::core::features::FeatureSet;
+//! use rbat::core::types::analysis::AnalysisResult;
+//!
+//! let result = AnalysisResult::default();
+//! let features = FeatureSet::from_analysis_result(&result);
+//!
+//! assert_eq!(features.basic_blocks_count, 0);
+//! assert!(!features.has_loop);
+//! ```
 
 use crate::core::{
     cfg::BasicBlock, disassembler::InstructionInfo, flirt::FlirtMatcher, parser::BinaryArch,
-    types::AnalysisResult,
+    types::analysis::AnalysisResult,
 };
 use ahash::{AHashMap, AHashSet, HashMapExt, HashSetExt};
 use aho_corasick::PatternID;
@@ -14,42 +51,86 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::sync::Arc;
 
+/// this type represents the adjacency vector.
 type Adj = Vec<SmallVec<[u32; 2]>>;
 
-/// Collected metrics and indicators extracted from the binary for rule evaluation.
+/// Collected metrics, symbols, and structural indicators extracted from an analyzed binary.
+///
+/// `FeatureSet` organizes binary characteristics into pre-indexed sets and normalized metrics
+/// tailored for high-speed evaluation against capa rule syntax trees:
+/// - Imports and exports are pre-mapped into Aho-Corasick [`PatternID`] sets for $O(1)$ presence testing.
+/// - Matched string constants are lowercased and deduplicated.
+/// - Basic blocks are filtered to exclude statically-linked standard library functions identified via FLIRT.
+/// - Control flow graph topologies are characterized by block count, loop presence, and maximum McCabe
+///   cyclomatic complexity across weakly connected components.
+///
+/// # Lifetime
+///
+/// The `'buf` lifetime binds section entropy maps and basic block references to the lifetime of
+/// the source [`AnalysisResult`].
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::features::FeatureSet;
+/// use rbat::core::types::analysis::AnalysisResult;
+///
+/// let result = AnalysisResult::default();
+/// let features = FeatureSet::from_analysis_result(&result);
+/// assert_eq!(features.max_cyclomatic_complexity, 0);
+/// ```
 #[derive(Debug, Clone)]
 pub struct FeatureSet<'buf> {
     /// Mapped API imports and suspicious dynamic symbol links.
-    pub apis: FxHashSet<PatternID>,
+    pub(crate) apis: FxHashSet<PatternID>,
     /// Mapped string constants.
-    pub strings: AHashSet<String>,
+    pub(crate) strings: AHashSet<String>,
     /// Section Shannon entropies.
-    pub section_entropies: &'buf AHashMap<&'buf str, f64>,
+    pub(crate) section_entropies: &'buf AHashMap<&'buf str, f64>,
     /// Whether any code caves (NOP/zero/trap runs) were mapped.
-    pub has_code_cave: bool,
+    pub(crate) has_code_cave: bool,
     /// Whether any packer/crypter signature was matched.
-    pub has_packer_sig: bool,
+    pub(crate) has_packer_sig: bool,
     /// Mapped target OS string.
-    pub os: String,
+    pub(crate) os: String,
     /// Mapped CPU architecture string.
-    pub arch: String,
+    pub(crate) arch: String,
     /// Canonical binary format identifier (`pe`, `elf`, or `macho`).
-    pub binary_format: String,
+    pub(crate) binary_format: String,
     // CFG structural fields
     /// The total count of basic blocks.
-    pub basic_blocks_count: usize,
+    pub(crate) basic_blocks_count: usize,
     /// Indicates if a loop structure was detected.
-    pub has_loop: bool,
+    pub(crate) has_loop: bool,
     /// The maximum cyclomatic complexity across blocks.
-    pub max_cyclomatic_complexity: usize,
+    pub(crate) max_cyclomatic_complexity: usize,
     /// A list of references to the basic blocks.
-    pub blocks: Vec<&'buf BasicBlock>,
+    pub(crate) blocks: Vec<&'buf BasicBlock>,
     /// Shared backing instructions for CFG basic block inspection.
-    pub cfg_instructions: Arc<[InstructionInfo]>,
+    pub(crate) cfg_instructions: Arc<[InstructionInfo]>,
 }
 
 impl<'buf> FeatureSet<'buf> {
     /// Populates a `FeatureSet` from the aggregate analysis findings.
+    ///
+    /// Executes the multi-stage extraction pipeline:
+    /// 1. Determines architecture and discovers FLIRT library function boundaries.
+    /// 2. Sorts and merges overlapping library ranges to filter out library basic blocks.
+    /// 3. Normalizes imports and exports into Aho-Corasick [`PatternID`] search sets.
+    /// 4. Collects and lowercases matched YARA string values.
+    /// 5. Filters non-library blocks, builds an adjacency graph, collapses parallel edges,
+    ///    detects loops via DFS, and computes maximum McCabe cyclomatic complexity.
+    /// 6. Normalizes target OS, architecture, and binary format strings.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::features::FeatureSet;
+    /// use rbat::core::types::analysis::AnalysisResult;
+    ///
+    /// let res = AnalysisResult::default();
+    /// let features = FeatureSet::from_analysis_result(&res);
+    /// ```
     pub fn from_analysis_result(res: &'buf AnalysisResult<'buf>) -> Self {
         let arch_name = res.metadata.architecture_name();
 
@@ -168,7 +249,7 @@ impl<'buf> FeatureSet<'buf> {
             has_code_cave: !res.code_cave.is_empty(),
             has_packer_sig: !res.packer_signatures.is_empty(),
             os: binary_type,
-            arch: res.metadata.architecture_name().to_lowercase(),
+            arch: arch_name.to_lowercase(),
             binary_format: binary_format.to_string(),
             basic_blocks_count: blocks.len(),
             has_loop,
@@ -182,7 +263,26 @@ impl<'buf> FeatureSet<'buf> {
         }
     }
 
-    /// Sorts and merges overlapping ranges
+    /// Sorts and merges overlapping or contiguous address ranges.
+    ///
+    /// Takes an unsorted vector of `(start, end)` virtual memory address intervals,
+    /// sorts them in ascending order, and merges overlapping or adjacent intervals
+    /// into a compacted, strictly ascending list of disjoint ranges in $O(N \log N)$ time.
+    ///
+    /// # Invariants
+    ///
+    /// Returns a list of ranges where for all `i`: `merged[i].0 <= merged[i].1` and
+    /// `merged[i].1 < merged[i + 1].0`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::features::FeatureSet;
+    ///
+    /// let ranges = vec![(0x1000, 0x1050), (0x1040, 0x1100), (0x2000, 0x2050)];
+    /// let merged = FeatureSet::merge_ranges(ranges);
+    /// assert_eq!(merged, vec![(0x1000, 0x1100), (0x2000, 0x2050)]);
+    /// ```
     pub fn merge_ranges(mut ranges: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
         ranges.sort_unstable();
         let mut merged: Vec<(u64, u64)> = Vec::with_capacity(ranges.len());
@@ -195,9 +295,31 @@ impl<'buf> FeatureSet<'buf> {
         merged
     }
 
-    /// Iterative 3-state DFS with a per-node edge cursor.
-    /// Returns true if the graph contains a cycle (a self-loop counts).
-    pub fn has_cycle(adj: &[SmallVec<[u32; 2]>]) -> bool {
+    /// Detects execution loops in an adjacency graph using an iterative 3-state DFS.
+    ///
+    /// Explores graph nodes using explicit depth-first search states:
+    /// - `0`: Unvisited node.
+    /// - `1`: Visiting / on recursion stack. Encountering a node in this state indicates a back-edge (cycle).
+    /// - `2`: Visited and fully explored.
+    ///
+    /// Uses an explicit edge cursor array instead of call-stack recursion to guarantee
+    /// safety against stack overflows on deeply nested or recursive CFGs.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::features::FeatureSet;
+    /// use smallvec::smallvec;
+    ///
+    /// // Acyclic DAG: 0 -> 1 -> 2
+    /// let dag = vec![smallvec![1], smallvec![2], smallvec![]];
+    /// assert!(!FeatureSet::has_cycle(&dag));
+    ///
+    /// // Cyclic graph: 0 -> 1 -> 0
+    /// let cycle = vec![smallvec![1], smallvec![0]];
+    /// assert!(FeatureSet::has_cycle(&cycle));
+    /// ```
+    pub fn has_cycle(adj: &Adj) -> bool {
         let n = adj.len();
         let mut state = vec![0u8; n]; // 0 = unvisited, 1 = on stack, 2 = done
         let mut cursor = vec![0usize; n];
@@ -232,8 +354,30 @@ impl<'buf> FeatureSet<'buf> {
         false
     }
 
-    /// Max McCabe complexity (E - N + 2) across weakly connected components.
-    pub fn max_cyclomatic_complexity(adj: &[SmallVec<[u32; 2]>]) -> usize {
+    /// Computes the maximum McCabe cyclomatic complexity across weakly connected components.
+    ///
+    /// Partitions the graph into weakly connected components using [`UnionFind`], counts the
+    /// number of nodes $N$ and edges $E$ per component, and calculates:
+    ///
+    /// $$M = E - N + 2$$
+    ///
+    /// Clamped to a minimum of 1. Returns the maximum score across all components in the graph.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::features::FeatureSet;
+    /// use smallvec::smallvec;
+    ///
+    /// // Linear sequence (1 decision path): E=2, N=3 => M = 2 - 3 + 2 = 1
+    /// let linear = vec![smallvec![1], smallvec![2], smallvec![]];
+    /// assert_eq!(FeatureSet::max_cyclomatic_complexity(&linear), 1);
+    ///
+    /// // Branching diamond (2 decision paths): E=4, N=4 => M = 4 - 4 + 2 = 2
+    /// let branch = vec![smallvec![1, 2], smallvec![3], smallvec![3], smallvec![]];
+    /// assert_eq!(FeatureSet::max_cyclomatic_complexity(&branch), 2);
+    /// ```
+    pub fn max_cyclomatic_complexity(adj: &Adj) -> usize {
         let n = adj.len();
         let mut uf = UnionFind::new(n);
         for (s, succs) in adj.iter().enumerate() {
@@ -264,7 +408,7 @@ mod tests {
     use super::*;
     use crate::core::{
         cfg::InstructionClass, disassembler::InstructionInfo, parser::BinaryArch,
-        types::AnalysisResult, yarahandler::YaraMatches,
+        types::analysis::AnalysisResult, yarahandler::YaraMatches,
     };
 
     #[test]
@@ -288,7 +432,7 @@ mod tests {
         res.section_entropy.insert(".text", 6.8);
 
         // Setup Code Cave
-        res.code_cave.insert("nop_addr", vec![2000, 2001]);
+        res.code_cave.nop_sleds = vec![2000, 2001];
 
         // simulate packer match
         res.packer_signatures.insert("UPX", vec![]);
