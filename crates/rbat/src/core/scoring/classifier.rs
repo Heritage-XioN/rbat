@@ -1,21 +1,102 @@
-//! # Risk Scoring and Severity Classification Engine
+//! # Threat Severity Classification Engine
 //!
-//! Maps matched capa rules to [`SeverityClass`] values and aggregates findings into a single
-//! risk score using **noisy-OR probabilistic combination**:
+//! Maps matched security and capability rules to discrete [`SeverityClass`] tiers for risk
+//! scoring and presentation.
 //!
-//! ```text
-//! score = 100 · (1 − Π (1 − pᵢ))
+//! The classification engine translates raw rule detections—spanning compiler artifacts, standard
+//! OS capabilities, suspicious behaviors, and aggressive malware techniques—into normalized threat
+//! severities. These severities directly feed the probabilistic [`risk`] aggregation engine.
+//!
+//! ## Core Types
+//!
+//! - [`SeverityClass`]: Behavioral severity classification tier (`Informational`, `Capability`, `Low`, `Medium`, `High`, `Critical`).
+//! - [`SeverityClassifier`]: Classification engine combining embedded defaults, TOML overrides, and heuristic inference.
+//!
+//! ## Decision Priority Cascade
+//!
+//! Classification follows a strict four-stage priority cascade:
+//!
+//! 1. **Explicit Rule Metadata**: If the rule explicitly specifies a `severity` field in its
+//!    metadata (e.g., `severity: "critical"`), that value takes precedence.
+//! 2. **Per-Rule TOML Overrides**: If the rule name exists in the active overrides table
+//!    (loaded from `capa-overrides.toml` or customized via [`SeverityClassifier::extend`]), its
+//!    configured severity is assigned.
+//! 3. **Namespace-Root Defaults**: If the root prefix of the rule's namespace matches a configured
+//!    namespace default (e.g., `compiler/*` or `runtime/*`), the namespace tier is assigned.
+//! 4. **Heuristic Inference**: If no explicit or configuration match exists, the classifier inspects
+//!    MITRE ATT&CK tactic mappings, Malware Behavior Catalog (MBC) objectives, and anti-analysis
+//!    heuristics:
+//!    - **Anti-Analysis**: Rules matching `anti-analysis` namespaces or MBC objectives are classified as [`SeverityClass::High`].
+//!    - **High-Threat Tactics**: Rules mapped to tactics like `defense_evasion`, `privilege_escalation`,
+//!      `credential_access`, `impact`, `collection`, `exfiltration`, or `lateral_movement` are classified as [`SeverityClass::High`].
+//!    - **Medium-Threat Tactics**: Rules mapped to `persistence`, `command_and_control`, or `execution`
+//!      are classified as [`SeverityClass::Medium`].
+//!    - **Fallback**: All other unmapped rules default to [`SeverityClass::Low`].
+//!
+//! ## Neutral Cryptographic Primitive Demotion
+//!
+//! Legitimate modern software ubiquitously employs cryptographic primitives for compression,
+//! telemetry, TLS communications, and integrity checks (e.g., hardware AES-NI or SHA instruction sets).
+//! In standard ATT&CK mappings, obfuscated code and encrypted payloads map to Defense Evasion (T1027/T1140).
+//!
+//! To prevent false positives in benign binaries:
+//! - When a rule resides under the `data-manipulation` namespace root,
+//! - Has purely cryptographic MBC objectives (`cryptography::*`), and
+//! - Maps exclusively to `defense_evasion` without other hostile tactics,
+//!
+//! the classifier demotes the finding to [`SeverityClass::Low`], preventing it from artificially
+//! inflating the malicious risk score.
+//!
+//! ## Probability Weights
+//!
+//! Each [`SeverityClass`] corresponds to a calibrated probability mass used by the noisy-OR
+//! risk calculation:
+//!
+//! | Severity Class | Base Probability ($p_i$) | Indication / Intent |
+//! | :--- | :--- | :--- |
+//! | [`SeverityClass::Informational`] | `0.00` | Non-behavioral build/compiler artifact |
+//! | [`SeverityClass::Capability`] | `0.00` | Benign OS capability (threads, sockets, files) |
+//! | [`SeverityClass::Low`] | `0.02` | Weak threat indicator with high FP potential |
+//! | [`SeverityClass::Medium`] | `0.08` | Notable indicator of potentially hostile behavior |
+//! | [`SeverityClass::High`] | `0.25` | Strong indicator of hostile behavior (evasion, priv-esc) |
+//! | [`SeverityClass::Critical`] | `0.40` | Direct indicator of active evasion or hijacking |
+//!
+//! ## Examples
+//!
+//! ```rust
+//! use rbat::core::{
+//!   rule::RuleMeta,
+//!   scoring::classifier::{SeverityClass, SeverityClassifier},
+//! };
+//!
+//! let classifier = SeverityClassifier::embedded();
+//!
+//! let rule_meta = RuleMeta {
+//!     name: "create process suspended".to_string(),
+//!     namespace: Some("process/creation".to_string()),
+//!     ..Default::default()
+//! };
+//!
+//! let severity = classifier.classify(&rule_meta);
+//! assert!(matches!(
+//!     severity,
+//!     SeverityClass::Capability
+//!         | SeverityClass::Low
+//!         | SeverityClass::Medium
+//!         | SeverityClass::High
+//!         | SeverityClass::Critical
+//! ));
 //! ```
 //!
-//! where `pᵢ` is the per-finding probability derived from its [`SeverityClass`].
-//! Classification honors explicit rule severities, TOML override tables, namespace defaults,
-//! and built-in ATT&CK/MBC inference.
+//! [`risk`]: crate::core::scoring::risk
 
-use crate::core::rule::RuleMeta;
-use crate::core::types::{RbatError, RbatResult};
+use crate::core::{
+    rule::RuleMeta,
+    types::result::{RbatError, RbatResult},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Embedded default override table shipped with the binary.
 const EMBEDDED_OVERRIDES: &str = include_str!("../../../assets/capa-overrides.toml");
@@ -59,10 +140,13 @@ const NEUTRAL_CRYPTO_OBJECTIVE: &str = "cryptography";
 /// Namespace root under which neutral cryptographic primitive rules live.
 const CRYPTO_NAMESPACE_ROOT: &str = "data-manipulation";
 
-/// Noisy-OR probability weights per non-neutral [`SeverityClass`].
+/// Base noisy-OR probability weight (`0.02`) for [`SeverityClass::Low`] findings.
 pub const LOW_PROBABILITY: f64 = 0.02;
+/// Base noisy-OR probability weight (`0.08`) for [`SeverityClass::Medium`] findings.
 pub const MEDIUM_PROBABILITY: f64 = 0.08;
+/// Base noisy-OR probability weight (`0.25`) for [`SeverityClass::High`] findings.
 pub const HIGH_PROBABILITY: f64 = 0.25;
+/// Base noisy-OR probability weight (`0.40`) for [`SeverityClass::Critical`] findings.
 pub const CRITICAL_PROBABILITY: f64 = 0.4;
 
 /// Raw deserialized shape of the TOML override table.
@@ -81,6 +165,16 @@ struct OverrideTable {
 /// sort-by-severity rendering. `Informational` and `Capability` classes describe what a
 /// binary *does* without asserting hostile intent and carry zero risk weight, while
 /// `Low` through `Critical` are genuine threat indicators.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::scoring::SeverityClass;
+///
+/// assert!(SeverityClass::Low < SeverityClass::High);
+/// assert_eq!(SeverityClass::Critical.label(), "CRITICAL");
+/// assert_eq!(SeverityClass::Capability.probability(), 0.0);
+/// ```
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SeverityClass {
     /// Build/compiler artifact or other non-behavioral match (e.g. `compiler/msvc`).
@@ -99,12 +193,21 @@ pub enum SeverityClass {
 }
 
 impl SeverityClass {
-    /// Per-finding probability used by the noisy-OR risk aggregation.
+    /// Returns the per-finding independent probability ($p_i$) used in noisy-OR risk aggregation.
     ///
-    /// `Informational` and `Capability` findings contribute no probability mass and are
-    /// excluded from the product entirely, so capability-heavy benign software trends
-    /// toward a zero score.
-    pub fn probability(self) -> f64 {
+    /// Findings with [`SeverityClass::Informational`] and [`SeverityClass::Capability`]
+    /// return `0.0`, contributing zero risk mass to benign software.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::scoring::SeverityClass;
+    ///
+    /// assert_eq!(SeverityClass::Informational.probability(), 0.0);
+    /// assert_eq!(SeverityClass::Low.probability(), 0.02);
+    /// assert_eq!(SeverityClass::Critical.probability(), 0.40);
+    /// ```
+    pub(crate) fn probability(self) -> f64 {
         match self {
             Self::Informational | Self::Capability => 0.0,
             Self::Low => LOW_PROBABILITY,
@@ -114,7 +217,16 @@ impl SeverityClass {
         }
     }
 
-    /// Short uppercase label suitable for badge columns.
+    /// Returns a short uppercase label suitable for terminal badges and tabular report columns.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::scoring::SeverityClass;
+    ///
+    /// assert_eq!(SeverityClass::Low.label(), "LOW");
+    /// assert_eq!(SeverityClass::Critical.label(), "CRITICAL");
+    /// ```
     pub fn label(self) -> &'static str {
         match self {
             Self::Informational => "INFO",
@@ -127,7 +239,24 @@ impl SeverityClass {
     }
 }
 
-/// Classifies matched rules into [`SeverityClass`] values for scoring and rendering.
+/// Multi-tiered classification engine mapping matched security rules to [`SeverityClass`] tiers.
+///
+/// Combines embedded default configurations, user-supplied TOML overrides, and
+/// heuristic inference from MITRE ATT&CK and MBC taxonomies.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::rule::RuleMeta;
+/// use rbat::core::scoring::{SeverityClass, SeverityClassifier};
+///
+/// let classifier = SeverityClassifier::embedded();
+/// let meta = RuleMeta {
+///     name: "create reverse shell".to_string(),
+///     ..Default::default()
+/// };
+/// let class = classifier.classify(&meta);
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct SeverityClassifier {
     namespace_defaults: BTreeMap<String, SeverityClass>,
@@ -135,13 +264,51 @@ pub struct SeverityClassifier {
 }
 
 impl SeverityClassifier {
-    /// Builds the classifier from the embedded default override table.
+    /// Builds a [`SeverityClassifier`] initialized from the embedded override table.
+    ///
+    /// The embedded table defines standard overrides for known common benign rules and
+    /// assigns baseline namespace defaults (e.g. for build systems and compilers).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::scoring::SeverityClassifier;
+    ///
+    /// let classifier = SeverityClassifier::embedded();
+    /// ```
     pub fn embedded() -> Self {
         Self::from_toml_str(EMBEDDED_OVERRIDES).unwrap_or_default()
     }
 
-    /// Builds a standalone classifier from a TOML string. Returns an error describing
-    /// the offending entry if the table cannot be parsed.
+    /// Constructs a standalone [`SeverityClassifier`] from a TOML override table string.
+    ///
+    /// Parses `[namespace_defaults]` and `[overrides]` sections and validates that
+    /// mapped severity classes correspond to known [`SeverityClass`] variants.
+    ///
+    /// # Parameters
+    ///
+    /// - `src`: A string slice containing valid TOML with override tables.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RbatError::ConfigError`]
+    /// if `src` is invalid TOML or fails to deserialize into the override schema.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::scoring::{SeverityClass, SeverityClassifier};
+    ///
+    /// let toml = r#"
+    /// [namespace_defaults]
+    /// "compiler" = "informational"
+    ///
+    /// [overrides]
+    /// "create reverse shell" = "critical"
+    /// "#;
+    ///
+    /// let classifier = SeverityClassifier::from_toml_str(toml).unwrap();
+    /// ```
     pub fn from_toml_str(src: &str) -> RbatResult<Self> {
         let table: OverrideTable = toml::from_str(src)
             .map_err(|e| RbatError::ConfigError(format!("invalid override table: {e}")))?;
@@ -167,45 +334,91 @@ impl SeverityClassifier {
         }
     }
 
-    /// Merges a TOML override file on top of the current tables. Later entries win,
-    /// so user files can retune both built-in and custom classifications.
+    /// Reads and merges an external TOML override file on top of the embedded defaults.
+    ///
+    /// Later entries take precedence, allowing users to override embedded classifications
+    /// or fine-tune scoring thresholds for specialized analysis environments.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Filesystem path to the TOML override configuration file.
     ///
     /// # Errors
-    /// Returns an error if the file cannot be read or parsed.
-    pub fn extend(path: &Option<PathBuf>) -> RbatResult<Self> {
+    ///
+    /// Returns [`RbatError::ConfigError`]
+    /// if the file cannot be read from disk or contains invalid TOML syntax.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rbat::core::scoring::SeverityClassifier;
+    ///
+    /// let classifier = SeverityClassifier::extend("my-overrides.toml")
+    ///     .expect("failed to load custom overrides");
+    /// ```
+    pub fn extend<P: AsRef<Path>>(path: P) -> RbatResult<Self> {
         let mut classifier = SeverityClassifier::embedded();
-        if let Some(path) = path {
-            let src = std::fs::read_to_string(path).map_err(|e| {
-                RbatError::ConfigError(format!("cannot read override file {}: {e}", path.display()))
-            })?;
-            let table: OverrideTable = toml::from_str(&src)
-                .map_err(|e| RbatError::ConfigError(format!("invalid override file: {e}")))?;
+        let src = std::fs::read_to_string(path.as_ref()).map_err(|e| {
+            RbatError::ConfigError(format!(
+                "cannot read override file {}: {e}",
+                path.as_ref().display()
+            ))
+        })?;
+        let table: OverrideTable = toml::from_str(&src)
+            .map_err(|e| RbatError::ConfigError(format!("invalid override file: {e}")))?;
 
-            for (key, class) in table.namespace_defaults {
-                if let Some(c) = Self::parse_class(&class) {
-                    classifier.namespace_defaults.insert(key.to_lowercase(), c);
-                } else {
-                    eprintln!(
-                        "warning: unrecognized severity class '{class}' for namespace '{key}' in {}",
-                        path.display()
-                    );
-                }
+        for (key, class) in table.namespace_defaults {
+            if let Some(c) = Self::parse_class(&class) {
+                classifier.namespace_defaults.insert(key.to_lowercase(), c);
+            } else {
+                eprintln!(
+                    "warning: unrecognized severity class '{class}' for namespace '{key}' in {}",
+                    path.as_ref().display()
+                );
             }
-            for (key, class) in table.overrides {
-                if let Some(c) = Self::parse_class(&class) {
-                    classifier.rule_overrides.insert(key.to_lowercase(), c);
-                } else {
-                    eprintln!(
-                        "warning: unrecognized severity class '{class}' for rule '{key}' in {}",
-                        path.display()
-                    );
-                }
+        }
+        for (key, class) in table.overrides {
+            if let Some(c) = Self::parse_class(&class) {
+                classifier.rule_overrides.insert(key.to_lowercase(), c);
+            } else {
+                eprintln!(
+                    "warning: unrecognized severity class '{class}' for rule '{key}' in {}",
+                    path.as_ref().display()
+                );
             }
         }
         Ok(classifier)
     }
 
-    /// Resolves the effective [`SeverityClass`] for a matched rule.
+    /// Resolves the effective [`SeverityClass`] for a matched rule according to the priority cascade.
+    ///
+    /// Evaluates explicit rule metadata, per-rule overrides, namespace-level defaults, and
+    /// taxonomic heuristics in order.
+    ///
+    /// # Parameters
+    ///
+    /// - `rule`: Reference to the [`RuleMeta`] of the matched rule.
+    ///
+    /// # Returns
+    ///
+    /// The determined [`SeverityClass`] tier.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   rule::RuleMeta,
+    ///   scoring::{SeverityClass, SeverityClassifier},
+    /// };
+    ///
+    /// let classifier = SeverityClassifier::embedded();
+    /// let meta = RuleMeta {
+    ///     name: "compiled with MSVC".to_string(),
+    ///     namespace: Some("compiler/msvc".to_string()),
+    ///     ..Default::default()
+    /// };
+    /// assert_eq!(classifier.classify(&meta), SeverityClass::Informational);
+    /// ```
     pub fn classify(&self, rule: &RuleMeta) -> SeverityClass {
         // 1. Explicit severity declared on the rule itself.
         if let Some(class) = rule.severity.as_deref().and_then(Self::parse_class) {
@@ -290,7 +503,7 @@ impl SeverityClassifier {
     fn attack_tactics(rule: &RuleMeta) -> Vec<String> {
         rule.mitre_attack
             .as_ref()
-            .map(|m| m.as_vec())
+            .map(|m| m.to_vec())
             .unwrap_or_default()
             .iter()
             .filter_map(|entry| Self::tactic_slug(entry))
@@ -301,7 +514,7 @@ impl SeverityClassifier {
     fn mbc_objectives(rule: &RuleMeta) -> Vec<String> {
         rule.mbc
             .as_ref()
-            .map(|m| m.as_vec())
+            .map(|m| m.to_vec())
             .unwrap_or_default()
             .iter()
             .map(|entry| {
@@ -320,12 +533,30 @@ impl SeverityClassifier {
         tactic.trim().to_lowercase().replace([' ', '-'], "_")
     }
 
-    /// Extracts the tactic slug from a formatted ATT&CK mapping such as
-    /// `"Defense Evasion::Obfuscated Files or Information [T1027]"`.
+    /// Extracts and normalizes a MITRE ATT&CK tactic slug from a formatted mapping entry.
     ///
-    /// Returns `None` when the entry does not resolve to a known tactic, either
-    /// because it lacks the `::` tactic prefix entirely or because the prefix is
-    /// unrecognized.
+    /// Handles both fully qualified technique strings (e.g. `"Defense Evasion::Obfuscated Files [T1027]"`)
+    /// and raw tactic names (e.g. `"defense_evasion"` or `"Defense Evasion"`).
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: Text string from rule metadata containing a tactic or technique reference.
+    ///
+    /// # Returns
+    ///
+    /// `Some(slug)` if the entry resolves to one of the recognized ATT&CK tactics, or `None`
+    /// if unrecognized or malformed.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::scoring::SeverityClassifier;
+    ///
+    /// let slug = SeverityClassifier::tactic_slug("Defense Evasion::Obfuscated Files [T1027]");
+    /// assert_eq!(slug.as_deref(), Some("defense_evasion"));
+    ///
+    /// assert_eq!(SeverityClassifier::tactic_slug("Unrecognized Tactic"), None);
+    /// ```
     pub fn tactic_slug(entry: &str) -> Option<String> {
         let candidate = match entry.split_once("::") {
             Some((prefix, _)) => prefix,

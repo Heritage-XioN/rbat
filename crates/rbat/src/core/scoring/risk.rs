@@ -1,15 +1,77 @@
-//! # Risk Scoring and Severity Classification Engine
+//! # Probabilistic Threat Risk Scoring Engine
 //!
-//! Maps matched capa rules to [`SeverityClass`] values and aggregates findings into a single
-//! risk score using **noisy-OR probabilistic combination**:
+//! Aggregates classified security findings into an objective risk assessment using
+//! **noisy-OR probabilistic combination**, dimensional MITRE ATT&CK tactic breakdowns,
+//! and calibrated qualitative verdict bands.
+//!
+//! Rather than relying on simple linear addition or arbitrary heuristic caps, `rbat` models
+//! each detected behavioral rule as an independent probabilistic indicator of malicious intent.
+//! The resulting score represents the cumulative probability that at least one detected behavior
+//! reflects genuine threat activity.
+//!
+//! ## Core Types
+//!
+//! - [`RiskAssessment`]: Comprehensive risk assessment containing final score, verdict, findings, breakdowns, and recommendations.
+//! - [`Finding`]: Individual behavioral capability or threat indicator discovered during analysis.
+//! - [`CategoryScore`]: Saturated sub-score (`0..=100`) measuring threat concentration within a specific MITRE ATT&CK tactic.
+//! - [`FindingCounts`]: Granular tallies of findings across all [`SeverityClass`] tiers.
+//!
+//! ## Noisy-OR Mathematical Model
+//!
+//! The aggregated threat score is computed via the noisy-OR formulation:
 //!
 //! ```text
-//! score = 100 · (1 − Π (1 − pᵢ))
+//! Score = min(100, round(100 × (1 − ∏ (1 − pᵢ))))
 //! ```
 //!
-//! where `pᵢ` is the per-finding probability derived from its [`SeverityClass`].
-//! Classification honors explicit rule severities, TOML override tables, namespace defaults,
-//! and built-in ATT&CK/MBC inference.
+//! where $p_i \in [0.0, 1.0]$ represents the independent malicious probability assigned to finding $i$
+//! based on its [`SeverityClass`]:
+//!
+//! - **Benign Immunity**: Findings classified as [`SeverityClass::Informational`] or [`SeverityClass::Capability`]
+//!   carry $p_i = 0.0$. They never contribute to the product, ensuring that binaries rich in benign OS
+//!   capabilities (network sockets, file manipulation, thread pools) trend naturally toward a score of `0`.
+//! - **Corroborating Evidence**: Weak and medium indicators compound asymptotically. For example, multiple
+//!   medium findings ($p = 0.08$) compound cleanly ($1 - (1 - 0.08)^5 \approx 34\%$) without premature
+//!   saturation or arbitrary clipping.
+//! - **Saturated Upper Bound**: A single critical finding ($p = 0.40$) immediately yields a score of `40`
+//!   (Suspicious), and two critical findings compound to $1 - (1 - 0.40)^2 = 64\%$ (Malicious).
+//!
+//! ## Verdict Bands and Operational Guidance
+//!
+//! Scores are mapped into three qualitative evaluation bands:
+//!
+//! | Score Range | Verdict Band | Interpretation & Operational Guidance |
+//! | :--- | :--- | :--- |
+//! | `0..=14` | `"Safe"` | Standard execution permissible. Benign capabilities or harmless compiler artifacts. |
+//! | `15..=49` | `"Suspicious"` | Flagged for manual analyst inspection. Do not run in production. Community hash lookup advised. |
+//! | `50..=100` | `"Malicious"` | Immediate quarantine required. Restrict execution strictly to an isolated sandbox. |
+//!
+//! ## Dimensional Tactic Breakdowns
+//!
+//! In addition to global risk aggregation, the engine independently tracks survival probabilities
+//! across MITRE ATT&CK tactic categories. Each category's saturated sub-score is reported in
+//! [`RiskAssessment::category_breakdown`], enabling analysts to immediately pinpoint the dominant
+//! threat dimension (e.g. `defense_evasion` vs `credential_access`).
+//!
+//! ## Examples
+//!
+//! ```rust
+//! use rbat::core::{
+//!   rule::RuleMeta,
+//!   scoring::{risk::RiskAssessment, classifier::SeverityClassifier},
+//! };
+//!
+//! let classifier = SeverityClassifier::embedded();
+//! let rule = RuleMeta {
+//!     name: "create process suspended".to_string(),
+//!     namespace: Some("process/creation".to_string()),
+//!     ..Default::default()
+//! };
+//!
+//! let assessment = RiskAssessment::calculate_risk(&[&rule], &classifier);
+//! assert!(assessment.score <= 100);
+//! assert!(matches!(assessment.severity.as_str(), "Safe" | "Suspicious" | "Malicious"));
+//! ```
 
 use crate::core::{
     rule::{RuleMeta, StringOrVec},
@@ -18,62 +80,26 @@ use crate::core::{
 use ahash::{AHashMap, AHashSet};
 use serde::{Deserialize, Serialize};
 
-/// Verdict band thresholds applied to the aggregated noisy-OR score (0-100).
+/// Maximum score (inclusive, `14`) classified under the `"Safe"` verdict band.
 pub const SAFE_MAX_SCORE: u32 = 14;
+/// Maximum score (inclusive, `49`) classified under the `"Suspicious"` verdict band; scores `50` and above are `"Malicious"`.
 pub const SUSPICIOUS_MAX_SCORE: u32 = 49;
 
-/// A specific behavioral capability or threat indicator discovered during analysis.
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
-pub struct Finding {
-    /// The shorthand description or type of the finding.
-    pub indicator: String,
-    /// A detailed explanation of what was found and why it is flagged.
-    pub description: String,
-    /// Behavioral classification controlling risk weight and rendering color.
-    #[serde(default)]
-    pub severity_class: SeverityClass,
-    /// MITRE ATT&CK technique IDs mapped by the source rule (e.g. `"T1059.003"`).
-    #[serde(default)]
-    pub attack_ids: Vec<String>,
-    /// Malware Behavior Catalog IDs mapped by the source rule (e.g. `"C0029"`).
-    #[serde(default)]
-    pub mbc_ids: Vec<String>,
-    /// Primary MITRE ATT&CK tactic slug bucketing this finding (e.g. `"execution"`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    /// Source rule namespace path (e.g. `"communication/c2/shell"`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub namespace: Option<String>,
-}
-
-/// Saturated per-tactic contribution to the overall risk score, for dimensional breakdowns.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, Eq)]
-pub struct CategoryScore {
-    /// ATT&CK tactic slug (e.g. `"defense_evasion"`).
-    pub category: String,
-    /// Saturated category score in `0..=100`.
-    pub score: u8,
-}
-
-/// Tallies of findings per [`SeverityClass`] for summary lines.
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct FindingCounts {
-    pub critical: u32,
-    pub high: u32,
-    pub medium: u32,
-    pub low: u32,
-    pub capability: u32,
-    pub informational: u32,
-}
-
-impl FindingCounts {
-    /// Total number of genuine threat indicators (`Critical`+`High`+`Medium`+`Low`).
-    pub fn indicator_count(&self) -> u32 {
-        self.critical + self.high + self.medium + self.low
-    }
-}
-
-/// The aggregated security assessment containing the threat score and findings.
+/// Comprehensive security assessment encapsulating the overall risk score, verdict, and findings.
+///
+/// Includes qualitative threat rating, full list of findings ordered by descending severity,
+/// actionable mitigation guidance, and dimensional category sub-scores.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::scoring::{RiskAssessment, SeverityClassifier};
+///
+/// let assessment = RiskAssessment::calculate_risk(&[], &SeverityClassifier::embedded());
+/// assert_eq!(assessment.score, 0);
+/// assert_eq!(assessment.severity, "Safe");
+/// assert!(assessment.findings.is_empty());
+/// ```
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct RiskAssessment {
     /// The final numeric score ranging from `0` (Safe) to `100` (Highly Malicious).
@@ -93,8 +119,44 @@ pub struct RiskAssessment {
 }
 
 impl RiskAssessment {
-    /// Calculates a final risk score (0-100) using noisy-OR aggregation and a custom
-    /// [`SeverityClassifier`] (e.g. one extended with user override files).
+    /// Aggregates a slice of matched security rules into a unified [`RiskAssessment`].
+    ///
+    /// Evaluates rules against the supplied [`SeverityClassifier`] to resolve severities,
+    /// applies noisy-OR combination to compute global and per-category threat scores,
+    /// maps the numeric score to a qualitative verdict band, and generates targeted
+    /// analyst recommendations.
+    ///
+    /// # Parameters
+    ///
+    /// - `matched_rules`: Slice of references to [`RuleMeta`] for rules that triggered during analysis.
+    /// - `classifier`: Reference to the [`SeverityClassifier`] used for severity determination.
+    ///
+    /// # Returns
+    ///
+    /// A fully populated [`RiskAssessment`] with findings sorted by descending severity,
+    /// granular finding counts, dimensional category breakdown, and operational recommendations.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   rule::RuleMeta,
+    ///   scoring::{RiskAssessment, SeverityClassifier},
+    /// };
+    ///
+    /// let classifier = SeverityClassifier::embedded();
+    /// let rule = RuleMeta {
+    ///     name: "create thread in remote process".to_string(),
+    ///     namespace: Some("injection/remote-thread".to_string()),
+    ///     severity: Some("high".to_string()),
+    ///     ..Default::default()
+    /// };
+    ///
+    /// let assessment = RiskAssessment::calculate_risk(&[&rule], &classifier);
+    /// assert_eq!(assessment.score, 25);
+    /// assert_eq!(assessment.severity, "Suspicious");
+    /// assert_eq!(assessment.finding_counts.high, 1);
+    /// ```
     pub fn calculate_risk(matched_rules: &[&RuleMeta], classifier: &SeverityClassifier) -> Self {
         let mut findings: Vec<Finding> = Vec::with_capacity(matched_rules.len());
         let mut counts = FindingCounts::default();
@@ -111,7 +173,7 @@ impl RiskAssessment {
             let category = rule
                 .mitre_attack
                 .as_ref()
-                .map(|m| m.as_vec())
+                .map(|m| m.to_vec())
                 .unwrap_or_default()
                 .iter()
                 .find_map(|entry| SeverityClassifier::tactic_slug(entry));
@@ -191,7 +253,7 @@ impl RiskAssessment {
     /// rule mapping field, falling back to bare IDs like `"T1098"`.
     fn extract_bracketed_ids(mapping: Option<&StringOrVec>) -> Vec<String> {
         let mut ids: AHashSet<String> = mapping
-            .map(|m| m.as_vec())
+            .map(|m| m.to_vec())
             .unwrap_or_default()
             .iter()
             .map(|entry| StringOrVec::extract_mitre_id_from(entry))
@@ -241,6 +303,127 @@ impl RiskAssessment {
         }
 
         recs
+    }
+}
+
+/// A specific behavioral capability or threat indicator discovered during analysis.
+///
+/// Findings capture matched rule metadata, assigned severity, MITRE ATT&CK and MBC
+/// technique mappings, and high-level categorization.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::scoring::{Finding, SeverityClass};
+///
+/// let finding = Finding {
+///     indicator: "process_hollowing".to_string(),
+///     description: "Injects code into a suspended host process".to_string(),
+///     severity_class: SeverityClass::High,
+///     ..Default::default()
+/// };
+/// assert_eq!(finding.severity_class, SeverityClass::High);
+/// ```
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+pub struct Finding {
+    /// The shorthand description or type of the finding.
+    pub indicator: String,
+    /// A detailed explanation of what was found and why it is flagged.
+    pub description: String,
+    /// Behavioral classification controlling risk weight and rendering color.
+    #[serde(default)]
+    pub severity_class: SeverityClass,
+    /// MITRE ATT&CK technique IDs mapped by the source rule (e.g. `"T1059.003"`).
+    #[serde(default)]
+    pub attack_ids: Vec<String>,
+    /// Malware Behavior Catalog IDs mapped by the source rule (e.g. `"C0029"`).
+    #[serde(default)]
+    pub mbc_ids: Vec<String>,
+    /// Primary MITRE ATT&CK tactic slug bucketing this finding (e.g. `"execution"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Source rule namespace path (e.g. `"communication/c2/shell"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+}
+
+/// Saturated sub-score measuring threat concentration within a specific MITRE ATT&CK tactic category.
+///
+/// Computed via independent noisy-OR aggregation of findings belonging to that tactic.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::scoring::CategoryScore;
+///
+/// let cat = CategoryScore {
+///     category: "defense_evasion".to_string(),
+///     score: 45,
+/// };
+/// assert_eq!(cat.score, 45);
+/// ```
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, Eq)]
+pub struct CategoryScore {
+    /// ATT&CK tactic slug (e.g. `"defense_evasion"`).
+    pub category: String,
+    /// Saturated category score in `0..=100`.
+    pub score: u8,
+}
+
+/// Aggregated tallies of findings categorized by [`SeverityClass`].
+///
+/// Used in summary badges, terminal banners, and JSON report headers.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::scoring::FindingCounts;
+///
+/// let counts = FindingCounts {
+///     critical: 1,
+///     high: 2,
+///     medium: 0,
+///     low: 3,
+///     capability: 5,
+///     informational: 2,
+/// };
+/// assert_eq!(counts.indicator_count(), 6);
+/// ```
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct FindingCounts {
+    /// Number of critical-severity findings.
+    pub critical: u32,
+    /// Number of high-severity findings.
+    pub high: u32,
+    /// Number of medium-severity findings.
+    pub medium: u32,
+    /// Number of low-severity findings.
+    pub low: u32,
+    /// Number of capability-class (benign behavioral) findings.
+    pub capability: u32,
+    /// Number of informational (compiler/artifact) findings.
+    pub informational: u32,
+}
+
+impl FindingCounts {
+    /// Computes the total number of genuine threat indicators (`Critical` + `High` + `Medium` + `Low`).
+    ///
+    /// Benign `Capability` and `Informational` items are excluded from this count.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::scoring::FindingCounts;
+    ///
+    /// let counts = FindingCounts {
+    ///     critical: 1,
+    ///     high: 1,
+    ///     ..Default::default()
+    /// };
+    /// assert_eq!(counts.indicator_count(), 2);
+    /// ```
+    pub fn indicator_count(&self) -> u32 {
+        self.critical + self.high + self.medium + self.low
     }
 }
 
