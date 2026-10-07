@@ -427,6 +427,7 @@ impl ControlFlowGraph {
     ///     InstructionClass::Return
     /// );
     /// ```
+    #[cfg_attr(not(feature = "backend-capstone"), allow(dead_code))]
     pub(crate) fn classify_instr(mnemonic: &str, arch: &BinaryArch) -> InstructionClass {
         InstructionClass::classify(mnemonic, arch)
     }
@@ -452,7 +453,7 @@ impl ControlFlowGraph {
 ///     start_idx: 0,
 ///     end_idx: 3,
 /// };
-/// assert_eq!(block.instruction_count(), 3);
+/// assert_eq!(block.instr_count(), 3);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BasicBlock {
@@ -551,8 +552,10 @@ impl InstructionClass {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::cfg::InstructionClass;
-    /// use rbat::core::parser::BinaryArch;
+    /// use rbat::core::{
+    ///   cfg::InstructionClass,
+    ///   parser::BinaryArch,
+    /// };
     ///
     /// assert_eq!(
     ///     InstructionClass::classify("je", &BinaryArch::X64),
@@ -594,7 +597,7 @@ impl InstructionClass {
     }
 }
 
-#[cfg(all(test, feature = "backend-capstone"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::disassembler::InstructionInfo;

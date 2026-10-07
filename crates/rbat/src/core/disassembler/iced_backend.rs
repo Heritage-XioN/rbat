@@ -1,151 +1,175 @@
-//! iced_x86 based disassembler implementation
+//! # Iced-x86 Disassembly Backend
+//!
+//! High-throughput pure-Rust x86 and x64 disassembler leveraging the `iced-x86` crate.
+//!
+//! ## Overview
+//!
+//! The [`DisassemblerImpl`] engine provides fast, memory-safe instruction decoding for:
+//! - `x86` (32-bit protected mode)
+//! - `x64` (64-bit long mode)
+//!
+//! All instructions are decoded directly into unified [`InstructionInfo`] structs, formatting
+//! operands using Intel syntax with lowercase hexadecimal values (`0x...`) to ensure strict
+//! parity with capa rule evaluation and Capstone output.
+//!
+//! ## Memory & Allocation Bounds
+//!
+//! - **Bounded Pre-allocation**: The instruction vector is pre-allocated up to a maximum
+//!   safety cap of `MAX_PREALLOC_BYTES` (8 MiB, ~131,000 instructions) based on the heuristic
+//!   `min(text_bytes.len() / 4, cap)`. Malformed or adversarial binaries with huge `.text`
+//!   virtual sizes cannot trigger unbounded upfront allocation.
+//! - **Decode-Time Inlining**: Operands and mnemonics are formatted directly into reusable
+//!   scratch buffers and stored inside inline [`CompactString`] fields. This eliminates dynamic
+//!   re-formatting across downstream analysis threads (such as parallel CFG reconstruction).
+//! - **Zero Foreign Allocations**: Unlike C-based disassemblers, `iced-x86` performs zero heap
+//!   allocations inside the decoder core.
+//!
+//! ## Resilient Decoding
+//!
+//! The decoder steps linearly through `text_bytes`. Invalid instructions (`Code::INVALID`)
+//! are skipped, allowing disassembly to recover after data alignment padding, embedded tables,
+//! or non-code bytes.
+//!
+//! ## Examples
+//!
+//! ```rust
+//! use rbat::core::{
+//!   disassembler::DisassemblerImpl,
+//!   parser::{BinaryArch, IatMap},
+//! };
+//!
+//! let disasm = DisassemblerImpl::new(BinaryArch::X64);
+//! let iat_map = IatMap::default();
+//! let bytes = [0x90, 0xc3]; // nop; ret
+//! let instructions = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+//!
+//! assert_eq!(instructions.len(), 2);
+//! assert_eq!(instructions[0].format_mnemonic(), "nop");
+//! assert_eq!(instructions[1].format_mnemonic(), "ret");
+//! ```
 
+use super::InstructionInfo;
 use crate::core::{
     cfg::InstructionClass,
     parser::{BinaryArch, IatMap},
-    traits::Disassembler,
-    types::{RbatError, RbatResult},
+    types::result::{RbatError, RbatResult},
 };
-use aho_corasick::PatternID;
-use iced_x86::{Code, Decoder, DecoderOptions, FlowControl};
+use compact_str::CompactString;
+use iced_x86::{Code, Decoder, DecoderOptions, FlowControl, Formatter};
 use smallvec::SmallVec;
-use std::sync::Arc;
+use std::{fmt::Write, sync::Arc};
 
-/// A generic view over a disassembled instruction.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstructionInfo {
-    pub inner: iced_x86::Instruction,
-    pub api_resolution: Option<Arc<str>>,
-    /// Pre-computed set of Aho-Corasick pattern IDs matched against this instruction's text.
-    pub matched: SmallVec<[PatternID; 8]>,
-    /// Control-flow class resolved from Iced's precise `flow_control()`
-    pub inst_class: InstructionClass,
-}
-
-impl InstructionInfo {
-    pub fn from_iced(inner: &iced_x86::Instruction, api_resolution: Option<Arc<str>>) -> Self {
-        Self {
-            inner: *inner,
-            api_resolution,
-            matched: smallvec::SmallVec::new(),
-            inst_class: Self::classify_flow(inner.flow_control()),
-        }
-    }
-
-    pub fn address(&self) -> u64 {
-        self.inner.ip()
-    }
-
-    pub fn format_mnemonic_into(&self, buf: &mut String) {
-        use std::fmt::Write;
-        buf.clear();
-        let _ = write!(buf, "{:?}", self.inner.mnemonic());
-        buf.make_ascii_lowercase();
-    }
-
-    pub fn format_mnemonic(&self) -> String {
-        let mut buf = String::new();
-        self.format_mnemonic_into(&mut buf);
-        buf
-    }
-
-    pub fn format_operands_into(&self, buf: &mut String) {
-        use iced_x86::Formatter;
-        use std::cell::RefCell;
-        thread_local! {
-            static INTEL_FMT: RefCell<iced_x86::IntelFormatter> = RefCell::new(iced_x86::IntelFormatter::new());
-        }
-
-        buf.clear();
-        // Intel syntax on every OS so operand text matches capa's ruleset
-        INTEL_FMT.with(|fmt| fmt.borrow_mut().format_all_operands(&self.inner, buf))
-    }
-
-    pub fn format_operands(&self) -> String {
-        let mut buf = String::new();
-        self.format_operands_into(&mut buf);
-        buf
-    }
-
-    /// Returns the branch target address if this is a near branch instruction, without
-    /// allocating a string. Returns `None` for non-branch or indirect branches.
-    pub fn branch_target(&self) -> Option<u64> {
-        let target = self.inner.near_branch_target();
-        if target != 0 { Some(target) } else { None }
-    }
-
-    /// Classifies this instruction's control-flow role without allocating a string.
-    pub fn class(&self, _arch: &BinaryArch) -> InstructionClass {
-        self.inst_class
-    }
-
-    fn classify_flow(flow: iced_x86::FlowControl) -> InstructionClass {
-        match flow {
-            FlowControl::UnconditionalBranch => InstructionClass::UnconditionalJump,
-            FlowControl::ConditionalBranch => InstructionClass::ConditionalJump,
-            FlowControl::Call | FlowControl::IndirectCall => InstructionClass::Call,
-            FlowControl::Return => InstructionClass::Return,
-            _ => InstructionClass::Normal,
-        }
-    }
-}
-
-impl serde::Serialize for InstructionInfo {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("InstructionInfo", 3)?;
-        state.serialize_field("address", &self.address())?;
-        state.serialize_field("mnemonic", &self.format_mnemonic())?;
-        state.serialize_field("op_str", &self.format_operands())?;
-        state.end()
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for InstructionInfo {
-    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialization is a stub because we cannot easily recreate the raw iced_x86 instruction
-        // from formatted strings without the binary data.
-        Err(serde::de::Error::custom(
-            "Deserialize not supported for backend-iced InstructionInfo",
-        ))
-    }
-}
-
+/// High-performance x86/x64 disassembly engine powered by [`iced-x86`].
+///
+/// Decodes 32-bit and 64-bit x86 machine code into unified [`InstructionInfo`] sequences
+/// with pre-computed control flow classification and IAT import resolution.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::disassembler::DisassemblerImpl;
+/// use rbat::core::parser::BinaryArch;
+///
+/// let disasm = DisassemblerImpl::new(BinaryArch::X64);
+/// ```
+///
+/// [`iced-x86`]: iced_x86
 #[derive(Debug)]
 pub struct DisassemblerImpl {
     arch: BinaryArch,
 }
 
 impl DisassemblerImpl {
+    /// Creates a new iced-x86 [`DisassemblerImpl`] configured for the specified [`BinaryArch`].
+    ///
+    /// # Parameters
+    ///
+    /// - `arch`: Target architecture (must be [`BinaryArch::X86`] or [`BinaryArch::X64`]).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::disassembler::DisassemblerImpl;
+    /// use rbat::core::parser::BinaryArch;
+    ///
+    /// let disasm = DisassemblerImpl::new(BinaryArch::X64);
+    /// ```
     pub fn new(arch: BinaryArch) -> Self {
         Self { arch }
     }
-}
 
-impl Disassembler for DisassemblerImpl {
-    /// Decodes/disassembles all x86 instructions in the provided text bytes.
+    /// Creates an [`IntelFormatter`] configured with Capstone-compatible settings:
+    /// lowercase hex prefix (`0x`), no suffix, and lowercase formatting.
+    #[must_use]
+    pub(crate) fn create_formatter() -> iced_x86::IntelFormatter {
+        let mut formatter = iced_x86::IntelFormatter::new();
+        formatter.options_mut().set_hex_prefix("0x");
+        formatter.options_mut().set_hex_suffix("");
+        formatter.options_mut().set_uppercase_hex(false);
+        formatter
+    }
+
+    /// Resolves direct branch targets or memory displacements against `iat_map` for imported API detection.
+    #[inline]
+    pub(crate) fn resolve_api(instr: &iced_x86::Instruction, iat_map: &IatMap) -> Option<Arc<str>> {
+        let target = instr.near_branch64();
+        if target != 0
+            && let Some(api) = iat_map.get(&target)
+        {
+            return Some(api.clone());
+        }
+        let disp = instr.memory_displacement64();
+        if disp != 0
+            && let Some(api) = iat_map.get(&disp)
+        {
+            return Some(api.clone());
+        }
+        None
+    }
+
+    /// Decodes and disassembles all x86/x64 instructions in the provided byte slice.
     ///
-    /// # Allocation behavior
+    /// Uses an `iced_x86::Decoder` configured for 32-bit or 64-bit execution mode.
+    /// Resolves direct branch targets and memory displacements against `iat_map` for imported API detection,
+    /// formats operands into normalized Intel syntax, and classifies control flow.
     ///
-    /// The returned `Vec<InstructionInfo>` is pre-allocated to
-    /// `min(text.len() / 4, MAX_PREALLOC_BYTES / size_of::<InstructionInfo>())`
-    /// entries as a heuristic estimate of instruction count (x86 instructions
-    /// average ~3–4 bytes). The upfront allocation is therefore capped at
-    /// `MAX_PREALLOC_BYTES` (8 MiB) regardless of input size, so a very large
-    /// or adversarial `text` cannot trigger an unbounded upfront allocation.
+    /// # Parameters
     ///
-    /// If the input contains more instructions than the pre-allocated capacity
-    /// (e.g. a long run of 1-byte instructions such as NOPs), the vector grows
-    /// amortized, requiring a small, bounded number of reallocations.
+    /// - `text_bytes`: Raw executable machine code bytes.
+    /// - `entry_addr`: Virtual memory base address corresponding to the start of `text_bytes`.
+    /// - `iat_map`: Import Address Table mapping virtual addresses to API symbol names.
     ///
-    /// Peak memory is O(number of instructions).
-    fn disassemble(
+    /// # Returns
+    ///
+    /// A vector of [`InstructionInfo`] structs representing the decoded instructions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`RbatError::GenericDisassemblerError`] if `self.arch` is not [`BinaryArch::X86`]
+    /// or [`BinaryArch::X64`] (e.g. ARM or ARM64, which are only supported by the Capstone backend).
+    ///
+    /// # Allocation Behavior
+    ///
+    /// The returned `Vec<InstructionInfo>` is pre-allocated up to `MAX_PREALLOC_BYTES` (8 MiB)
+    /// based on the heuristic `min(text_bytes.len() / 4, cap)`.
+    /// Text strings are formatted using stack-reused scratch buffers and inlined into
+    /// [`CompactString`] fields without heap allocations for strings <= 24 bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::disassembler::DisassemblerImpl;
+    /// use rbat::core::parser::{BinaryArch, IatMap};
+    ///
+    /// let disasm = DisassemblerImpl::new(BinaryArch::X86);
+    /// let iat = IatMap::default();
+    /// let code = [0xb8, 0x01, 0x00, 0x00, 0x00]; // mov eax, 1
+    /// let insns = disasm.disassemble(&code, 0x400000, &iat).unwrap();
+    ///
+    /// assert_eq!(insns.len(), 1);
+    /// assert_eq!(insns[0].format_mnemonic(), "mov");
+    /// ```
+    pub fn disassemble(
         &self,
         text_bytes: &[u8],
         entry_addr: u64,
@@ -169,6 +193,10 @@ impl Disassembler for DisassemblerImpl {
         let mut instructions = Vec::with_capacity(if decoder.can_decode() { cap } else { 0 });
         let mut instr = iced_x86::Instruction::default();
 
+        let mut formatter = Self::create_formatter();
+        let mut mnem_buf = String::with_capacity(16);
+        let mut op_buf = String::with_capacity(64);
+
         while decoder.can_decode() {
             decoder.decode_out(&mut instr);
 
@@ -176,37 +204,86 @@ impl Disassembler for DisassemblerImpl {
                 continue;
             }
 
-            let mut api_resolution = None;
-            let target = instr.near_branch64();
-            if target != 0
-                && let Some(api) = iat_map.get(&target)
-            {
-                api_resolution = Some(api.clone());
-            }
-            if api_resolution.is_none() {
-                let disp = instr.memory_displacement64();
-                if disp != 0
-                    && let Some(api) = iat_map.get(&disp)
-                {
-                    api_resolution = Some(api.clone());
-                }
-            }
-
-            instructions.push(InstructionInfo::from_iced(&instr, api_resolution));
+            let api_resolution = Self::resolve_api(&instr, iat_map);
+            instructions.push(InstructionInfo::from_iced(
+                &instr,
+                &mut formatter,
+                &mut mnem_buf,
+                &mut op_buf,
+                api_resolution,
+            ));
         }
 
         Ok(instructions)
     }
+
+    /// Maps an `iced_x86::FlowControl` descriptor to an [`InstructionClass`].
+    ///
+    /// Disambiguates unconditional branches, conditional branches, calls, and returns
+    /// from normal sequential execution flow.
+    ///
+    /// # Parameters
+    ///
+    /// - `flow`: The flow control classification provided by `iced-x86`.
+    ///
+    /// # Returns
+    ///
+    /// The corresponding [`InstructionClass`].
+    fn classify_flow(flow: iced_x86::FlowControl) -> InstructionClass {
+        match flow {
+            FlowControl::UnconditionalBranch => InstructionClass::UnconditionalJump,
+            FlowControl::ConditionalBranch => InstructionClass::ConditionalJump,
+            FlowControl::Call | FlowControl::IndirectCall => InstructionClass::Call,
+            FlowControl::Return => InstructionClass::Return,
+            _ => InstructionClass::Normal,
+        }
+    }
 }
 
-#[cfg(all(test, feature = "backend-iced", not(feature = "backend-capstone")))]
+impl InstructionInfo {
+    /// High-throughput constructor reusing caller-allocated scratch buffers and formatter.
+    ///
+    /// Avoids dynamic memory allocations in tight disassembly loops while ensuring consistent
+    /// control-flow classification and string inlining.
+    ///
+    /// # Parameters
+    ///
+    /// - `instr`: Reference to the native [`iced_x86::Instruction`].
+    /// - `formatter`: Mutable reference to the configured [`iced_x86::IntelFormatter`].
+    /// - `mnem_buf`: Scratch buffer for mnemonic formatting. Cleared before use.
+    /// - `op_buf`: Scratch buffer for operand formatting. Cleared before use.
+    /// - `api_resolution`: Optional [`Arc<str>`] representing an imported API resolved from IAT.
+    pub(crate) fn from_iced(
+        instr: &iced_x86::Instruction,
+        formatter: &mut iced_x86::IntelFormatter,
+        mnem_buf: &mut String,
+        op_buf: &mut String,
+        api_resolution: Option<Arc<str>>,
+    ) -> Self {
+        mnem_buf.clear();
+        let _ = write!(mnem_buf, "{:?}", instr.mnemonic());
+        mnem_buf.make_ascii_lowercase();
+
+        op_buf.clear();
+        formatter.format_all_operands(instr, op_buf);
+
+        let inst_class = DisassemblerImpl::classify_flow(instr.flow_control());
+
+        InstructionInfo {
+            address: instr.ip(),
+            mnemonic: CompactString::new(mnem_buf.as_str()),
+            op_str: CompactString::new(op_buf.as_str()),
+            api_resolution,
+            matched: SmallVec::new(),
+            inst_class,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{
-        parser::{BinaryArch, IatMap},
-        traits::Disassembler,
-    };
+    use crate::core::parser::{BinaryArch, IatMap};
 
     #[test]
     fn test_iced_disasm_factory_x64_intel() {
@@ -225,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_iced_disasm_factory_x86_att() {
+    fn test_iced_disasm_factory_x86_intel() {
         let disasm = DisassemblerImpl::new(BinaryArch::X86);
         // MOV EAX, 1
         let bytes = &[0xB8, 0x01, 0x00, 0x00, 0x00];
@@ -235,10 +312,10 @@ mod tests {
 
         assert_eq!(insns[0].address(), 0x1000);
         assert_eq!(insns[0].format_mnemonic(), "mov");
-        // GAS format: $1, %eax
+        // Intel format
         let op_str = insns[0].format_operands();
         assert!(
-            op_str.contains("%eax") || op_str.contains("$1") || op_str.contains("eax"),
+            op_str.contains("eax") || op_str.contains("1"),
             "op_str: {}",
             op_str
         );
@@ -251,8 +328,28 @@ mod tests {
         let bytes = &[0xFF, 0xFF];
         let iat_map = IatMap::default();
         let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
-        // Iced decodes it as an INVALID instruction and we skip it in our loop,
-        // but let's check what it outputs, probably 0 instructions.
         assert_eq!(insns.len(), 0);
+    }
+
+    #[test]
+    fn test_from_iced_constructors() {
+        let mut decoder = Decoder::with_ip(64, &[0xC3], 0x401000, DecoderOptions::NONE);
+        let instr = decoder.decode();
+        // High-throughput constructor with reusable buffers
+        let mut formatter = DisassemblerImpl::create_formatter();
+        let mut mnem_buf = String::with_capacity(16);
+        let mut op_buf = String::with_capacity(64);
+        let api_sym: Arc<str> = Arc::from("dummy_api");
+        let info_buf = InstructionInfo::from_iced(
+            &instr,
+            &mut formatter,
+            &mut mnem_buf,
+            &mut op_buf,
+            Some(api_sym.clone()),
+        );
+        assert_eq!(info_buf.address(), 0x401000);
+        assert_eq!(info_buf.format_mnemonic(), "ret");
+        assert_eq!(info_buf.api_resolution, Some(api_sym));
+        assert_eq!(info_buf.inst_class, InstructionClass::Return);
     }
 }

@@ -76,8 +76,8 @@ use crate::core::{
     needle::NeedleIndex,
     parser::{ParsedBinaryContext, Parser},
     rule::Rule,
-    scoring::{RiskAssessment, SeverityClassifier},
-    traits::{Disassembler, HeuristicPlugin},
+    scoring::{classifier::SeverityClassifier, risk::RiskAssessment},
+    traits::HeuristicPlugin,
     types::{
         analysis::{AnalysisContext, AnalysisProgress, AnalysisResult, SectionRange},
         result::{RbatError, RbatResult},

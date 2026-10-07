@@ -169,7 +169,7 @@ struct OverrideTable {
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::scoring::SeverityClass;
+/// use rbat::core::scoring::classifier::SeverityClass;
 ///
 /// assert!(SeverityClass::Low < SeverityClass::High);
 /// assert_eq!(SeverityClass::Critical.label(), "CRITICAL");
@@ -201,13 +201,13 @@ impl SeverityClass {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::scoring::SeverityClass;
+    /// use rbat::core::scoring::classifier::SeverityClass;
     ///
     /// assert_eq!(SeverityClass::Informational.probability(), 0.0);
     /// assert_eq!(SeverityClass::Low.probability(), 0.02);
     /// assert_eq!(SeverityClass::Critical.probability(), 0.40);
     /// ```
-    pub(crate) fn probability(self) -> f64 {
+    pub fn probability(self) -> f64 {
         match self {
             Self::Informational | Self::Capability => 0.0,
             Self::Low => LOW_PROBABILITY,
@@ -222,7 +222,7 @@ impl SeverityClass {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::scoring::SeverityClass;
+    /// use rbat::core::scoring::classifier::SeverityClass;
     ///
     /// assert_eq!(SeverityClass::Low.label(), "LOW");
     /// assert_eq!(SeverityClass::Critical.label(), "CRITICAL");
@@ -247,8 +247,10 @@ impl SeverityClass {
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::rule::RuleMeta;
-/// use rbat::core::scoring::{SeverityClass, SeverityClassifier};
+/// use rbat::core::{
+///   rule::RuleMeta,
+///   scoring::classifier::{SeverityClass, SeverityClassifier},
+/// };
 ///
 /// let classifier = SeverityClassifier::embedded();
 /// let meta = RuleMeta {
@@ -272,7 +274,7 @@ impl SeverityClassifier {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::scoring::SeverityClassifier;
+    /// use rbat::core::scoring::classifier::SeverityClassifier;
     ///
     /// let classifier = SeverityClassifier::embedded();
     /// ```
@@ -297,7 +299,7 @@ impl SeverityClassifier {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::scoring::{SeverityClass, SeverityClassifier};
+    /// use rbat::core::scoring::classifier::{SeverityClass, SeverityClassifier};
     ///
     /// let toml = r#"
     /// [namespace_defaults]
@@ -351,7 +353,7 @@ impl SeverityClassifier {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use rbat::core::scoring::SeverityClassifier;
+    /// use rbat::core::scoring::classifier::SeverityClassifier;
     ///
     /// let classifier = SeverityClassifier::extend("my-overrides.toml")
     ///     .expect("failed to load custom overrides");
@@ -408,7 +410,7 @@ impl SeverityClassifier {
     /// ```rust
     /// use rbat::core::{
     ///   rule::RuleMeta,
-    ///   scoring::{SeverityClass, SeverityClassifier},
+    ///   scoring::classifier::{SeverityClass, SeverityClassifier},
     /// };
     ///
     /// let classifier = SeverityClassifier::embedded();
@@ -550,7 +552,7 @@ impl SeverityClassifier {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::scoring::SeverityClassifier;
+    /// use rbat::core::scoring::classifier::SeverityClassifier;
     ///
     /// let slug = SeverityClassifier::tactic_slug("Defense Evasion::Obfuscated Files [T1027]");
     /// assert_eq!(slug.as_deref(), Some("defense_evasion"));

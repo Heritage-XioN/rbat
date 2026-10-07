@@ -171,7 +171,6 @@ mod tests {
         assert_eq!(results[34], 0x1000 + 54);
     }
 
-    #[cfg(feature = "backend-capstone")]
     #[test]
     fn test_disassemble_section_no_early_breakout() {
         let mut instructions = Vec::new();

@@ -225,7 +225,7 @@ impl HeuristicPlugin for CfgPlugin {
     }
 }
 
-#[cfg(all(test, feature = "backend-capstone"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::{

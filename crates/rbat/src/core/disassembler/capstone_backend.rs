@@ -1,106 +1,147 @@
-//! capstone based disassembler implementation
+//! # Capstone Disassembly Backend
+//!
+//! Multi-architecture linear-sweep disassembler leveraging the C-based Capstone engine.
+//!
+//! ## Overview
+//!
+//! The [`DisassemblerImpl`] engine supports multi-architecture disassembly across:
+//! - `x86` (32-bit Intel syntax)
+//! - `x64` (64-bit Intel syntax)
+//! - `ARM` (32-bit little-endian)
+//! - `ARM64` (AArch64 little-endian)
+//!
+//! Disassembly uses Intel syntax across all targets to guarantee exact mnemonic and operand
+//! text compatibility with capa rule signatures.
+//!
+//! ## Resilient Disassembly & Skipdata
+//!
+//! In compiled binaries, code sections frequently interleave non-code elements (alignment padding,
+//! embedded jump tables, literal pools, inline data). Standard linear disassembly would halt upon
+//! encountering undecodable byte sequences. `DisassemblerImpl` enables Capstone's `skipdata`
+//! mode (`cs.set_skipdata(true)`), skipping invalid bytes and resuming disassembly at the next
+//! aligned sequence to maintain complete section coverage.
+//!
+//! ## Allocation & Memory Characteristics
+//!
+//! - **Decode-Time Inlining**: Mnemonics and operands are unpacked into stack-allocated
+//!   [`CompactString`] buffers within [`InstructionInfo`]. Instructions with <= 24 bytes of
+//!   text representation require 0 heap allocations.
+//! - **IAT Thunk Resolution**: Instructions targeting Import Address Table (IAT) entries
+//!   share existing [`Arc<str>`] symbol allocations from [`IatMap`].
+//! - **Instruction Classification**: Each instruction is classified into an [`InstructionClass`]
+//!   (Call, Return, ConditionalJump, UnconditionalJump, Normal) using Capstone's instruction
+//!   group detail tables.
+//!
+//! ## Examples
+//!
+//! ```rust
+//! use rbat::core::disassembler::DisassemblerImpl;
+//! use rbat::core::parser::{BinaryArch, IatMap};
+//!
+//! let disasm = DisassemblerImpl::new(BinaryArch::X64);
+//! let iat_map = IatMap::default();
+//! let bytes = [0x90, 0xc3]; // nop; ret
+//! let instructions = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+//!
+//! assert_eq!(instructions.len(), 2);
+//! assert_eq!(instructions[0].format_mnemonic(), "nop");
+//! assert_eq!(instructions[1].format_mnemonic(), "ret");
+//! ```
 
-use crate::core::traits::Disassembler;
-use crate::core::types::RbatResult;
+use super::InstructionInfo;
+use crate::core::types::result::RbatResult;
 use crate::core::{
     cfg::{ControlFlowGraph, InstructionClass},
     parser::{BinaryArch, IatMap},
 };
-use aho_corasick::PatternID;
 use capstone::prelude::*;
 use compact_str::CompactString;
-use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::sync::Arc;
 
-/// Represents a single disassembled instruction with pre-computed optimization metadata.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InstructionInfo {
-    /// The memory address of the instruction.
-    pub address: u64,
-    /// The cached mnemonic string.
-    pub mnemonic: CompactString,
-    /// The cached operand string.
-    pub op_str: CompactString,
-    pub api_resolution: Option<Arc<str>>,
-    /// The set of PatternIDs this instruction matched.
-    #[serde(skip)]
-    pub matched: SmallVec<[PatternID; 8]>,
-    /// Precise control-flow class resolved from Capstone instruction detail.
-    pub inst_class: InstructionClass,
-}
-
-impl InstructionInfo {
-    /// Instantiates an `InstructionInfo` from a Capstone instruction.
-    pub fn from_capstone(
-        insn: &capstone::Insn,
-        api_resolution: Option<Arc<str>>,
-        inst_class: InstructionClass,
-    ) -> Self {
-        Self {
-            address: insn.address(),
-            mnemonic: CompactString::new(insn.mnemonic().unwrap_or("")),
-            op_str: CompactString::new(insn.op_str().unwrap_or("")),
-            api_resolution,
-            matched: SmallVec::new(),
-            inst_class,
-        }
-    }
-
-    /// Returns the address of the instruction.
-    pub fn address(&self) -> u64 {
-        self.address
-    }
-
-    /// Returns a new lowercase formatted mnemonic string.
-    pub fn format_mnemonic(&self) -> String {
-        self.mnemonic.to_string()
-    }
-
-    /// Returns a new lowercase formatted operand string.
-    pub fn format_operands(&self) -> String {
-        self.op_str.to_string()
-    }
-
-    /// Zero-allocation formatted mnemonic writer.
-    pub fn format_mnemonic_into(&self, buf: &mut String) {
-        buf.clear();
-        buf.push_str(&self.mnemonic);
-    }
-
-    /// Zero-allocation formatted operand writer.
-    pub fn format_operands_into(&self, buf: &mut String) {
-        buf.clear();
-        buf.push_str(&self.op_str);
-    }
-
-    /// Returns the branch target address if this is a branch/call to a direct address.
-    /// Falls back to string parsing for capstone backend.
-    pub fn branch_target(&self) -> Option<u64> {
-        ControlFlowGraph::parse_target_address(&self.op_str)
-    }
-
-    /// Classifies this instruction's control-flow role.
-    /// Uses the precise class resolved from Capstone detail when available,
-    /// otherwise falls back to the string-based mnemonic heuristic.
-    pub fn class(&self, _arch: &BinaryArch) -> InstructionClass {
-        self.inst_class
-    }
-}
-
+/// Multi-architecture disassembly engine powered by Capstone.
+///
+/// Disassembles machine code for x86, x64, ARM, and ARM64 architectures into unified
+/// [`InstructionInfo`] sequences. Configures Capstone with instruction detail inspection
+/// and skipdata resilience.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::disassembler::DisassemblerImpl;
+/// use rbat::core::parser::BinaryArch;
+///
+/// let disasm = DisassemblerImpl::new(BinaryArch::X64);
+/// ```
 #[derive(Debug)]
 pub struct DisassemblerImpl {
     arch: BinaryArch,
 }
 
 impl DisassemblerImpl {
+    /// Creates a new Capstone-backed [`DisassemblerImpl`] configured for the specified [`BinaryArch`].
+    ///
+    /// # Parameters
+    ///
+    /// - `arch`: Target binary architecture ([`BinaryArch::X86`], [`BinaryArch::X64`],
+    ///   [`BinaryArch::Arm`], or [`BinaryArch::Arm64`]).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::disassembler::DisassemblerImpl;
+    /// use rbat::core::parser::BinaryArch;
+    ///
+    /// let disasm = DisassemblerImpl::new(BinaryArch::X64);
+    /// ```
     pub fn new(arch: BinaryArch) -> Self {
         Self { arch }
     }
-}
 
-impl Disassembler for DisassemblerImpl {
-    fn disassemble(
+    /// Disassembles all machine code instructions from the provided byte slice.
+    ///
+    /// Configures the Capstone engine for `self.arch` with Intel syntax and detail tracking enabled.
+    /// Inlines mnemonic and operand strings, inspects operands against `iat_map` to resolve
+    /// imported API calls, and assigns control-flow classifications.
+    ///
+    /// # Parameters
+    ///
+    /// - `text_bytes`: Raw executable machine code bytes (typically from `.text` or executable section).
+    /// - `entry_addr`: Virtual memory base address corresponding to the start of `text_bytes`.
+    /// - `iat_map`: Import Address Table mapping virtual addresses / displacements to API symbol names.
+    ///
+    /// # Returns
+    ///
+    /// A vector of [`InstructionInfo`] structs representing the disassembled instructions in linear order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`RbatError`](crate::core::types::result::RbatError) if:
+    /// - Capstone initialization fails for the requested architecture.
+    /// - Setting disassembly mode, syntax, or skipdata options fails.
+    /// - Linear disassembly fails fatally in the Capstone C engine.
+    ///
+    /// # Allocation Behavior
+    ///
+    /// - Capstone's C engine allocates an internal instruction buffer during `disasm_all`.
+    /// - The resulting vector pre-allocates space for all decoded instructions.
+    /// - Text strings are stored inline via [`CompactString`] without dynamic heap allocations for strings <= 24 bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::disassembler::DisassemblerImpl;
+    /// use rbat::core::parser::{BinaryArch, IatMap};
+    ///
+    /// let disasm = DisassemblerImpl::new(BinaryArch::X86);
+    /// let iat = IatMap::default();
+    /// let code = [0xb8, 0x01, 0x00, 0x00, 0x00]; // mov eax, 1
+    /// let insns = disasm.disassemble(&code, 0x400000, &iat).unwrap();
+    ///
+    /// assert_eq!(insns.len(), 1);
+    /// assert_eq!(insns[0].format_mnemonic(), "mov");
+    /// ```
+    pub fn disassemble(
         &self,
         text_bytes: &[u8],
         entry_addr: u64,
@@ -164,11 +205,10 @@ impl Disassembler for DisassemblerImpl {
                     }
                 }
                 let inst_class = match &detail {
-                    Some(d) => instruction_class_from_detail(insn, d),
-                    None => ControlFlowGraph::classify_instruction(
-                        insn.mnemonic().unwrap_or(""),
-                        &self.arch,
-                    ),
+                    Some(d) => Self::instruction_class_from_detail(insn, d),
+                    None => {
+                        ControlFlowGraph::classify_instr(insn.mnemonic().unwrap_or(""), &self.arch)
+                    }
                 };
                 InstructionInfo::from_capstone(insn, api_resolution, inst_class)
             })
@@ -176,50 +216,84 @@ impl Disassembler for DisassemblerImpl {
 
         Ok(inst_vec)
     }
-}
 
-/// A helper that resolves a precise `InstructionClass` from Capstone instruction detail
-/// (control-flow groups), disambiguating unconditional vs conditional jumps.
-/// Falls back to the mnemonic for x86 `loop*` instructions, which Capstone
-/// does not always tag with a generic branch group.
-fn instruction_class_from_detail(
-    insn: &capstone::Insn,
-    detail: &capstone::InsnDetail,
-) -> InstructionClass {
-    use capstone::InsnGroupType;
-    let grouped = |g: u8| detail.groups().iter().any(|x| x.0 == g);
-    if grouped(InsnGroupType::CS_GRP_CALL as u8) {
-        InstructionClass::Call
-    } else if grouped(InsnGroupType::CS_GRP_RET as u8) || grouped(InsnGroupType::CS_GRP_IRET as u8)
-    {
-        InstructionClass::Return
-    } else if grouped(InsnGroupType::CS_GRP_JUMP as u8) {
-        // Capstone tags both conditional and unconditional jumps with the
-        // generic `Jump` group. Recognize x86 (`jmp`) and ARM/ARM64 (`b`, `bx`, `br`) unconditional jumps.
-        match insn.mnemonic() {
-            Some("jmp") | Some("b") | Some("bx") | Some("br") => {
-                InstructionClass::UnconditionalJump
+    /// Resolves a precise [`InstructionClass`] from Capstone instruction detail groups.
+    ///
+    /// Inspects architecture group flags to identify calls, returns, and jumps, disambiguating
+    /// unconditional branches (`jmp`, `b`, `bx`, `br`) from conditional jumps. Falls back to
+    /// mnemonic matching for x86 `loop*` instructions which Capstone does not consistently tag
+    /// with branch group flags.
+    ///
+    /// # Parameters
+    ///
+    /// - `insn`: The native Capstone instruction.
+    /// - `detail`: The decoded Capstone instruction detail containing operand and group metadata.
+    ///
+    /// # Returns
+    ///
+    /// An [`InstructionClass`] denoting the control-flow role of the instruction.
+    fn instruction_class_from_detail(
+        insn: &capstone::Insn,
+        detail: &capstone::InsnDetail,
+    ) -> InstructionClass {
+        use capstone::InsnGroupType;
+        let grouped = |g: u8| detail.groups().iter().any(|x| x.0 == g);
+        if grouped(InsnGroupType::CS_GRP_CALL as u8) {
+            InstructionClass::Call
+        } else if grouped(InsnGroupType::CS_GRP_RET as u8)
+            || grouped(InsnGroupType::CS_GRP_IRET as u8)
+        {
+            InstructionClass::Return
+        } else if grouped(InsnGroupType::CS_GRP_JUMP as u8) {
+            // Capstone tags both conditional and unconditional jumps with the
+            // generic `Jump` group. Recognize x86 (`jmp`) and ARM/ARM64 (`b`, `bx`, `br`) unconditional jumps.
+            match insn.mnemonic() {
+                Some("jmp") | Some("b") | Some("bx") | Some("br") => {
+                    InstructionClass::UnconditionalJump
+                }
+                _ => InstructionClass::ConditionalJump,
             }
-            _ => InstructionClass::ConditionalJump,
-        }
-    } else {
-        match insn.mnemonic() {
-            Some(m) if m == "loop" || m == "loope" || m == "loopne" => {
-                InstructionClass::ConditionalJump
+        } else {
+            match insn.mnemonic() {
+                Some(m) if m == "loop" || m == "loope" || m == "loopne" => {
+                    InstructionClass::ConditionalJump
+                }
+                _ => InstructionClass::Normal,
             }
-            _ => InstructionClass::Normal,
         }
     }
 }
 
-#[cfg(all(test, feature = "backend-capstone", not(feature = "backend-iced")))]
+impl InstructionInfo {
+    /// Instantiates an [`InstructionInfo`] from a Capstone instruction and resolved metadata.
+    ///
+    /// # Parameters
+    ///
+    /// - `insn`: Reference to the native [`capstone::Insn`].
+    /// - `api_resolution`: Optional [`Arc<str>`] representing an imported API resolved from IAT.
+    /// - `inst_class`: Control flow classification resolved from Capstone detail groups.
+    pub(crate) fn from_capstone(
+        insn: &capstone::Insn,
+        api_resolution: Option<Arc<str>>,
+        inst_class: InstructionClass,
+    ) -> Self {
+        Self {
+            address: insn.address(),
+            mnemonic: CompactString::new(insn.mnemonic().unwrap_or("")),
+            op_str: CompactString::new(insn.op_str().unwrap_or("")),
+            api_resolution,
+            matched: SmallVec::new(),
+            inst_class,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::{
         cfg::InstructionClass,
         parser::{BinaryArch, IatMap},
-        traits::Disassembler,
     };
 
     #[test]
@@ -232,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn test_disasm_factory_x86_att() {
+    fn test_disasm_factory_x86_intel() {
         let disasm = DisassemblerImpl::new(BinaryArch::X86);
         let iat_map = IatMap::default();
         let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();

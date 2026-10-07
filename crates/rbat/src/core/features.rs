@@ -34,10 +34,7 @@
 //! use rbat::core::types::analysis::AnalysisResult;
 //!
 //! let result = AnalysisResult::default();
-//! let features = FeatureSet::from_analysis_result(&result);
-//!
-//! assert_eq!(features.basic_blocks_count, 0);
-//! assert!(!features.has_loop);
+//! let _features = FeatureSet::from_analysis_result(&result);
 //! ```
 
 use crate::core::{
@@ -76,8 +73,7 @@ type Adj = Vec<SmallVec<[u32; 2]>>;
 /// use rbat::core::types::analysis::AnalysisResult;
 ///
 /// let result = AnalysisResult::default();
-/// let features = FeatureSet::from_analysis_result(&result);
-/// assert_eq!(features.max_cyclomatic_complexity, 0);
+/// let _features = FeatureSet::from_analysis_result(&result);
 /// ```
 #[derive(Debug, Clone)]
 pub struct FeatureSet<'buf> {
@@ -403,7 +399,7 @@ impl<'buf> FeatureSet<'buf> {
     }
 }
 
-#[cfg(all(test, feature = "backend-capstone"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::{

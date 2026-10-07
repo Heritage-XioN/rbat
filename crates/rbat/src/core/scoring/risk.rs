@@ -93,7 +93,7 @@ pub const SUSPICIOUS_MAX_SCORE: u32 = 49;
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::scoring::{RiskAssessment, SeverityClassifier};
+/// use rbat::core::scoring::{risk::RiskAssessment, classifier::SeverityClassifier};
 ///
 /// let assessment = RiskAssessment::calculate_risk(&[], &SeverityClassifier::embedded());
 /// assert_eq!(assessment.score, 0);
@@ -141,7 +141,7 @@ impl RiskAssessment {
     /// ```rust
     /// use rbat::core::{
     ///   rule::RuleMeta,
-    ///   scoring::{RiskAssessment, SeverityClassifier},
+    ///   scoring::{risk::RiskAssessment, classifier::SeverityClassifier},
     /// };
     ///
     /// let classifier = SeverityClassifier::embedded();
@@ -314,7 +314,7 @@ impl RiskAssessment {
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::scoring::{Finding, SeverityClass};
+/// use rbat::core::scoring::{risk::Finding, classifier::SeverityClass};
 ///
 /// let finding = Finding {
 ///     indicator: "process_hollowing".to_string(),
@@ -354,7 +354,7 @@ pub struct Finding {
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::scoring::CategoryScore;
+/// use rbat::core::scoring::risk::CategoryScore;
 ///
 /// let cat = CategoryScore {
 ///     category: "defense_evasion".to_string(),
@@ -377,7 +377,7 @@ pub struct CategoryScore {
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::scoring::FindingCounts;
+/// use rbat::core::scoring::risk::FindingCounts;
 ///
 /// let counts = FindingCounts {
 ///     critical: 1,
@@ -413,7 +413,7 @@ impl FindingCounts {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::scoring::FindingCounts;
+    /// use rbat::core::scoring::risk::FindingCounts;
     ///
     /// let counts = FindingCounts {
     ///     critical: 1,

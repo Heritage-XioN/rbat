@@ -1159,7 +1159,7 @@ impl StringOrVec {
     /// let list = StringOrVec::List(vec!["discovery".into(), "lateral-movement".into()]);
     /// assert_eq!(list.to_vec(), vec!["discovery", "lateral-movement"]);
     /// ```
-    pub(crate) fn to_vec(&self) -> Vec<String> {
+    pub fn to_vec(&self) -> Vec<String> {
         match self {
             Self::Single(s) => vec![s.clone()],
             Self::List(v) => v.clone(),
@@ -1220,7 +1220,7 @@ impl Default for StringOrVec {
     }
 }
 
-#[cfg(all(test, feature = "backend-capstone"))]
+#[cfg(test)]
 mod tests {
     use crate::core::{
         cfg::{BasicBlock, ControlFlowGraph},
