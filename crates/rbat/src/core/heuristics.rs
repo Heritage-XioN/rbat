@@ -69,8 +69,8 @@ pub(crate) fn disassemble_section(
 /// Performs YARA string detection against binary section data.
 ///
 /// # Errors
-/// Returns `RbatError::YaraCompileError` if the embedded rule fails to compile,
-/// or `RbatError::YaraIO` if the scan engine encounters a runtime error.
+/// Returns `RbatError::CompileYaraRuleError` if the embedded rule fails to compile,
+/// or `RbatError::ScanYaraPayloadError` if the scan engine encounters a runtime error.
 pub(crate) fn string_check<'buf>(
     buffer: &'buf [u8],
     section_ranges: &[SectionRange<'buf>],
@@ -88,8 +88,8 @@ pub(crate) fn string_check<'buf>(
 /// Checks the binary against packer and compiler signature rules.
 ///
 /// # Errors
-/// Returns `RbatError::YaraCompileError` if the embedded rule fails to compile,
-/// or `RbatError::YaraIO` if the scan engine encounters a runtime error.
+/// Returns `RbatError::CompileYaraRuleError` if the embedded rule fails to compile,
+/// or `RbatError::ScanYaraPayloadError` if the scan engine encounters a runtime error.
 pub(crate) fn packer_sig_check<'buf>(
     buffer: &'buf [u8],
     section_ranges: &[SectionRange<'buf>],

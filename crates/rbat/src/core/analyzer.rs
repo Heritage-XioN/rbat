@@ -189,9 +189,9 @@ impl Analyzer {
     /// # Errors
     ///
     /// Returns an [`RbatError`] if:
-    /// - Binary format identification or header parsing fails ([`RbatError::UnsupportedBinaryFormat`], [`RbatError::ParseError`]).
-    /// - Machine code disassembly fails ([`RbatError::GenericDisassemblerError`]).
-    /// - An individual heuristic plugin fails during execution (e.g. [`RbatError::YaraIO`], [`RbatError::ParseError`]).
+    /// - Binary format identification or header parsing fails ([`RbatError::ValidateBinaryFormatError`], [`RbatError::ParseBinaryError`]).
+    /// - Machine code disassembly fails ([`RbatError::DisassembleInstructionError`]).
+    /// - An individual heuristic plugin fails during execution (e.g. [`RbatError::ScanYaraPayloadError`], [`RbatError::ParseBinaryError`]).
     pub fn streaming<'buf, F>(&self, buffer: &'buf [u8], on_progress: F) -> RbatResult<()>
     where
         F: Fn(AnalysisProgress<'buf>) + Send + Sync,
@@ -300,9 +300,9 @@ impl Analyzer {
     /// # Errors
     ///
     /// Returns an [`RbatError`] if:
-    /// - Binary parsing or section discovery fails ([`RbatError::UnsupportedBinaryFormat`], [`RbatError::ParseError`]).
-    /// - Machine instruction disassembly fails ([`RbatError::GenericDisassemblerError`]).
-    /// - Any heuristic analysis plugin fails during parallel execution (e.g. [`RbatError::YaraIO`]).
+    /// - Binary parsing or section discovery fails ([`RbatError::ValidateBinaryFormatError`], [`RbatError::ParseBinaryError`]).
+    /// - Machine instruction disassembly fails ([`RbatError::DisassembleInstructionError`]).
+    /// - Any heuristic analysis plugin fails during parallel execution (e.g. [`RbatError::ScanYaraPayloadError`]).
     ///
     /// [`streaming`]: Analyzer::streaming
     pub fn batch<'buf>(
@@ -369,7 +369,7 @@ impl Analyzer {
     /// Saves the first error that occurs to the shared Mutex and triggers the cancellation flag.
     /// Subsequent errors are discarded to preserve the root cause error.
     fn capture_error_and_cancel(&self, err: RbatError) {
-        if matches!(err, RbatError::AnalysisCancelled) {
+        if matches!(err, RbatError::CancelAnalysisError) {
             return;
         }
         let mut guard = self
@@ -438,7 +438,7 @@ impl AnalyzerBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`RbatError::FlirtMatcherError`] if the directory cannot be read or contains
+    /// Returns [`RbatError::MatchFlirtSignatureError`] if the directory cannot be read or contains
     /// malformed signature files.
     ///
     /// # Examples
@@ -481,7 +481,7 @@ impl AnalyzerBuilder {
     ///
     /// # Errors
     ///
-    /// Returns [`RbatError::ConfigError`] if the file cannot be read or contains invalid TOML.
+    /// Returns [`RbatError::LoadConfigurationError`] if the file cannot be read or contains invalid TOML.
     ///
     /// # Examples
     ///
@@ -635,7 +635,7 @@ mod tests {
         );
 
         // 2. capture_error_and_cancel must recover from the poisoned mutex instead of panicking
-        analyzer.capture_error_and_cancel(RbatError::GenericDisassemblerError(
+        analyzer.capture_error_and_cancel(RbatError::ValidateBinaryFormatError(
             "captured error".to_string(),
         ));
 
@@ -647,7 +647,7 @@ mod tests {
             .take();
         assert!(matches!(
             recovered_err,
-            Some(RbatError::GenericDisassemblerError(_))
+            Some(RbatError::ValidateBinaryFormatError(_))
         ));
 
         // 4. streaming must also recover when initializing with a poisoned mutex
@@ -680,7 +680,7 @@ mod tests {
         let analyzer = Analyzer::builder().build();
 
         // 1. Simulate a previous failed run that triggered early cancellation
-        analyzer.capture_error_and_cancel(RbatError::GenericDisassemblerError(
+        analyzer.capture_error_and_cancel(RbatError::ValidateBinaryFormatError(
             "prior failure".to_string(),
         ));
         assert!(

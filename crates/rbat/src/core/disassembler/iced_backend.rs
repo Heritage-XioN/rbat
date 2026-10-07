@@ -145,7 +145,7 @@ impl DisassemblerImpl {
     ///
     /// # Errors
     ///
-    /// Returns an [`RbatError::GenericDisassemblerError`] if `self.arch` is not [`BinaryArch::X86`]
+    /// Returns an [`RbatError::DisassembleInstructionError`] if `self.arch` is not [`BinaryArch::X86`]
     /// or [`BinaryArch::X64`] (e.g. ARM or ARM64, which are only supported by the Capstone backend).
     ///
     /// # Allocation Behavior
@@ -179,7 +179,7 @@ impl DisassemblerImpl {
             BinaryArch::X64 => 64,
             BinaryArch::X86 => 32,
             _ => {
-                return Err(RbatError::GenericDisassemblerError(
+                return Err(RbatError::DisassembleInstructionError(
                     "iced-x86 only supports x86 and x64 architectures".into(),
                 ));
             }

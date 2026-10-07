@@ -134,7 +134,7 @@ impl Rule {
     ///
     /// # Errors
     ///
-    /// Returns [`RbatError::RuleError`] if deserialization fails for both YAML and JSON parsers.
+    /// Returns [`RbatError::ParseRuleError`] if deserialization fails for both YAML and JSON parsers.
     ///
     /// # Examples
     ///
@@ -150,7 +150,7 @@ impl Rule {
             rule
         } else {
             serde_json::from_slice::<Rule>(bytes)
-                .map_err(|e| RbatError::RuleError(e.to_string()))?
+                .map_err(|e| RbatError::ParseRuleError(e.to_string()))?
         };
         rule_var.rule.features = rule_var
             .rule
@@ -241,12 +241,31 @@ impl Rule {
 
     /// Loads all embedded Capa rules from the pre-compiled MessagePack bundle.
     ///
-    /// Decodes the pre-compiled asset. If decoding fails, logs a warning
-    /// to stderr and returns an empty vector without panicking.
+    /// # Errors
     ///
-    /// # Returns
+    /// Returns [`RbatError::LoadEmbeddedAssetError`] if decoding the compile-time MessagePack
+    /// bundle fails.
     ///
-    /// A vector of parsed embedded [`Rule`] instances.
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::rule::Rule;
+    ///
+    /// let rules = Rule::try_load_embedded().unwrap();
+    /// assert!(!rules.is_empty());
+    /// ```
+    pub fn try_load_embedded() -> RbatResult<Vec<Self>> {
+        rmp_serde::from_slice::<Vec<Rule>>(CAPA_RULES_MP).map_err(|e| {
+            RbatError::LoadEmbeddedAssetError(format!("failed to decode pre-compiled rules: {e}"))
+        })
+    }
+
+    /// Loads all embedded Capa rules from the pre-compiled MessagePack bundle.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the compile-time embedded MessagePack rule bundle is corrupted.
+    /// For a fallible alternative, use [`Rule::try_load_embedded`].
     ///
     /// # Examples
     ///
@@ -257,10 +276,7 @@ impl Rule {
     /// assert!(!rules.is_empty());
     /// ```
     pub fn load_embedded() -> Vec<Self> {
-        rmp_serde::from_slice::<Vec<Rule>>(CAPA_RULES_MP).unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to decode pre-compiled rules: {e}");
-            Vec::new()
-        })
+        Self::try_load_embedded().expect("embedded capa rules asset is valid MessagePack")
     }
 
     /// Loads the embedded Capa rules and merges additional custom rules from a directory.

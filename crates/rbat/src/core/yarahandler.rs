@@ -42,11 +42,11 @@ impl YaraHandler {
     /// Compiles YARA rules from the embedded assets and returns a compiled `Rules` object.
     ///
     /// # Errors
-    /// Returns `RbatError::MissingAsset` if the rule file does not exist in the embedded directory,
-    /// or `RbatError::YaraCompileError` if the rule string contains syntax errors.
+    /// Returns `RbatError::LoadEmbeddedAssetError` if the rule file does not exist in the embedded directory,
+    /// or `RbatError::CompileYaraRuleError` if the rule string contains syntax errors.
     pub(crate) fn compile_yara_rule(&self) -> RbatResult<Rules> {
         let file = EmbedYaraRule::get(&self.path)
-            .ok_or_else(|| RbatError::MissingAsset(self.path.to_string()))?;
+            .ok_or_else(|| RbatError::LoadEmbeddedAssetError(self.path.to_string()))?;
         let rules = std::str::from_utf8(&file.data)?;
         let compiler = Compiler::new()?.add_rules_str(rules)?;
         let compiled_rule_file = compiler.compile_rules()?;
@@ -57,7 +57,7 @@ impl YaraHandler {
     /// Maps matches to their corresponding binary section name based on their file offsets.
     ///
     /// # Errors
-    /// Returns `RbatError::YaraIO` if the scan engine encounters a runtime scanning error.
+    /// Returns `RbatError::ScanYaraPayloadError` if the scan engine encounters a runtime scanning error.
     pub(crate) fn scan_mem<'buf>(
         &self,
         compiled_rules: &'buf Rules,

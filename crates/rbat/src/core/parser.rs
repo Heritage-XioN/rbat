@@ -197,8 +197,8 @@ impl<'data, 'obj> Parser<'data, 'obj> {
     ///
     /// # Errors
     ///
-    /// - [`RbatError::UnsupportedBinaryFormat`]: If the container format or CPU architecture is unrecognized.
-    /// - [`RbatError::MissingExecutableSection`]: If no suitable executable text section is present.
+    /// - [`RbatError::ValidateBinaryFormatError`]: If the container format or CPU architecture is unrecognized.
+    /// - [`RbatError::LocateExecutableSectionError`]: If no suitable executable text section is present.
     ///
     /// # Examples
     ///
@@ -228,7 +228,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
             BinaryFormat::Pe | BinaryFormat::Coff => BinaryOS::Win,
             BinaryFormat::MachO => BinaryOS::Mac,
             _ => {
-                return Err(RbatError::UnsupportedBinaryFormat(
+                return Err(RbatError::ValidateBinaryFormatError(
                     "Unsupported OS format".into(),
                 ));
             }
@@ -240,7 +240,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
             Architecture::Aarch64 | Architecture::Aarch64_Ilp32 => BinaryArch::Arm64,
             Architecture::Arm => BinaryArch::Arm,
             other => {
-                return Err(RbatError::UnsupportedBinaryFormat(format!(
+                return Err(RbatError::ValidateBinaryFormatError(format!(
                     "Unsupported architecture: {:?}",
                     other
                 )));
@@ -269,7 +269,7 @@ impl<'data, 'obj> Parser<'data, 'obj> {
 
         let text_bytes = text_bytes
             .or(first_fallback_text)
-            .ok_or(RbatError::MissingExecutableSection)?;
+            .ok_or(RbatError::LocateExecutableSectionError)?;
 
         let iat_map = self.build_iat_map();
 
@@ -605,10 +605,10 @@ mod tests {
         let parser = Parser::new(&binary_object);
         let result = parser.parse_buffer();
         match result {
-            Err(RbatError::UnsupportedBinaryFormat(msg)) => {
+            Err(RbatError::ValidateBinaryFormatError(msg)) => {
                 assert!(msg.contains("Unsupported architecture"));
             }
-            _ => panic!("Expected UnsupportedBinaryFormat error, got {:?}", result),
+            _ => panic!("Expected ValidateBinaryFormatError error, got {:?}", result),
         }
     }
 

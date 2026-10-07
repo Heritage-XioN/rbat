@@ -293,8 +293,8 @@ impl SeverityClassifier {
     ///
     /// # Errors
     ///
-    /// Returns [`RbatError::ConfigError`]
-    /// if `src` is invalid TOML or fails to deserialize into the override schema.
+    /// Returns [`RbatError::LoadConfigurationError`] if `src` is invalid TOML, fails to deserialize,
+    /// or contains an unrecognized severity class for any rule or namespace.
     ///
     /// # Examples
     ///
@@ -312,28 +312,37 @@ impl SeverityClassifier {
     /// let classifier = SeverityClassifier::from_toml_str(toml).unwrap();
     /// ```
     pub fn from_toml_str(src: &str) -> RbatResult<Self> {
-        let table: OverrideTable = toml::from_str(src)
-            .map_err(|e| RbatError::ConfigError(format!("invalid override table: {e}")))?;
-        Ok(Self::from_table(table))
+        let table: OverrideTable = toml::from_str(src).map_err(|e| {
+            RbatError::LoadConfigurationError(format!("invalid override table: {e}"))
+        })?;
+        Self::from_table(table)
     }
 
-    fn from_table(table: OverrideTable) -> Self {
-        let map_entries = |entries: BTreeMap<String, String>| {
-            entries
-                .into_iter()
-                .filter_map(|(key, class)| match Self::parse_class(&class) {
-                    Some(c) => Some((key.to_lowercase(), c)),
-                    None => {
-                        eprintln!("warning: unrecognized severity class '{class}' for '{key}'");
-                        None
-                    }
-                })
-                .collect()
-        };
-        Self {
-            namespace_defaults: map_entries(table.namespace_defaults),
-            rule_overrides: map_entries(table.overrides),
+    fn from_table(table: OverrideTable) -> RbatResult<Self> {
+        let mut namespace_defaults = BTreeMap::new();
+        for (key, class) in table.namespace_defaults {
+            let severity = Self::parse_class(&class).ok_or_else(|| {
+                RbatError::LoadConfigurationError(format!(
+                    "unrecognized severity class '{class}' for namespace '{key}'"
+                ))
+            })?;
+            namespace_defaults.insert(key.to_lowercase(), severity);
         }
+
+        let mut rule_overrides = BTreeMap::new();
+        for (key, class) in table.overrides {
+            let severity = Self::parse_class(&class).ok_or_else(|| {
+                RbatError::LoadConfigurationError(format!(
+                    "unrecognized severity class '{class}' for rule '{key}'"
+                ))
+            })?;
+            rule_overrides.insert(key.to_lowercase(), severity);
+        }
+
+        Ok(Self {
+            namespace_defaults,
+            rule_overrides,
+        })
     }
 
     /// Reads and merges an external TOML override file on top of the embedded defaults.
@@ -347,8 +356,8 @@ impl SeverityClassifier {
     ///
     /// # Errors
     ///
-    /// Returns [`RbatError::ConfigError`]
-    /// if the file cannot be read from disk or contains invalid TOML syntax.
+    /// Returns [`RbatError::LoadConfigurationError`] if the file cannot be read from disk,
+    /// contains invalid TOML syntax, or contains an unrecognized severity class for any rule or namespace.
     ///
     /// # Examples
     ///
@@ -361,33 +370,36 @@ impl SeverityClassifier {
     pub fn extend<P: AsRef<Path>>(path: P) -> RbatResult<Self> {
         let mut classifier = SeverityClassifier::embedded();
         let src = std::fs::read_to_string(path.as_ref()).map_err(|e| {
-            RbatError::ConfigError(format!(
+            RbatError::LoadConfigurationError(format!(
                 "cannot read override file {}: {e}",
                 path.as_ref().display()
             ))
         })?;
-        let table: OverrideTable = toml::from_str(&src)
-            .map_err(|e| RbatError::ConfigError(format!("invalid override file: {e}")))?;
+        let table: OverrideTable = toml::from_str(&src).map_err(|e| {
+            RbatError::LoadConfigurationError(format!("invalid override file: {e}"))
+        })?;
 
         for (key, class) in table.namespace_defaults {
-            if let Some(c) = Self::parse_class(&class) {
-                classifier.namespace_defaults.insert(key.to_lowercase(), c);
-            } else {
-                eprintln!(
-                    "warning: unrecognized severity class '{class}' for namespace '{key}' in {}",
+            let severity = Self::parse_class(&class).ok_or_else(|| {
+                RbatError::LoadConfigurationError(format!(
+                    "unrecognized severity class '{class}' for namespace '{key}' in {}",
                     path.as_ref().display()
-                );
-            }
+                ))
+            })?;
+            classifier
+                .namespace_defaults
+                .insert(key.to_lowercase(), severity);
         }
         for (key, class) in table.overrides {
-            if let Some(c) = Self::parse_class(&class) {
-                classifier.rule_overrides.insert(key.to_lowercase(), c);
-            } else {
-                eprintln!(
-                    "warning: unrecognized severity class '{class}' for rule '{key}' in {}",
+            let severity = Self::parse_class(&class).ok_or_else(|| {
+                RbatError::LoadConfigurationError(format!(
+                    "unrecognized severity class '{class}' for rule '{key}' in {}",
                     path.as_ref().display()
-                );
-            }
+                ))
+            })?;
+            classifier
+                .rule_overrides
+                .insert(key.to_lowercase(), severity);
         }
         Ok(classifier)
     }
@@ -648,20 +660,18 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_class_entries_are_skipped() {
-        let classifier = SeverityClassifier::from_toml_str(
+    fn test_invalid_class_entries_return_error() {
+        let err = SeverityClassifier::from_toml_str(
             "[overrides]\n\"bad entry\" = \"nonsense\"\n\"good entry\" = \"low\"\n",
         )
-        .expect("valid toml");
-        assert_eq!(
-            classifier.classify(&rule("good entry", None)),
-            SeverityClass::Low
-        );
-        // Unmatched names fall through to tactic inference (no mappings => Low).
-        assert_eq!(
-            classifier.classify(&rule("bad entry", None)),
-            SeverityClass::Low
-        );
+        .unwrap_err();
+        match err {
+            RbatError::LoadConfigurationError(msg) => {
+                assert!(msg.contains("nonsense"));
+                assert!(msg.contains("bad entry"));
+            }
+            other => panic!("expected LoadConfigurationError, got {other:?}"),
+        }
     }
 
     #[test]
