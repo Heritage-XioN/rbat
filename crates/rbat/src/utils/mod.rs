@@ -1,9 +1,9 @@
-//! # Standalone Algorithmic Utilities
+//! # Algorithmic Utilities
 //!
-//! Truly standalone mathematical and algorithmic helpers used across the static analysis library.
+//! Mathematical and algorithmic helpers used across the static analysis library.
 
-pub mod entropy;
-pub mod hashing;
+pub(crate) mod entropy;
+pub(crate) mod hashing;
 
 #[cfg(test)]
 pub mod test_helpers;

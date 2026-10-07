@@ -1,3 +1,7 @@
+//! Collects IDA FLIRT `.sig` signature files from the
+//! `assets/flirtdb/` Git submodule and copies them into `assets/signatures_embedded/`
+//! for embedding into the library.
+
 use std::fs;
 use std::path::Path;
 

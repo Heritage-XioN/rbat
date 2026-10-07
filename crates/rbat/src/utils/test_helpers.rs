@@ -55,6 +55,7 @@ pub fn generate_pe_stub(path: &Path) {
     file.write_all(&result).unwrap();
 }
 
+#[allow(dead_code)]
 /// Generates a minimal i386 ELF binary and writes it to `path`.
 pub fn generate_elf_x86(path: &Path) {
     let mut obj = Object::new(BinaryFormat::Elf, Architecture::I386, Endianness::Little);
@@ -65,6 +66,7 @@ pub fn generate_elf_x86(path: &Path) {
     file.write_all(&result).unwrap();
 }
 
+#[allow(dead_code)]
 /// Generates a minimal AArch64 Mach-O binary and writes it to `path`.
 pub fn generate_macho_arm64(path: &Path) {
     let mut obj = Object::new(
@@ -79,6 +81,7 @@ pub fn generate_macho_arm64(path: &Path) {
     file.write_all(&result).unwrap();
 }
 
+#[allow(dead_code)]
 /// Generates a minimal i386 PE binary stub and writes it to `path`.
 pub fn generate_pe_x86(path: &Path) {
     let mut stub = vec![0u8; 0x200];

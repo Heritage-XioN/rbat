@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 const DIGEST_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Computes all triage hashes for a binary buffer.
-pub fn compute_hashes(buffer: &[u8]) -> BinaryHashes {
+pub(crate) fn compute_hashes(buffer: &[u8]) -> BinaryHashes {
     let mut md5_hasher = Md5::new();
     let mut sha1_hasher = Sha1::new();
     let mut sha256_hasher = Sha256::new();
