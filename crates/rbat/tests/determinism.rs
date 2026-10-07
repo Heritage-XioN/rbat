@@ -43,9 +43,7 @@ fn assert_deterministic(filename: &str) {
     let mut category_breakdowns: Vec<Vec<(String, u8)>> = Vec::with_capacity(DETERMINISM_RUNS);
 
     for run in 0..DETERMINISM_RUNS {
-        let analyzer = Analyzer::builder()
-            .build()
-            .unwrap_or_else(|e| panic!("Failed to build analyzer on run {}: {}", run, e));
+        let analyzer = Analyzer::builder().build();
 
         let (analysis, assessment) = analyzer
             .batch(&buffer)

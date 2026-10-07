@@ -1,3 +1,4 @@
+use petgraph::unionfind::UnionFind;
 use proptest::prelude::*;
 use rbat::core::features::FeatureSet;
 use smallvec::SmallVec;
@@ -50,40 +51,49 @@ proptest! {
         }
     }
 
-    /// Invariant: A strictly forward Directed Acyclic Graph (DAG) where all edges
-    /// satisfy u < v must NEVER contain a cycle.
+    /// Invariant: An arbitrary forward-directed DAG where all edges satisfy u < v
+    /// must NEVER be detected as having a cycle.
     #[test]
-    fn test_has_cycle_dag_invariants(n in 1usize..64) {
+    fn test_has_cycle_dag_invariants(
+        n in 1usize..64,
+        raw_edges in prop::collection::vec((any::<u8>(), any::<u8>()), 0..100)
+    ) {
         let mut adj: Vec<SmallVec<[u32; 2]>> = vec![SmallVec::new(); n];
 
-        // Generate forward-only edges (u -> v where u < v)
-        for (u, succs) in adj.iter_mut().enumerate() {
-            for v in (u + 1)..n {
-                if (u + v) % 3 == 0 && succs.len() < 2 {
-                    succs.push(v as u32);
-                }
+        // Add random forward edges (u < v)
+        for (a, b) in raw_edges {
+            let u = (a as usize) % n;
+            let v = (b as usize) % n;
+            let (u, v) = (u.min(v), u.max(v));
+            if u != v && adj[u].len() < 2 && !adj[u].contains(&(v as u32)) {
+                adj[u].push(v as u32);
             }
         }
 
-        prop_assert!(!FeatureSet::has_cycle(&adj), "DAG falsely reported having a cycle!");
+        prop_assert!(!FeatureSet::has_cycle(&adj), "Random DAG falsely reported having a cycle!");
     }
 
-    /// Invariant: Any graph with an explicit cycle must be detected as having a cycle.
+    /// Invariant: Any graph containing a back-edge or cycle must be detected as having a cycle.
     #[test]
-    fn test_has_cycle_detected_on_synthetic_cycles(n in 2usize..64) {
+    fn test_has_cycle_detected_on_synthetic_cycles(
+        n in 2usize..64,
+        cycle_start in 0usize..63
+    ) {
+        let cycle_start = cycle_start % (n - 1);
         let mut adj: Vec<SmallVec<[u32; 2]>> = vec![SmallVec::new(); n];
 
-        // Form a simple Hamiltonian ring 0 -> 1 -> 2 -> ... -> (n-1) -> 0
+        // Form a path from 0 to n-1
         for (i, succs) in adj[..n - 1].iter_mut().enumerate() {
             succs.push((i + 1) as u32);
         }
-        adj[n - 1].push(0);
+        // Inject a back-edge from n-1 to cycle_start forming a cycle
+        adj[n - 1].push(cycle_start as u32);
 
-        prop_assert!(FeatureSet::has_cycle(&adj), "Cycle ring was not detected!");
+        prop_assert!(FeatureSet::has_cycle(&adj), "Injected cycle was not detected!");
     }
 
-    /// Invariant: McCabe Cyclomatic Complexity must always evaluate to at least 1
-    /// for any arbitrary graph structure.
+    /// Invariant: McCabe Cyclomatic Complexity must strictly follow the formula
+    /// CC = max_r (E_r - N_r + 2) across weakly connected components.
     #[test]
     fn test_max_cyclomatic_complexity_invariants(
         n in 1usize..50,
@@ -100,6 +110,30 @@ proptest! {
         }
 
         let cc = FeatureSet::max_cyclomatic_complexity(&adj);
-        prop_assert!(cc >= 1, "Cyclomatic complexity was less than 1: {}", cc);
+
+        // Calculate expected McCabe complexity independently using UnionFind
+        let mut uf = UnionFind::new(n);
+        for (s, succs) in adj.iter().enumerate() {
+            for &d in succs {
+                uf.union(s, d as usize);
+            }
+        }
+        let labels = uf.into_labeling();
+
+        let mut comp_nodes = vec![0u32; n];
+        let mut comp_edges = vec![0u32; n];
+        for (s, succs) in adj.iter().enumerate() {
+            let r = labels[s];
+            comp_nodes[r] += 1;
+            comp_edges[r] += succs.len() as u32;
+        }
+
+        let expected_cc = (0..n)
+            .filter(|&r| comp_nodes[r] > 0)
+            .map(|r| (comp_edges[r] + 2).saturating_sub(comp_nodes[r]).max(1) as usize)
+            .max()
+            .unwrap_or(1);
+
+        prop_assert_eq!(cc, expected_cc, "Cyclomatic complexity mismatch: computed {}, expected {}", cc, expected_cc);
     }
 }
