@@ -4,13 +4,17 @@
 
 pub use crate::core::{
     analyzer::Analyzer,
-    cfg::ControlFlowGraph,
+    cfg::{BasicBlock, ControlFlowGraph},
     features::FeatureSet,
     flirt::FlirtMatcher,
+    needle::NeedleIndex,
     rule::Rule,
-    scoring::SeverityClassifier,
+    scoring::{
+        classifier::{SeverityClass, SeverityClassifier},
+        risk::{FindingCounts, RiskAssessment},
+    },
     types::{
-        AnalysisProgress, AnalysisResult, BinaryHashes, BinaryMetadata, RbatError, RbatResult,
-        SectionRange,
+        analysis::{AnalysisProgress, AnalysisResult, BinaryHashes, BinaryMetadata, SectionRange},
+        result::{RbatError, RbatResult},
     },
 };
