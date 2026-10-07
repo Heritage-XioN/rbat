@@ -4,7 +4,7 @@
 //! into a pretty-printed JSON file format for automation integration.
 
 use color_eyre::Result;
-use rbat::core::{scoring::RiskAssessment, types::AnalysisResult};
+use rbat::prelude::*;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;

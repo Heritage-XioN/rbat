@@ -5,7 +5,7 @@
 
 use color_eyre::Result;
 use csv::Writer;
-use rbat::core::{scoring::RiskAssessment, types::AnalysisResult};
+use rbat::prelude::*;
 use std::path::Path;
 
 /// Generates a SOC-ready CSV report of the analysis findings.
@@ -98,7 +98,7 @@ pub fn generate_csv_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rbat::core::scoring::{Finding, SeverityClass};
+    use rbat::core::scoring::{classifier::SeverityClass, risk::Finding};
     use tempfile::tempdir;
 
     #[test]

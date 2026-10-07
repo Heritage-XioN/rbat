@@ -7,10 +7,7 @@ use super::viz::generate_entropy_heatmap;
 use askama::Template;
 use chrono::Local;
 use color_eyre::Result;
-use rbat::core::{
-    scoring::{RiskAssessment, SeverityClass},
-    types::AnalysisResult,
-};
+use rbat::prelude::*;
 use std::fs;
 use std::path::Path;
 
@@ -121,10 +118,31 @@ pub fn generate_pdf_report(
     // Map Technical Capabilities
     let mut capabilities = Vec::new();
 
-    for (section, caves) in &analysis_result.code_cave {
+    if !analysis_result.code_cave.nop_sleds.is_empty() {
         capabilities.push(TechnicalFinding {
             category: "Code Cave".to_string(),
-            details: format!("Found {} caves in section {}", caves.len(), section),
+            details: format!(
+                "Found {} NOP sled addresses",
+                analysis_result.code_cave.nop_sleds.len()
+            ),
+        });
+    }
+    if !analysis_result.code_cave.null_padding.is_empty() {
+        capabilities.push(TechnicalFinding {
+            category: "Code Cave".to_string(),
+            details: format!(
+                "Found {} NULL padding addresses",
+                analysis_result.code_cave.null_padding.len()
+            ),
+        });
+    }
+    if !analysis_result.code_cave.trap_padding.is_empty() {
+        capabilities.push(TechnicalFinding {
+            category: "Code Cave".to_string(),
+            details: format!(
+                "Found {} INT3/trap padding addresses",
+                analysis_result.code_cave.trap_padding.len()
+            ),
         });
     }
 

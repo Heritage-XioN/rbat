@@ -15,11 +15,7 @@ use ratatui::{
         Tabs, Widget,
     },
 };
-use rbat::core::{
-    cfg::BasicBlock,
-    scoring::{RiskAssessment, SeverityClass},
-    types::AnalysisResult,
-};
+use rbat::prelude::*;
 use std::io;
 
 // ── RBAT Design System Palette ───
@@ -380,7 +376,7 @@ impl<'buf> App<'buf> {
             vec![]
         };
         if let Some(block) = self.disasm_state.selected().and_then(|idx| blocks.get(idx)) {
-            return block.instruction_count();
+            return block.instr_count();
         }
         0
     }
@@ -674,7 +670,7 @@ impl<'buf> App<'buf> {
                 .analysis_result
                 .cfg
                 .as_ref()
-                .map(|cfg| cfg.block_instructions(block))
+                .map(|cfg| cfg.as_block_instr(block))
                 .unwrap_or(&[]);
 
             let rows: Vec<Row> = instrs
