@@ -8,50 +8,41 @@ use comfy_table::{
     Attribute, Cell, Color, ContentArrangement, Table, presets::UTF8_FULL_CONDENSED,
 };
 use crossterm::style::{Color as TermColor, Stylize};
-use rbat::core::{
-    scoring::{FindingCounts, RiskAssessment, SeverityClass},
-    types::AnalysisResult,
-};
+use rbat::prelude::*;
 use std::path::Path;
 
 // Palette definitions aligned with Next.js client & TUI palette
-const COLOR_ACCENT: TermColor = TermColor::Rgb {
+const COLOR_ACCENT: Color = Color::Rgb {
     r: 192,
     g: 132,
     b: 252,
 }; // #c084fc
-const COLOR_MUTED: TermColor = TermColor::Rgb {
+const COLOR_MUTED: Color = Color::Rgb {
     r: 156,
     g: 163,
     b: 175,
 }; // #9ca3af
-const COLOR_BORDER: TermColor = TermColor::Rgb {
-    r: 60,
-    g: 64,
-    b: 110,
-}; // Indigo border
-
-const COLOR_DANGER: TermColor = TermColor::Rgb {
+const COLOR_DANGER: Color = Color::Rgb {
     r: 239,
     g: 68,
     b: 68,
 }; // #ef4444
-const COLOR_WARNING: TermColor = TermColor::Rgb {
+const COLOR_WARNING: Color = Color::Rgb {
     r: 245,
     g: 158,
     b: 11,
 }; // #f59e0b
-const COLOR_WARNING_LIGHT: TermColor = TermColor::Rgb {
+const COLOR_WARNING_LIGHT: Color = Color::Rgb {
     r: 251,
     g: 191,
     b: 36,
 }; // #fbbf24
-const COLOR_SUCCESS: TermColor = TermColor::Rgb {
+const COLOR_SUCCESS: Color = Color::Rgb {
     r: 34,
     g: 197,
     b: 94,
 }; // #22c55e
-const COLOR_SUCCESS_LIGHT: TermColor = TermColor::Rgb {
+const COLOR_SUCCESS_LIGHT: Color = Color::Rgb {
     r: 74,
     g: 222,
     b: 128,
@@ -61,37 +52,131 @@ const COLOR_SUCCESS_LIGHT: TermColor = TermColor::Rgb {
 /// progressive scale: green (low) → amber (medium) → orange (high) → red (critical).
 fn class_color(class: SeverityClass) -> Color {
     match class {
-        SeverityClass::Critical => Color::Rgb {
-            r: 239,
-            g: 68,
-            b: 68,
-        },
+        SeverityClass::Critical => COLOR_DANGER,
         SeverityClass::High => Color::Rgb {
             r: 249,
             g: 115,
             b: 22,
         },
-        SeverityClass::Medium => Color::Rgb {
-            r: 245,
-            g: 158,
-            b: 11,
-        },
-        SeverityClass::Low => Color::Rgb {
-            r: 74,
-            g: 222,
-            b: 128,
-        },
-        SeverityClass::Capability => Color::Rgb {
-            r: 156,
-            g: 163,
-            b: 175,
-        },
+        SeverityClass::Medium => COLOR_WARNING,
+        SeverityClass::Low => COLOR_SUCCESS_LIGHT,
+        SeverityClass::Capability => COLOR_MUTED,
         SeverityClass::Informational => Color::Rgb {
             r: 120,
             g: 128,
             b: 140,
         },
     }
+}
+
+/// Builds the Target Metadata & Triage Hashes table.
+fn build_metadata_table(file_path: &Path, analysis_result: &AnalysisResult<'_>) -> Table {
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL_CONDENSED)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("RBAT STATIC ANALYSIS REPORT")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("VALUE")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+        ]);
+
+    table.add_row(vec![
+        Cell::new("Target File").fg(COLOR_MUTED),
+        Cell::new(file_path.display().to_string()).add_attribute(Attribute::Bold),
+    ]);
+    table.add_row(vec![
+        Cell::new("Binary Type").fg(COLOR_MUTED),
+        Cell::new(&analysis_result.metadata.binary_type).fg(COLOR_ACCENT),
+    ]);
+    table.add_row(vec![
+        Cell::new("Architecture").fg(COLOR_MUTED),
+        Cell::new(analysis_result.metadata.architecture_name()).fg(COLOR_ACCENT),
+    ]);
+    table.add_row(vec![
+        Cell::new("Entry Point").fg(COLOR_MUTED),
+        Cell::new(format!("0x{:X}", analysis_result.metadata.entry_point)).fg(COLOR_ACCENT),
+    ]);
+
+    let hashes = &analysis_result.hashes;
+    for (label, value) in [
+        ("MD5", hashes.md5.as_str()),
+        ("SHA-1", hashes.sha1.as_str()),
+        ("SHA-256", hashes.sha256.as_str()),
+        ("SSDEEP", hashes.ssdeep.as_str()),
+        ("TLSH", hashes.tlsh.as_str()),
+    ] {
+        if !value.is_empty() {
+            table.add_row(vec![
+                Cell::new(label).fg(COLOR_MUTED),
+                Cell::new(value).fg(COLOR_ACCENT),
+            ]);
+        }
+    }
+
+    table
+}
+
+/// Builds the Risk Assessment gauge and severity overview table.
+fn build_risk_table(assessment: &RiskAssessment) -> Table {
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL_CONDENSED)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("RISK ASSESSMENT")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("SCORE")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("VERDICT")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("SUMMARY")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+        ]);
+
+    let score = assessment.score.min(100);
+    let bar_width = 20;
+    let filled = ((score as usize) * bar_width) / 100;
+    let empty = bar_width.saturating_sub(filled);
+
+    let (score_color, severity_str) = match assessment.severity.as_str() {
+        "Safe" => (COLOR_SUCCESS, "SAFE"),
+        "Suspicious" => (COLOR_WARNING, "SUSPICIOUS"),
+        _ => (COLOR_DANGER, "MALICIOUS"),
+    };
+
+    let gauge = format!("{}{} ({}%)", "█".repeat(filled), "░".repeat(empty), score);
+
+    let summary = format_summary_line(&assessment.finding_counts);
+    let summary_text = if summary.is_empty() {
+        "No findings".to_string()
+    } else {
+        summary
+    };
+
+    table.add_row(vec![
+        Cell::new("Threat Level").fg(COLOR_MUTED),
+        Cell::new(gauge)
+            .fg(score_color)
+            .add_attribute(Attribute::Bold),
+        Cell::new(severity_str)
+            .fg(score_color)
+            .add_attribute(Attribute::Bold),
+        Cell::new(summary_text).fg(if assessment.finding_counts.indicator_count() > 0 {
+            COLOR_WARNING_LIGHT
+        } else {
+            COLOR_SUCCESS_LIGHT
+        }),
+    ]);
+
+    table
 }
 
 /// Builds the colorized findings table (`CLASS | CAPABILITY | ATT&CK | MBC | NAMESPACE`).
@@ -101,59 +186,84 @@ fn build_findings_table(assessment: &RiskAssessment) -> Table {
         .load_preset(UTF8_FULL_CONDENSED)
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec![
-            Cell::new("CLASS").fg(Color::Rgb {
-                r: 192,
-                g: 132,
-                b: 252,
-            }),
-            Cell::new("CAPABILITY").fg(Color::Rgb {
-                r: 192,
-                g: 132,
-                b: 252,
-            }),
-            Cell::new("ATT&CK").fg(Color::Rgb {
-                r: 192,
-                g: 132,
-                b: 252,
-            }),
-            Cell::new("MBC").fg(Color::Rgb {
-                r: 192,
-                g: 132,
-                b: 252,
-            }),
-            Cell::new("NAMESPACE").fg(Color::Rgb {
-                r: 192,
-                g: 132,
-                b: 252,
-            }),
+            Cell::new("CLASS")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("CAPABILITY")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("ATT&CK")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("MBC")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("NAMESPACE")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
         ]);
 
-    for finding in &assessment.findings {
-        let class_cell = Cell::new(finding.severity_class.label())
-            .fg(class_color(finding.severity_class))
-            .add_attribute(Attribute::Bold);
-        let attack_ids = if finding.attack_ids.is_empty() {
-            "—".to_string()
-        } else {
-            finding.attack_ids.join(", ")
-        };
-        let mbc_ids = if finding.mbc_ids.is_empty() {
-            "—".to_string()
-        } else {
-            finding.mbc_ids.join(", ")
-        };
-        let namespace = finding.namespace.as_deref().unwrap_or("—").to_string();
-
+    if assessment.findings.is_empty() {
         table.add_row(vec![
-            class_cell,
-            Cell::new(&finding.indicator),
-            Cell::new(attack_ids),
-            Cell::new(mbc_ids),
-            Cell::new(namespace).fg(Color::Rgb {
-                r: 156,
-                g: 163,
-                b: 175,
-            }),
+            Cell::new("INFO")
+                .fg(COLOR_SUCCESS)
+                .add_attribute(Attribute::Bold),
+            Cell::new("✔ No security threats or anomalies detected.").fg(COLOR_SUCCESS_LIGHT),
+            Cell::new("—"),
+            Cell::new("—"),
+            Cell::new("—").fg(COLOR_MUTED),
+        ]);
+    } else {
+        for finding in &assessment.findings {
+            let class_cell = Cell::new(finding.severity_class.label())
+                .fg(class_color(finding.severity_class))
+                .add_attribute(Attribute::Bold);
+            let attack_ids = if finding.attack_ids.is_empty() {
+                "—".to_string()
+            } else {
+                finding.attack_ids.join(", ")
+            };
+            let mbc_ids = if finding.mbc_ids.is_empty() {
+                "—".to_string()
+            } else {
+                finding.mbc_ids.join(", ")
+            };
+            let namespace = finding.namespace.as_deref().unwrap_or("—").to_string();
+
+            table.add_row(vec![
+                class_cell,
+                Cell::new(&finding.indicator),
+                Cell::new(attack_ids),
+                Cell::new(mbc_ids),
+                Cell::new(namespace).fg(COLOR_MUTED),
+            ]);
+        }
+    }
+
+    table
+}
+
+/// Builds the Generated Reports table if output files were created.
+fn build_reports_table(generated_reports: &[(&str, &Path)]) -> Table {
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL_CONDENSED)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("REPORT FORMAT")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+            Cell::new("FILE PATH")
+                .fg(COLOR_ACCENT)
+                .add_attribute(Attribute::Bold),
+        ]);
+
+    for (fmt, path) in generated_reports {
+        table.add_row(vec![
+            Cell::new(format!("[+] {fmt}"))
+                .fg(COLOR_SUCCESS)
+                .add_attribute(Attribute::Bold),
+            Cell::new(path.display().to_string()).fg(COLOR_MUTED),
         ]);
     }
 
@@ -182,172 +292,79 @@ fn format_summary_line(counts: &FindingCounts) -> String {
     parts.join(" · ")
 }
 
-/// Prints a stylized CLI summary report to stdout.
+/// Prints a stylized CLI summary report to stdout using comfy-table layouts.
 pub fn print_terminal_report(
     file_path: &Path,
     analysis_result: &AnalysisResult<'_>,
     assessment: &RiskAssessment,
     generated_reports: &[(&str, &Path)],
 ) {
-    let line_sep = "─".repeat(100).with(COLOR_BORDER);
+    println!();
+    // 1. Target Metadata & Hashes Table
+    println!("{}", build_metadata_table(file_path, analysis_result));
+    println!();
 
-    println!("\n{}", line_sep);
+    // 2. Risk Assessment Gauge Table
+    println!("{}", build_risk_table(assessment));
+    println!();
+
+    // 3. Matched Rules & Capabilities Table
+    println!("{}", build_findings_table(assessment));
+
+    let analyzed_at = Local::now().format("%Y-%m-%d %H:%M:%S");
     println!(
-        " {}",
-        "RBAT STATIC ANALYSIS REPORT".with(COLOR_ACCENT).bold()
+        "  {}",
+        format!("Analyzed {analyzed_at} · override classes via --severity-overrides")
+            .with(TermColor::Rgb {
+                r: 156,
+                g: 163,
+                b: 175
+            })
+            .italic()
     );
-    println!("{}", line_sep);
-
-    // 1. Target Metadata
-    println!(
-        "  {:<15} : {}",
-        "Target File".with(COLOR_MUTED),
-        file_path.display().to_string().bold()
-    );
-    println!(
-        "  {:<15} : {}",
-        "Binary Type".with(COLOR_MUTED),
-        analysis_result
-            .metadata
-            .binary_type
-            .as_str()
-            .with(COLOR_ACCENT)
-    );
-    println!(
-        "  {:<15} : {}",
-        "Architecture".with(COLOR_MUTED),
-        analysis_result
-            .metadata
-            .architecture_name()
-            .with(COLOR_ACCENT)
-    );
-    println!(
-        "  {:<15} : {}",
-        "Entry Point".with(COLOR_MUTED),
-        format!("0x{:X}", analysis_result.metadata.entry_point).with(COLOR_ACCENT)
-    );
-
-    // Triage identifier set (exact-match digests + similarity hashes)
-    let hashes = &analysis_result.hashes;
-    for (label, value) in [
-        ("MD5", hashes.md5.as_str()),
-        ("SHA-1", hashes.sha1.as_str()),
-        ("SHA-256", hashes.sha256.as_str()),
-        ("SSDEEP", hashes.ssdeep.as_str()),
-        ("TLSH", hashes.tlsh.as_str()),
-    ] {
-        if !value.is_empty() {
-            println!(
-                "  {:<15} : {}",
-                label.with(COLOR_MUTED),
-                value.with(COLOR_ACCENT)
-            );
-        }
-    }
-
-    println!("{}", line_sep);
-
-    // 2. Risk Assessment Gauge
-    let score = assessment.score.min(100);
-    let bar_width = 24;
-    let filled = ((score as usize) * bar_width) / 100;
-    let empty = bar_width.saturating_sub(filled);
-
-    let (score_color, severity_badge) = match assessment.severity.as_str() {
-        "Safe" => (COLOR_SUCCESS, "SAFE".with(COLOR_SUCCESS).bold()),
-        "Suspicious" => (COLOR_WARNING, "SUSPICIOUS".with(COLOR_WARNING).bold()),
-        _ => (COLOR_DANGER, "MALICIOUS".with(COLOR_DANGER).bold()),
-    };
-
-    let progress_bar = format!(
-        "[{}{}]",
-        "█".repeat(filled).with(score_color),
-        "░".repeat(empty).with(COLOR_BORDER)
-    );
-
-    println!(
-        "  {:<15} : {}  {}% ({})",
-        "Risk Score".with(COLOR_MUTED),
-        progress_bar,
-        score.to_string().with(score_color).bold(),
-        severity_badge
-    );
-
-    println!("{}", line_sep);
-
-    // 3. Matched Rules & Capabilities table
-    println!(
-        " {}",
-        "MATCHED RULES & CAPABILITIES".with(COLOR_ACCENT).bold()
-    );
-
-    if assessment.findings.is_empty() {
-        println!(
-            "  {}",
-            "✔ No security threats or anomalies detected.".with(COLOR_SUCCESS_LIGHT)
-        );
-    } else {
-        println!("{}", build_findings_table(assessment));
-        let summary = format_summary_line(&assessment.finding_counts);
-        if !summary.is_empty() {
-            let tinted = if assessment.finding_counts.indicator_count() > 0 {
-                summary.with(COLOR_WARNING_LIGHT)
-            } else {
-                summary.with(COLOR_SUCCESS_LIGHT)
-            };
-            println!("  {}", tinted);
-        }
-        let analyzed_at = Local::now().format("%Y-%m-%d %H:%M:%S");
-        println!(
-            "  {}",
-            format!("Analyzed {analyzed_at} · override classes via --severity-overrides")
-                .with(COLOR_MUTED)
-                .italic()
-        );
-    }
 
     // 4. Generated Output Files (if any)
     if !generated_reports.is_empty() {
-        println!("{}", line_sep);
-        println!(" {}", "GENERATED REPORTS".with(COLOR_ACCENT).bold());
-        for (fmt, path) in generated_reports {
-            println!(
-                "  {} {:<8} : {}",
-                "[+]".with(COLOR_SUCCESS),
-                fmt,
-                path.display().to_string().with(COLOR_MUTED)
-            );
-        }
+        println!();
+        println!("{}", build_reports_table(generated_reports));
     }
 
-    println!("{}", line_sep);
-
+    // 5. Execution Time
     if analysis_result.total_analysis_time_ms > 0 {
         let seconds = (analysis_result.total_analysis_time_ms as f64) / 1000.0;
         println!(
-            "  {} {}",
-            "⏱️ Total Analysis Time:".with(COLOR_ACCENT).bold(),
-            format!("{:.2}s", seconds).with(COLOR_SUCCESS_LIGHT)
+            "\n  {} {}",
+            "⏱ Total Analysis Time:"
+                .with(TermColor::Rgb {
+                    r: 192,
+                    g: 132,
+                    b: 252
+                })
+                .bold(),
+            format!("{:.2}s", seconds).with(TermColor::Rgb {
+                r: 74,
+                g: 222,
+                b: 128
+            })
         );
-        println!("{}", line_sep);
     }
 
-    // Footer Hint
+    // 6. Footer Hint
     println!(
         "  {}",
         "💡 Tip: Run with --tui for an interactive dashboard view or --cfg for Graphviz DOT format."
-            .with(COLOR_MUTED)
+            .with(TermColor::Rgb { r: 156, g: 163, b: 175 })
             .italic()
     );
-    println!("{}\n", line_sep);
+    println!();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rbat::core::{
-        scoring::{CategoryScore, Finding, FindingCounts},
-        types::BinaryMetadata,
+        scoring::risk::{CategoryScore, Finding, FindingCounts},
+        types::analysis::BinaryMetadata,
     };
 
     #[test]
