@@ -32,7 +32,6 @@ fn main() -> Result<()> {
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .and_then(|p| p.parent())
         .expect("Failed to locate workspace root")
         .to_path_buf()
 }
@@ -56,8 +55,8 @@ fn collect_rule_files(dir: &Path, files: &mut Vec<PathBuf>) {
 fn bundle_rules() -> Result<()> {
     let start = Instant::now();
     let root = workspace_root();
-    let rules_dir = root.join("crates/rbat/assets/capa-rules");
-    let out_path = root.join("crates/rbat/assets/embedded_rules.mp");
+    let rules_dir = root.join("rbat/assets/capa-rules");
+    let out_path = root.join("rbat/assets/embedded_rules.mp");
 
     if !rules_dir.exists() {
         eprintln!(
