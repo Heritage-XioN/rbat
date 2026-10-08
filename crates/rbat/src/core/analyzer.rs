@@ -381,6 +381,24 @@ impl Analyzer {
             self.cancel_flag.store(true, Ordering::Relaxed);
         }
     }
+
+    /// Returns a reference to the loaded Capa behavioral rules.
+    #[inline]
+    pub fn rules(&self) -> &Arc<Vec<Rule>> {
+        &self.rules
+    }
+
+    /// Returns a reference to the shared [`NeedleIndex`] automaton.
+    #[inline]
+    pub fn needle(&self) -> &Arc<NeedleIndex> {
+        &self.needle
+    }
+
+    /// Returns a reference to the configured [`SeverityClassifier`].
+    #[inline]
+    pub fn classifier(&self) -> &SeverityClassifier {
+        &self.classifier
+    }
 }
 
 /// Configuration options for binary analysis.
