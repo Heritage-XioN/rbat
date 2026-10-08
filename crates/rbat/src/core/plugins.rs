@@ -105,6 +105,14 @@ impl HeuristicPlugin for StringCheckPlugin {
         ctx: &AnalysisContext<'buf, 'ctx>,
     ) -> RbatResult<AnalysisProgress<'buf>> {
         let results = string_check(ctx.buffer, ctx.section_ranges)?;
+        for matches in results.values() {
+            for m in matches {
+                for mat in ctx.needle.automaton.find_overlapping_iter(m.data.as_ref()) {
+                    let pat_idx = mat.pattern().as_usize();
+                    ctx.needle.present[pat_idx].store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
         Ok(AnalysisProgress::Strings(results))
     }
 }

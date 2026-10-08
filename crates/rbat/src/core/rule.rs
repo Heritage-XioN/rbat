@@ -852,7 +852,13 @@ impl RuleCondition {
                     false
                 }
             }
-            Self::String { string } => features.strings.iter().any(|s| s.contains(string)),
+            Self::String { string } => {
+                if let Some(id) = needle.lookup.get(string) {
+                    needle.present[id.as_usize()].load(Ordering::Relaxed)
+                } else {
+                    features.strings.iter().any(|s| s.contains(string))
+                }
+            }
             Self::Mnemonic { mnemonic } => {
                 if let Some(id) = needle.lookup.get(mnemonic) {
                     needle.present[id.as_usize()].load(Ordering::Relaxed)
@@ -953,6 +959,11 @@ impl RuleCondition {
                     }
                 }
                 Self::String { string } => {
+                    if let Some(id) = needle.lookup.get(string)
+                        && !needle.present[id.as_usize()].load(Ordering::Relaxed)
+                    {
+                        return 0 == *count;
+                    }
                     let mut accumulated = 0;
                     for s in &features.strings {
                         if s.contains(string) {
