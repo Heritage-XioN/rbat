@@ -101,7 +101,7 @@ impl DisassemblerImpl {
     /// Creates an [`IntelFormatter`] configured with Capstone-compatible settings:
     /// lowercase hex prefix (`0x`), no suffix, and lowercase formatting.
     #[must_use]
-    pub(crate) fn create_formatter() -> iced_x86::IntelFormatter {
+    fn create_formatter() -> iced_x86::IntelFormatter {
         let mut formatter = iced_x86::IntelFormatter::new();
         formatter.options_mut().set_hex_prefix("0x");
         formatter.options_mut().set_hex_suffix("");
@@ -111,7 +111,7 @@ impl DisassemblerImpl {
 
     /// Resolves direct branch targets or memory displacements against `iat_map` for imported API detection.
     #[inline]
-    pub(crate) fn resolve_api(instr: &iced_x86::Instruction, iat_map: &IatMap) -> Option<Arc<str>> {
+    fn resolve_api(instr: &iced_x86::Instruction, iat_map: &IatMap) -> Option<Arc<str>> {
         let target = instr.near_branch64();
         if target != 0
             && let Some(api) = iat_map.get(&target)
@@ -151,8 +151,11 @@ impl DisassemblerImpl {
     /// # Allocation Behavior
     ///
     /// The returned `Vec<InstructionInfo>` is pre-allocated up to `MAX_PREALLOC_BYTES` (8 MiB)
-    /// based on the heuristic `min(text_bytes.len() / 4, cap)`.
-    /// Text strings are formatted using stack-reused scratch buffers and inlined into
+    /// based on the heuristic `min(text_bytes.len() / 4, cap)` to mitigate initial allocation churn.
+    /// If dynamic reallocations occur during disassembly of large binaries, [`Vec::shrink_to_fit`]
+    /// is invoked prior to returning to immediately release any exponential doubling overcapacity,
+    /// guaranteeing that returned vectors hold zero unused memory slots.
+    /// Text strings are formatted using caller-reused scratch buffers and inlined into
     /// [`CompactString`] fields without heap allocations for strings <= 24 bytes.
     ///
     /// # Examples
@@ -214,6 +217,8 @@ impl DisassemblerImpl {
             ));
         }
 
+        instructions.shrink_to_fit();
+
         Ok(instructions)
     }
 
@@ -253,7 +258,7 @@ impl InstructionInfo {
     /// - `mnem_buf`: Scratch buffer for mnemonic formatting. Cleared before use.
     /// - `op_buf`: Scratch buffer for operand formatting. Cleared before use.
     /// - `api_resolution`: Optional [`Arc<str>`] representing an imported API resolved from IAT.
-    pub(crate) fn from_iced(
+    fn from_iced(
         instr: &iced_x86::Instruction,
         formatter: &mut iced_x86::IntelFormatter,
         mnem_buf: &mut String,

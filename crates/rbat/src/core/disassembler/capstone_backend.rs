@@ -272,7 +272,7 @@ impl InstructionInfo {
     /// - `insn`: Reference to the native [`capstone::Insn`].
     /// - `api_resolution`: Optional [`Arc<str>`] representing an imported API resolved from IAT.
     /// - `inst_class`: Control flow classification resolved from Capstone detail groups.
-    pub(crate) fn from_capstone(
+    fn from_capstone(
         insn: &capstone::Insn,
         api_resolution: Option<Arc<str>>,
         inst_class: InstructionClass,
