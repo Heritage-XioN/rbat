@@ -13,10 +13,7 @@ mod tui;
 use clap::Parser;
 use color_eyre::Result;
 use indicatif::{ProgressBar, ProgressStyle};
-use rbat::core::scoring::RiskAssessment;
-use rbat::prelude::SeverityClassifier;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, sync::mpsc};
 use tui_banner::Banner;
@@ -27,15 +24,16 @@ use crate::report::{
 };
 use crate::rules::{print_rule_example, print_rule_schema, validate_rules_directory};
 use crate::tui::App;
+use rbat::prelude::*;
 
-use rbat::core::{
-    analyzer::Analyzer,
-    features::FeatureSet,
-    rule::Rule,
-    types::{AnalysisProgress, AnalysisResult, NeedleIndex},
-};
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     color_eyre::install()?;
     let cli = Cli::parse();
 
@@ -68,54 +66,41 @@ fn run_rules(args: RulesArgs) -> Result<()> {
 }
 
 fn run_analyze(args: AnalyzeArgs) -> Result<()> {
+    // ========================================================
+    // Display ASCII banner, read buffer and setup channel
+    // ========================================================
+    let spinner = ascii_banner_progress_setup(&args)?;
     let buffer = fs::read(&args.path)?;
-
-    // Display ASCII banner only when not emitting pure DOT graph syntax to stdout
-    if !args.cfg {
-        let font = tui_banner::Font::from_figlet_str(include_str!("../assets/ansishadow.flf"))
-            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse ANSI Shadow font: {:?}", e))?;
-        let banner = Banner::new("RBAT")?
-            .font(font)
-            .gradient(tui_banner::Gradient::vertical(
-                tui_banner::Palette::from_hex(&[
-                    "#e879a8", // Pink (gradient endpoint)
-                    "#c084fc", // Purple-400 (--rbat-accent)
-                    "#a855f7", // Purple-500 (chart-2)
-                    "#7c3aed", // Violet-600 (chart-3)
-                ]),
-            ))
-            .fill(tui_banner::Fill::Keep)
-            .render();
-        println!("\n {}", banner);
-    }
-
-    // Progress spinner indicator (emits to stderr by default)
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::with_template("{spinner:.magenta} [{elapsed_precise}] {msg}")?
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✓"]),
-    );
-    spinner.enable_steady_tick(Duration::from_millis(100));
-    spinner.set_message("Initializing binary analysis pipeline...");
-
     let (tx, rx) = mpsc::channel();
 
-    let buffer_ref = &buffer;
-    let analyzer = Analyzer::builder()
-        .with_classifier(&args.severity_overrides)?
-        .with_flirt(&args.signatures)
-        .with_rules(&args.rules)
-        .build()?;
+    // =====================================================
+    // Build the analyzer
+    // =====================================================
+    let mut builder = Analyzer::builder();
+    if let Some(ref path) = args.severity_overrides {
+        builder = builder.with_classifier(path)?;
+    }
+    if let Some(ref path) = args.signatures {
+        builder = builder.with_flirt(path)?;
+    }
+    if let Some(ref path) = args.rules {
+        builder = builder.with_rules(path);
+    }
+    let analyzer = builder.build();
 
-    let mut analysis_result = AnalysisResult::default();
+    // =====================================================
+    // Begin analysis in streaming mode
+    // =====================================================
     let start_time = std::time::Instant::now();
-
-    let result = analyzer.streaming(buffer_ref, move |event| {
+    let result = analyzer.streaming(buffer.as_ref(), move |event| {
         let _ = tx.send(event);
     });
 
-    // Event loop receiving real-time progress events
-    for event in &rx {
+    // =====================================================
+    // Collect and emit progress events
+    // =====================================================
+    let mut analysis_result = AnalysisResult::default();
+    for event in rx {
         match event {
             AnalysisProgress::Hashes(hashes) => {
                 analysis_result.hashes = hashes;
@@ -177,6 +162,9 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         }
     }
 
+    // ========================================================
+    // Post analysis result check
+    // ========================================================
     match result {
         Ok(_) => {
             spinner.set_message("Plugin analysis complete!");
@@ -187,29 +175,29 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         }
     }
 
-    let rules = Rule::extend(&args.rules);
-    let classifier = SeverityClassifier::extend(&args.severity_overrides)?;
-    let needle_index = Arc::new(NeedleIndex::build_from_rules(&rules));
-
     spinner.set_message(format!(
         "Evaluating binary against {} capa rules...",
-        rules.len()
+        analyzer.rules().len()
     ));
 
     if let Some(ref mut cfg) = analysis_result.cfg {
-        needle_index.populate_cfg(cfg);
+        analyzer.needle().populate_cfg(cfg);
     }
 
-    // construct featureset and evaluate againsts loaded rules
+    // ========================================================
+    // Construct featureset and evaluate against loaded rules
+    // ========================================================
     let features = FeatureSet::from_analysis_result(&analysis_result);
-    let matched_rules = Rule::evaluate(&features, &rules, &needle_index);
-    let risk_assessment = RiskAssessment::calculate_risk(&matched_rules, &classifier);
+    let matched_rules = Rule::evaluate(&features, analyzer.rules(), analyzer.needle());
+    let risk_assessment = RiskAssessment::calculate_risk(&matched_rules, analyzer.classifier());
 
     let elapsed = start_time.elapsed();
     analysis_result.total_analysis_time_ms = elapsed.as_millis();
     spinner.finish_with_message(format!("Analysis completed in {:.2?}! ✅", elapsed));
 
-    // Setup output directory
+    // ========================================================
+    // Output method and renderers
+    // ========================================================
     let base_dir = args.out_dir.unwrap_or_else(|| PathBuf::from("."));
     if base_dir.exists() && !base_dir.is_dir() {
         return Err(color_eyre::eyre::eyre!(
@@ -268,4 +256,33 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn ascii_banner_progress_setup(args: &AnalyzeArgs) -> Result<ProgressBar> {
+    if !args.cfg {
+        let font = tui_banner::Font::from_figlet_str(include_str!("../assets/ansishadow.flf"))
+            .map_err(|e| color_eyre::eyre::eyre!("Failed to parse ANSI Shadow font: {:?}", e))?;
+        let banner = Banner::new("RBAT")?
+            .font(font)
+            .gradient(tui_banner::Gradient::vertical(
+                tui_banner::Palette::from_hex(&[
+                    "#e879a8", // Pink (gradient endpoint)
+                    "#c084fc", // Purple-400 (--rbat-accent)
+                    "#a855f7", // Purple-500 (chart-2)
+                    "#7c3aed", // Violet-600 (chart-3)
+                ]),
+            ))
+            .fill(tui_banner::Fill::Keep)
+            .render();
+        println!("\n {}", banner);
+    }
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::with_template("{spinner:.magenta} [{elapsed_precise}] {msg}")?
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✓"]),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(100));
+    spinner.set_message("Initializing binary analysis pipeline...");
+    Ok(spinner)
 }
