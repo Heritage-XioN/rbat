@@ -33,24 +33,29 @@
 //! };
 //!
 //! let rules = Rule::load_embedded();
-//! let needle = NeedleIndex::build_from_rules(&rules);
+//! let needle = NeedleIndex::new(&rules);
 //! ```
 //!
 //! [`Aho-Corasick`]: AhoCorasick
 
-use crate::core::{cfg::ControlFlowGraph, rule::Rule, rule::RuleCondition};
+use crate::core::{
+    cfg::ControlFlowGraph,
+    disassembler::InstructionInfo,
+    rule::{Rule, RuleCondition},
+};
 use ahash::{AHashMap, AHashSet};
 use aho_corasick::{AhoCorasick, PatternID};
+use regex::bytes::{Regex, RegexBuilder};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 
-/// Multi-pattern Aho-Corasick search index compiled from security rule literals.
+/// Multi-pattern Aho-Corasick and Regex search index compiled from security rule literals.
 ///
-/// Pre-compiles all string patterns across loaded capa rules into a single finite-state
-/// automaton. Running this automaton against disassembled instructions populates their
-/// matched pattern IDs and maintains a global presence bitmask for fast pruning.
+/// Pre-compiles all string and regular expression patterns across loaded capa rules into
+///  a single finite-state automaton. Running this automaton against disassembled instructions
+/// populates their matched pattern IDs and maintains a global presence bitmask for fast pruning.
 ///
 /// # Examples
 ///
@@ -61,7 +66,7 @@ use std::sync::{
 /// };
 ///
 /// let rules = Rule::load_embedded();
-/// let needle = NeedleIndex::build_from_rules(&rules);
+/// let needle = NeedleIndex::new(&rules);
 /// ```
 #[derive(Debug)]
 pub struct NeedleIndex {
@@ -71,15 +76,17 @@ pub struct NeedleIndex {
     pub(crate) lookup: AHashMap<String, PatternID>,
     /// A bitmask array tracking which PatternIDs were found anywhere in the CFG.
     pub(crate) present: Vec<AtomicBool>,
+    /// Pre-compiled regex engines and optional literal anchor PatternIDs for regex conditions.
+    pub(crate) regex_lookup: AHashMap<String, (Regex, Option<PatternID>)>,
 }
 
 impl NeedleIndex {
-    /// Builds an Aho-Corasick automaton from all string-bearing conditions in the provided rule set.
+    /// Builds an Aho-Corasick automaton and regex index from all conditions in the provided rule set.
     ///
     /// Recursively walks each rule's condition tree to collect APIs, imports, exports,
-    /// strings, mnemonics, numbers, and offsets. The patterns are sorted lexicographically
-    /// to guarantee deterministic pattern IDs and compiled into an ASCII case-insensitive
-    /// search automaton.
+    /// strings, mnemonics, numbers, offsets, and regex literal anchors. The patterns are sorted
+    /// lexicographically to guarantee deterministic pattern IDs and compiled into an ASCII
+    /// case-insensitive search automaton.
     ///
     /// # Parameters
     ///
@@ -87,7 +94,7 @@ impl NeedleIndex {
     ///
     /// # Returns
     ///
-    /// An initialized [`NeedleIndex`] ready for instruction matching.
+    /// An initialized [`NeedleIndex`] ready for instruction and regex matching.
     ///
     /// # Examples
     ///
@@ -98,9 +105,9 @@ impl NeedleIndex {
     /// };
     ///
     /// let rules = Rule::load_embedded();
-    /// let needle = NeedleIndex::build_from_rules(&rules);
+    /// let needle = NeedleIndex::new(&rules);
     /// ```
-    pub fn build_from_rules<'rule>(rules: &'rule [Rule]) -> Self {
+    pub fn new<'rule>(rules: &'rule [Rule]) -> Self {
         let mut pattern_set: AHashSet<&'rule str> = AHashSet::new();
 
         for r in rules {
@@ -127,15 +134,70 @@ impl NeedleIndex {
             .map(|_| AtomicBool::new(false))
             .collect();
 
+        let mut regex_lookup = AHashMap::new();
+        for r in rules {
+            for cond in &r.rule.features {
+                Self::collect_regexes(cond, &mut regex_lookup, &lookup);
+            }
+        }
+
         NeedleIndex {
             automaton,
             lookup,
             present,
+            regex_lookup,
+        }
+    }
+
+    /// Recursively walks a condition tree and collects all regex conditions,
+    /// compiling their byte regular expressions and mapping their literal anchors.
+    fn collect_regexes(
+        cond: &RuleCondition,
+        regex_lookup: &mut AHashMap<String, (Regex, Option<PatternID>)>,
+        lookup: &AHashMap<String, PatternID>,
+    ) {
+        match cond {
+            RuleCondition::String { string } => {
+                if let Some((pattern, is_case_insensitive)) =
+                    RuleCondition::parse_capa_regex(string)
+                    && !regex_lookup.contains_key(string)
+                {
+                    let mut builder = RegexBuilder::new(pattern);
+                    builder.case_insensitive(is_case_insensitive);
+                    builder.dot_matches_new_line(true);
+                    if let Ok(re) = builder.build() {
+                        let anchor_id = Self::extract_regex_anchor(pattern)
+                            .and_then(|anc| lookup.get(anc).copied());
+                        regex_lookup.insert(string.clone(), (re, anchor_id));
+                    }
+                }
+            }
+            RuleCondition::And { and } => {
+                and.iter()
+                    .for_each(|c| Self::collect_regexes(c, regex_lookup, lookup));
+            }
+            RuleCondition::Or { or } => {
+                or.iter()
+                    .for_each(|c| Self::collect_regexes(c, regex_lookup, lookup));
+            }
+            RuleCondition::Not { not } => {
+                Self::collect_regexes(not, regex_lookup, lookup);
+            }
+            RuleCondition::BasicBlockScope { conditions }
+            | RuleCondition::CallScope { conditions } => {
+                conditions
+                    .iter()
+                    .for_each(|c| Self::collect_regexes(c, regex_lookup, lookup));
+            }
+            RuleCondition::Count { condition, .. } => {
+                Self::collect_regexes(condition, regex_lookup, lookup);
+            }
+            _ => {}
         }
     }
 
     /// Recursively walks a condition tree and collects all string patterns
-    /// that the rule engine needs to match against instruction text.
+    /// that the rule engine needs to match against instruction text and memory.
     fn collect_patterns<'rule>(cond: &'rule RuleCondition, patterns: &mut AHashSet<&'rule str>) {
         match cond {
             RuleCondition::Api { api } => {
@@ -148,7 +210,13 @@ impl NeedleIndex {
                 patterns.insert(export.as_str());
             }
             RuleCondition::String { string } => {
-                patterns.insert(string.as_str());
+                if let Some((pattern, _)) = RuleCondition::parse_capa_regex(string.as_str()) {
+                    if let Some(anchor) = Self::extract_regex_anchor(pattern) {
+                        patterns.insert(anchor);
+                    }
+                } else {
+                    patterns.insert(string.as_str());
+                }
             }
             RuleCondition::Match { .. } => {
                 // Rule dependency matching is handled at rule level, not as instruction text patterns
@@ -227,7 +295,7 @@ impl NeedleIndex {
     /// use std::sync::Arc;
     ///
     /// let rules = Rule::load_embedded();
-    /// let needle = NeedleIndex::build_from_rules(&rules);
+    /// let needle = NeedleIndex::new(&rules);
     /// let mut cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
     /// needle.populate_cfg(&mut cfg);
     /// ```
@@ -311,7 +379,7 @@ impl NeedleIndex {
     /// use rbat::core::{needle::NeedleIndex, rule::Rule};
     ///
     /// let rules = Rule::load_embedded();
-    /// let needle = NeedleIndex::build_from_rules(&rules);
+    /// let needle = NeedleIndex::new(&rules);
     /// needle.scan_buffer(b"This binary invokes powershell.exe and cmd.exe");
     /// ```
     pub fn scan_buffer(&self, buffer: &[u8]) {
@@ -356,6 +424,236 @@ impl NeedleIndex {
                 i += 1;
             }
         }
+    }
+
+    /// Checks whether the mandatory literal anchor for a Capa regular expression is present in the binary.
+    ///
+    /// If an anchor was extracted during index construction, performs an $O(1)$ load from the
+    /// presence bitmask. If no safe anchor could be extracted, conservatively returns `true`
+    /// to defer evaluation to full regex execution.
+    ///
+    /// # Parameters
+    ///
+    /// - `raw_string`: The raw Capa regex condition string literal (e.g. `"/vssadmin.* delete shadows/i"`).
+    ///
+    /// # Returns
+    ///
+    /// `true` if the regex pattern is registered and its literal anchor is present (or has no anchor),
+    /// `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{needle::NeedleIndex, rule::Rule};
+    ///
+    /// let rules = Rule::load_embedded();
+    /// let needle = NeedleIndex::new(&rules);
+    /// needle.scan_buffer(b"cmd.exe /c vssadmin.exe delete shadows");
+    /// assert!(needle.is_regex_present("/vssadmin.* delete shadows/i"));
+    /// ```
+    pub fn is_regex_present(&self, raw_string: &str) -> bool {
+        if let Some((_re, anchor_id)) = self.regex_lookup.get(raw_string) {
+            if let Some(id) = anchor_id {
+                return self.present[id.as_usize()].load(Ordering::Relaxed);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Evaluates a Capa regular expression against the binary raw buffer and extracted strings.
+    ///
+    /// Fast-paths non-matching patterns in $O(1)$ time by checking whether the regex's literal anchor
+    /// was observed during binary scanning. If the anchor is present (or none exists), tests the regex
+    /// sequentially against the set of extracted strings and the contiguous raw binary buffer.
+    ///
+    /// # Parameters
+    ///
+    /// - `raw_string`: The raw Capa regex pattern string as defined in the rule condition.
+    /// - `raw_buffer`: Raw executable binary byte slice to search.
+    /// - `strings`: Lowercased string literals extracted during binary analysis.
+    ///
+    /// # Returns
+    ///
+    /// `true` if any extracted string or raw buffer sequence matches the compiled regular expression,
+    /// `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ahash::AHashSet;
+    /// use rbat::core::{needle::NeedleIndex, rule::Rule};
+    ///
+    /// let rules = Rule::load_embedded();
+    /// let needle = NeedleIndex::new(&rules);
+    /// let buf = b"cmd.exe /c vssadmin.exe delete shadows /all /quiet";
+    /// needle.scan_buffer(buf);
+    ///
+    /// let strings = AHashSet::new();
+    /// assert!(needle.matches_regex("/vssadmin.* delete shadows/i", buf, &strings));
+    /// ```
+    pub fn matches_regex(
+        &self,
+        raw_string: &str,
+        raw_buffer: &[u8],
+        strings: &AHashSet<String>,
+    ) -> bool {
+        if let Some((re, anchor_id)) = self.regex_lookup.get(raw_string) {
+            // Fast O(1) literal anchor rejection
+            if let Some(id) = anchor_id
+                && !self.present[id.as_usize()].load(Ordering::Relaxed)
+            {
+                return false;
+            }
+            // Check extracted string set
+            for s in strings {
+                if re.is_match(s.as_bytes()) {
+                    return true;
+                }
+            }
+            // Check raw binary buffer
+            if !raw_buffer.is_empty() && re.is_match(raw_buffer) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Evaluates a Capa regular expression against a disassembled instruction.
+    ///
+    /// Performs an $O(1)$ fast check against the instruction's matched pattern IDs if an anchor
+    /// is associated with the regex. If the anchor is present, tests the regular expression
+    /// against the instruction's operand string, mnemonic, and resolved API symbol name.
+    ///
+    /// # Parameters
+    ///
+    /// - `raw_string`: The raw Capa regex pattern string as defined in the rule condition.
+    /// - `insn`: Disassembled instruction information to evaluate.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the instruction mnemonic, operands, or resolved API name match the regex,
+    /// `false` otherwise.
+    pub fn matches_regex_instruction(&self, raw_string: &str, insn: &InstructionInfo) -> bool {
+        if let Some((re, anchor_id)) = self.regex_lookup.get(raw_string) {
+            // Fast O(1) anchor check on instruction
+            if let Some(id) = anchor_id
+                && !insn.matched.contains(id)
+            {
+                return false;
+            }
+            if re.is_match(insn.op_str.as_bytes())
+                || re.is_match(insn.mnemonic.as_bytes())
+                || insn
+                    .api_resolution
+                    .as_ref()
+                    .is_some_and(|api| re.is_match(api.as_bytes()))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Extracts a mandatory literal anchor of length >= 4 from a regex pattern.
+    ///
+    /// Walks the regex pattern to discover contiguous ASCII word-character sequences that are guaranteed
+    /// to appear in every match (i.e. not within alternations, character classes, repetitions, or optional
+    /// qualifiers). If multiple qualifying candidates exist, returns the longest literal slice.
+    ///
+    /// # Parameters
+    ///
+    /// - `pat`: The inner regular expression pattern string without enclosing slashes or flags.
+    ///
+    /// # Returns
+    ///
+    /// `Some(&str)` representing a literal slice within `pat` guaranteed to appear in any match,
+    /// or `None` if no safe anchor of length >= 4 is found.
+    pub(crate) fn extract_regex_anchor(pat: &str) -> Option<&str> {
+        let bytes = pat.as_bytes();
+        let len = bytes.len();
+
+        // Check if there is a top-level alternation '|'
+        let mut depth = 0usize;
+        for &b in bytes {
+            match b {
+                b'(' | b'[' => depth += 1,
+                b')' | b']' => depth = depth.saturating_sub(1),
+                b'|' if depth == 0 => return None,
+                _ => {}
+            }
+        }
+
+        let mut best_range: Option<(usize, usize)> = None;
+        let mut current_start: Option<usize> = None;
+        let mut current_end = 0usize;
+        let mut depth = 0usize;
+        let mut i = 0usize;
+
+        let update_best = |best_range: &mut Option<(usize, usize)>, start: usize, end: usize| {
+            let chunk_len = end.saturating_sub(start);
+            if chunk_len >= 4 {
+                let current_best_len = best_range.map(|(s, e)| e - s).unwrap_or(0);
+                if chunk_len > current_best_len {
+                    *best_range = Some((start, end));
+                }
+            }
+        };
+
+        while i < len {
+            let b = bytes[i];
+            match b {
+                b'(' | b'[' => {
+                    if let Some(s) = current_start.take() {
+                        update_best(&mut best_range, s, current_end);
+                    }
+                    depth += 1;
+                    i += 1;
+                }
+                b')' | b']' => {
+                    depth = depth.saturating_sub(1);
+                    i += 1;
+                }
+                _ if depth > 0 => {
+                    i += 1;
+                }
+                b'\\' => {
+                    if let Some(s) = current_start.take() {
+                        update_best(&mut best_range, s, current_end);
+                    }
+                    i += 2;
+                }
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => {
+                    if current_start.is_none() {
+                        current_start = Some(i);
+                    }
+                    current_end = i + 1;
+                    i += 1;
+                }
+                b'*' | b'?' | b'{' => {
+                    if let Some(s) = current_start.take() {
+                        let end = current_end.saturating_sub(1);
+                        if end > s {
+                            update_best(&mut best_range, s, end);
+                        }
+                    }
+                    i += 1;
+                }
+                _ => {
+                    if let Some(s) = current_start.take() {
+                        update_best(&mut best_range, s, current_end);
+                    }
+                    i += 1;
+                }
+            }
+        }
+
+        if let Some(s) = current_start.take() {
+            update_best(&mut best_range, s, current_end);
+        }
+
+        best_range.map(|(s, e)| &pat[s..e])
     }
 }
 
@@ -402,7 +700,7 @@ mod tests {
             },
         ];
 
-        let needle = NeedleIndex::build_from_rules(&test_rules);
+        let needle = NeedleIndex::new(&test_rules);
 
         // Raw ASCII buffer containing powershell.exe
         let ascii_buf = b"Some prefix text with powershell.exe and suffix padding";
@@ -420,5 +718,89 @@ mod tests {
         assert!(needle.is_present("kernel32.dll"));
         assert!(!needle.is_present("nonexistent_string_12345"));
     }
-}
 
+    #[test]
+    fn test_parse_capa_regex() {
+        assert_eq!(
+            RuleCondition::parse_capa_regex("/powershell\\.exe/i"),
+            Some(("powershell\\.exe", true))
+        );
+        assert_eq!(
+            RuleCondition::parse_capa_regex("/VB5!.*/"),
+            Some(("VB5!.*", false))
+        );
+        assert_eq!(
+            RuleCondition::parse_capa_regex("/vssadmin.* delete shadows/i"),
+            Some(("vssadmin.* delete shadows", true))
+        );
+        // Literal Unix paths starting with / must not be parsed as regexes
+        assert_eq!(RuleCondition::parse_capa_regex("/etc/os-release"), None);
+        assert_eq!(RuleCondition::parse_capa_regex("/proc/self/maps"), None);
+        assert_eq!(RuleCondition::parse_capa_regex("powershell.exe"), None);
+        assert_eq!(RuleCondition::parse_capa_regex("/"), None);
+        assert_eq!(RuleCondition::parse_capa_regex("//"), None);
+    }
+
+    #[test]
+    fn test_extract_regex_anchor() {
+        assert_eq!(
+            NeedleIndex::extract_regex_anchor("vssadmin.* delete shadows"),
+            Some("vssadmin")
+        );
+        assert_eq!(
+            NeedleIndex::extract_regex_anchor("wevtutil(\\.exe)?\\s+(clear-log|cl)"),
+            Some("wevtutil")
+        );
+        assert_eq!(
+            NeedleIndex::extract_regex_anchor("foobar*baz"),
+            Some("fooba")
+        );
+        assert_eq!(NeedleIndex::extract_regex_anchor("GET|POST"), None);
+        assert_eq!(NeedleIndex::extract_regex_anchor("(GET|POST)"), None);
+        assert_eq!(NeedleIndex::extract_regex_anchor("abc?def"), None);
+    }
+
+    #[test]
+    fn test_regex_matching_and_anchor_pruning() {
+        let test_rules = vec![
+            Rule {
+                rule: RuleInner {
+                    meta: RuleMeta {
+                        name: "TestVssAdmin".to_string(),
+                        ..Default::default()
+                    },
+                    features: vec![RuleCondition::String {
+                        string: "/vssadmin.* delete shadows/i".to_string(),
+                    }],
+                },
+            },
+            Rule {
+                rule: RuleInner {
+                    meta: RuleMeta {
+                        name: "TestUnmatchedRegex".to_string(),
+                        ..Default::default()
+                    },
+                    features: vec![RuleCondition::String {
+                        string: "/shadowcopy_unique_xyz[0-9]+/i".to_string(),
+                    }],
+                },
+            },
+        ];
+
+        let needle = NeedleIndex::new(&test_rules);
+
+        // Raw buffer containing the command line
+        let buf = b"cmd.exe /c vssadmin.exe delete shadows /all /quiet";
+        needle.scan_buffer(buf);
+
+        let strings = AHashSet::new();
+
+        // vssadmin is present in the buffer, regex should match
+        assert!(needle.is_regex_present("/vssadmin.* delete shadows/i"));
+        assert!(needle.matches_regex("/vssadmin.* delete shadows/i", buf, &strings));
+
+        // Unmatched regex anchor is not in buffer, pruned in O(1)
+        assert!(!needle.is_regex_present("/shadowcopy_unique_xyz[0-9]+/i"));
+        assert!(!needle.matches_regex("/shadowcopy_unique_xyz[0-9]+/i", buf, &strings));
+    }
+}

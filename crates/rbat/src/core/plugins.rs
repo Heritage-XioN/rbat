@@ -26,7 +26,7 @@
 //! let section_ranges = vec![];
 //! let entry_points = FlirtMatcher::collect_entry_points(&obj, &[], &BinaryArch::X64, 0x1000);
 //!
-//! let needle = Arc::new(NeedleIndex::build_from_rules(&[]));
+//! let needle = Arc::new(NeedleIndex::new(&[]));
 //! let ctx = AnalysisContext {
 //!     buffer: &buffer,
 //!     binary_object: &obj,
@@ -270,7 +270,7 @@ mod tests {
             text_bytes: &[],
             entry_addr: 0x1000,
             instructions: Arc::from([]),
-            needle: std::sync::Arc::new(NeedleIndex::build_from_rules(&[])),
+            needle: std::sync::Arc::new(NeedleIndex::new(&[])),
             entry_points,
             custom_flirt: &FlirtMatcher::load_embedded(),
         };
@@ -304,7 +304,7 @@ mod tests {
             text_bytes: &[],
             entry_addr: 0x1000,
             instructions: Arc::from([]),
-            needle: std::sync::Arc::new(NeedleIndex::build_from_rules(&[])),
+            needle: std::sync::Arc::new(NeedleIndex::new(&[])),
             entry_points,
             custom_flirt: &FlirtMatcher::load_embedded(),
         };
@@ -353,7 +353,7 @@ mod tests {
             text_bytes: &text_bytes,
             entry_addr: 0x1000,
             instructions: instructions.into(),
-            needle: std::sync::Arc::new(NeedleIndex::build_from_rules(&[])),
+            needle: std::sync::Arc::new(NeedleIndex::new(&[])),
             entry_points,
             custom_flirt: &FlirtMatcher::load_embedded(),
         };

@@ -63,8 +63,8 @@
 //! // Evaluate rules against extracted binary features
 //! let rules = vec![rule];
 //! let result = AnalysisResult::default();
-//! let features = FeatureSet::from_analysis_result(&result);
-//! let needle = NeedleIndex::build_from_rules(&rules);
+//! let features = FeatureSet::new(&result, &[]);
+//! let needle = NeedleIndex::new(&rules);
 //!
 //! let matches = Rule::evaluate(&features, &rules, &needle);
 //! println!("Matched {} rules", matches.len());
@@ -194,8 +194,8 @@ impl Rule {
     /// let rule = Rule::from_slice(rule_yaml.as_bytes()).unwrap();
     /// let rules = vec![rule.clone()];
     /// let result = AnalysisResult::default();
-    /// let features = FeatureSet::from_analysis_result(&result);
-    /// let needle = NeedleIndex::build_from_rules(&rules);
+    /// let features = FeatureSet::new(&result, &[]);
+    /// let needle = NeedleIndex::new(&rules);
     /// let matched_rules = AHashSet::new();
     ///
     /// assert!(!rule.matches(&features, &needle, &matched_rules));
@@ -403,8 +403,8 @@ impl Rule {
     /// let rule = Rule::from_slice(rule_yaml.as_bytes()).unwrap();
     /// let rules = vec![rule];
     /// let result = AnalysisResult::default();
-    /// let features = FeatureSet::from_analysis_result(&result);
-    /// let needle = NeedleIndex::build_from_rules(&rules);
+    /// let features = FeatureSet::new(&result, &[]);
+    /// let needle = NeedleIndex::new(&rules);
     ///
     /// let matches = Rule::evaluate(&features, &rules, &needle);
     /// assert!(matches.is_empty());
@@ -733,9 +733,18 @@ impl RuleCondition {
             Self::Export { export } => Some(Self::Export {
                 export: Self::strip_inline_desc(&export).to_lowercase(),
             }),
-            Self::String { string } => Some(Self::String {
-                string: Self::strip_inline_desc(&string).to_lowercase(),
-            }),
+            Self::String { string } => {
+                let stripped = Self::strip_inline_desc(&string);
+                if Self::parse_capa_regex(stripped).is_some() {
+                    Some(Self::String {
+                        string: stripped.to_string(),
+                    })
+                } else {
+                    Some(Self::String {
+                        string: stripped.to_lowercase(),
+                    })
+                }
+            }
             Self::Mnemonic { mnemonic } => Some(Self::Mnemonic {
                 mnemonic: Self::strip_inline_desc(&mnemonic).to_lowercase(),
             }),
@@ -853,7 +862,9 @@ impl RuleCondition {
                 }
             }
             Self::String { string } => {
-                if let Some(id) = needle.lookup.get(string) {
+                if Self::parse_capa_regex(string).is_some() {
+                    needle.matches_regex(string, features.raw_buffer, &features.strings)
+                } else if let Some(id) = needle.lookup.get(string) {
                     needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
                     features.strings.iter().any(|s| s.contains(string))
@@ -959,21 +970,48 @@ impl RuleCondition {
                     }
                 }
                 Self::String { string } => {
-                    if let Some(id) = needle.lookup.get(string)
-                        && !needle.present[id.as_usize()].load(Ordering::Relaxed)
-                    {
-                        return 0 == *count;
-                    }
-                    let mut accumulated = 0;
-                    for s in &features.strings {
-                        if s.contains(string) {
-                            accumulated += 1;
-                            if accumulated >= *count {
-                                break;
+                    if Self::parse_capa_regex(string).is_some() {
+                        if !needle.is_regex_present(string) {
+                            return 0 == *count;
+                        }
+                        if let Some((re, _)) = needle.regex_lookup.get(string) {
+                            let mut accumulated = 0;
+                            for s in &features.strings {
+                                if re.is_match(s.as_bytes()) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        return true;
+                                    }
+                                }
+                            }
+                            if accumulated < *count && !features.raw_buffer.is_empty() {
+                                let buffer_matches = re
+                                    .find_iter(features.raw_buffer)
+                                    .take(*count - accumulated)
+                                    .count();
+                                accumulated += buffer_matches;
+                            }
+                            accumulated >= *count
+                        } else {
+                            0 == *count
+                        }
+                    } else {
+                        if let Some(id) = needle.lookup.get(string)
+                            && !needle.present[id.as_usize()].load(Ordering::Relaxed)
+                        {
+                            return 0 == *count;
+                        }
+                        let mut accumulated = 0;
+                        for s in &features.strings {
+                            if s.contains(string) {
+                                accumulated += 1;
+                                if accumulated >= *count {
+                                    break;
+                                }
                             }
                         }
+                        accumulated >= *count
                     }
-                    accumulated >= *count
                 }
                 Self::Mnemonic { mnemonic } => {
                     if let Some(id) = needle.lookup.get(mnemonic) {
@@ -1023,10 +1061,16 @@ impl RuleCondition {
                     .get(api)
                     .is_some_and(|id| insn.matched.contains(id))
             }
-            Self::String { string } => needle
-                .lookup
-                .get(string)
-                .is_some_and(|id| insn.matched.contains(id)),
+            Self::String { string } => {
+                if Self::parse_capa_regex(string).is_some() {
+                    needle.matches_regex_instruction(string, insn)
+                } else {
+                    needle
+                        .lookup
+                        .get(string)
+                        .is_some_and(|id| insn.matched.contains(id))
+                }
+            }
             Self::Mnemonic { mnemonic } => needle
                 .lookup
                 .get(mnemonic)
@@ -1060,10 +1104,18 @@ impl RuleCondition {
                     .get(api)
                     .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id)))
             }
-            Self::String { string } => needle
-                .lookup
-                .get(string)
-                .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id))),
+            Self::String { string } => {
+                if Self::parse_capa_regex(string).is_some() {
+                    instructions
+                        .iter()
+                        .any(|insn| needle.matches_regex_instruction(string, insn))
+                } else {
+                    needle
+                        .lookup
+                        .get(string)
+                        .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id)))
+                }
+            }
             Self::Mnemonic { mnemonic } => needle
                 .lookup
                 .get(mnemonic)
@@ -1109,10 +1161,16 @@ impl RuleCondition {
                     .get(api)
                     .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed))
             }
-            Self::String { string } => needle
-                .lookup
-                .get(string)
-                .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed)),
+            Self::String { string } => {
+                if Self::parse_capa_regex(string).is_some() {
+                    needle.is_regex_present(string)
+                } else {
+                    needle
+                        .lookup
+                        .get(string)
+                        .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed))
+                }
+            }
             Self::Mnemonic { mnemonic } => needle
                 .lookup
                 .get(mnemonic)
@@ -1140,6 +1198,41 @@ impl RuleCondition {
             }
             _ => false,
         }
+    }
+
+    /// Parses a Capa regular expression string literal in `/pattern/flags` syntax.
+    ///
+    /// Distinguishes Capa regular expression literals from ordinary string values and Unix filesystem paths
+    /// (e.g. `"/etc/os-release"` or `"/proc/self/maps"`). Validates that the string starts and terminates
+    /// with a delimiter slash, that only supported flags (`i`, `s`, `m`) follow the terminating slash,
+    /// and that the inner pattern is non-empty.
+    ///
+    /// # Parameters
+    ///
+    /// - `s`: Raw string slice to test and parse.
+    ///
+    /// # Returns
+    ///
+    /// `Some((pattern, is_case_insensitive))` containing the extracted inner regex slice and a boolean
+    /// indicating whether case insensitivity (`i` flag) was specified, or `None` if the input is not a regex literal.
+    pub(crate) fn parse_capa_regex(s: &str) -> Option<(&str, bool)> {
+        if !s.starts_with('/') || s.len() < 2 {
+            return None;
+        }
+        let last_slash = s.rfind('/')?;
+        if last_slash == 0 {
+            return None;
+        }
+        let flags = &s[last_slash + 1..];
+        if !flags.chars().all(|c| matches!(c, 'i' | 's' | 'm')) {
+            return None;
+        }
+        let pattern = &s[1..last_slash];
+        if pattern.is_empty() {
+            return None;
+        }
+        let is_case_insensitive = flags.contains('i');
+        Some((pattern, is_case_insensitive))
     }
 }
 
@@ -1279,6 +1372,7 @@ mod tests {
             max_cyclomatic_complexity: 0,
             blocks: Vec::new(),
             cfg_instructions: Arc::from([]),
+            raw_buffer: &[],
         };
 
         // Simple API Match Rule
@@ -1315,7 +1409,7 @@ mod tests {
         };
 
         let rules = vec![rule_api, rule_entropy];
-        let needle = NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::new(&rules);
         let matches = Rule::evaluate(&features, &rules, &needle);
 
         assert_eq!(matches.len(), 2);
@@ -1406,7 +1500,7 @@ mod tests {
         };
 
         let rules = vec![rule_cfg, rule_scope];
-        let needle = NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::new(&rules);
 
         // Manually populate matched sets since we bypass CFG in this test
         for insn in insns.iter_mut() {
@@ -1435,6 +1529,7 @@ mod tests {
             max_cyclomatic_complexity: 5,
             blocks: vec![&block1],
             cfg_instructions: insns.into(),
+            raw_buffer: &[],
         };
 
         let matches = Rule::evaluate(&features, &rules, &needle);
@@ -1461,6 +1556,7 @@ mod tests {
             max_cyclomatic_complexity: 0,
             blocks: Vec::new(),
             cfg_instructions: Arc::from([]),
+            raw_buffer: &[],
         };
 
         let rule_pe = RuleCondition::Format {
@@ -1469,7 +1565,7 @@ mod tests {
         let rule_elf = RuleCondition::Format {
             format: "elf".to_owned(),
         };
-        let needle = NeedleIndex::build_from_rules(&[]);
+        let needle = NeedleIndex::new(&[]);
 
         let empty_set = ahash::AHashSet::new();
         assert!(rule_pe.matches(&features, &needle, &empty_set));
@@ -1511,7 +1607,7 @@ mod tests {
         };
 
         let rules = vec![consumer_rule, lib_rule];
-        let needle = NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::new(&rules);
 
         let empty_entropy = AHashMap::new();
         let mut api_pattern = None;
@@ -1538,6 +1634,7 @@ mod tests {
             max_cyclomatic_complexity: 0,
             blocks: Vec::new(),
             cfg_instructions: Arc::from([]),
+            raw_buffer: &[],
         };
 
         let matched = Rule::evaluate(&features, &rules, &needle);
@@ -1564,7 +1661,7 @@ mod tests {
         };
 
         let rules = vec![rule_count];
-        let needle = NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::new(&rules);
         let alloc_id = *needle.lookup.get("VirtualAlloc").unwrap();
 
         let mut insn1 = InstructionInfo {
@@ -1612,6 +1709,7 @@ mod tests {
             max_cyclomatic_complexity: 1,
             blocks: vec![&block],
             cfg_instructions: insns.into(),
+            raw_buffer: &[],
         };
 
         let matched = Rule::evaluate(&features_two_calls, &rules, &needle);
@@ -1646,7 +1744,7 @@ mod tests {
         };
 
         let rules = vec![rule_short, rule_long];
-        let needle = NeedleIndex::build_from_rules(&rules);
+        let needle = NeedleIndex::new(&rules);
 
         let insn = InstructionInfo {
             address: 0x1000,
@@ -1690,5 +1788,48 @@ mod tests {
                 .iter()
                 .any(|r| r.rule.meta.name.contains("encrypt data using RC4 PRGA"))
         );
+    }
+
+    #[test]
+    fn test_regex_rule_evaluation() {
+        let regex_rule = Rule {
+            rule: RuleInner {
+                meta: RuleMeta {
+                    name: "DeleteShadowCopies".to_owned(),
+                    ..Default::default()
+                },
+                features: vec![RuleCondition::String {
+                    string: "/vssadmin.* delete shadows/i".to_owned(),
+                }],
+            },
+        };
+
+        let rules = vec![regex_rule];
+        let needle = NeedleIndex::new(&rules);
+
+        let buf = b"cmd.exe /c vssadmin.exe delete shadows /all /quiet";
+        needle.scan_buffer(buf);
+
+        let empty_entropy = AHashMap::new();
+        let features = FeatureSet {
+            apis: FxHashSet::default(),
+            strings: AHashSet::new(),
+            section_entropies: &empty_entropy,
+            has_code_cave: false,
+            has_packer_sig: false,
+            os: "windows".to_owned(),
+            arch: "x86_64".to_owned(),
+            binary_format: "pe".to_owned(),
+            basic_blocks_count: 0,
+            has_loop: false,
+            max_cyclomatic_complexity: 0,
+            blocks: Vec::new(),
+            cfg_instructions: Arc::from([]),
+            raw_buffer: buf,
+        };
+
+        let matches = Rule::evaluate(&features, &rules, &needle);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "DeleteShadowCopies");
     }
 }
