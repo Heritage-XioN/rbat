@@ -104,6 +104,9 @@ impl HeuristicPlugin for StringCheckPlugin {
         &self,
         ctx: &AnalysisContext<'buf, 'ctx>,
     ) -> RbatResult<AnalysisProgress<'buf>> {
+        // Direct multi-pattern needle scan over raw binary buffer and UTF-16LE sequences
+        ctx.needle.scan_buffer(ctx.buffer);
+
         let results = string_check(ctx.buffer, ctx.section_ranges)?;
         for matches in results.values() {
             for m in matches {
