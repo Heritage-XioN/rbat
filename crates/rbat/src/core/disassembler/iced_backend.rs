@@ -141,20 +141,19 @@ impl DisassemblerImpl {
     ///
     /// # Returns
     ///
-    /// A vector of [`InstructionInfo`] structs representing the decoded instructions.
+    /// An [`Arc<[InstructionInfo]>`](Arc) slice representing the decoded instructions.
     ///
     /// # Errors
     ///
-    /// Returns an [`RbatError::DisassembleInstructionError`] if `self.arch` is not [`BinaryArch::X86`]
-    /// or [`BinaryArch::X64`] (e.g. ARM or ARM64, which are only supported by the Capstone backend).
+    /// Returns an [`RbatError::DisassembleInstructionError`] if:
+    /// - `self.arch` is not [`BinaryArch::X86`] or [`BinaryArch::X64`] (e.g. ARM or ARM64, which are only supported by the Capstone backend).
+    /// - No valid instructions could be decoded from `text_bytes`.
     ///
     /// # Allocation Behavior
     ///
-    /// The returned `Vec<InstructionInfo>` is pre-allocated up to `MAX_PREALLOC_BYTES` (8 MiB)
-    /// based on the heuristic `min(text_bytes.len() / 4, cap)` to mitigate initial allocation churn.
-    /// If dynamic reallocations occur during disassembly of large binaries, [`Vec::shrink_to_fit`]
-    /// is invoked prior to returning to immediately release any exponential doubling overcapacity,
-    /// guaranteeing that returned vectors hold zero unused memory slots.
+    /// Constructs the [`Arc<[InstructionInfo]>`](Arc) directly via pre-counting and uninitialized
+    /// slice allocation ([`Arc::new_uninit_slice`]), requiring only a single allocation of exact size
+    /// and eliminating any transient buffer duplication or reallocation churn.
     /// Text strings are formatted using caller-reused scratch buffers and inlined into
     /// [`CompactString`] fields without heap allocations for strings <= 24 bytes.
     ///
@@ -177,7 +176,7 @@ impl DisassemblerImpl {
         text_bytes: &[u8],
         entry_addr: u64,
         iat_map: &IatMap,
-    ) -> RbatResult<Vec<InstructionInfo>> {
+    ) -> RbatResult<Arc<[InstructionInfo]>> {
         let bitness = match self.arch {
             BinaryArch::X64 => 64,
             BinaryArch::X86 => 32,
@@ -188,17 +187,37 @@ impl DisassemblerImpl {
             }
         };
 
-        const MAX_PREALLOC_BYTES: usize = 8 << 20; // 8 MiB
-        let max_entries = MAX_PREALLOC_BYTES / size_of::<InstructionInfo>();
-        let cap = (text_bytes.len() / 4).min(max_entries);
+        // Pass 1: Fast zero-allocation instruction count
+        let mut count = 0usize;
+        let mut count_decoder =
+            Decoder::with_ip(bitness, text_bytes, entry_addr, DecoderOptions::NONE);
+        let mut count_instr = iced_x86::Instruction::default();
 
+        while count_decoder.can_decode() {
+            count_decoder.decode_out(&mut count_instr);
+            if count_instr.code() != Code::INVALID {
+                count += 1;
+            }
+        }
+
+        if count == 0 {
+            return Err(RbatError::DisassembleInstructionError(
+                "no instructions decoded from binary text bytes".to_string(),
+            ));
+        }
+
+        // Allocate Arc slice directly with exact capacity
+        let mut uninit_arc = Arc::new_uninit_slice(count);
+        let slice = Arc::get_mut(&mut uninit_arc).expect("uniquely owned Arc slice");
+
+        // Pass 2: decode instructions and write slice
         let mut decoder = Decoder::with_ip(bitness, text_bytes, entry_addr, DecoderOptions::NONE);
-        let mut instructions = Vec::with_capacity(if decoder.can_decode() { cap } else { 0 });
         let mut instr = iced_x86::Instruction::default();
 
         let mut formatter = Self::create_formatter();
         let mut mnem_buf = String::with_capacity(16);
         let mut op_buf = String::with_capacity(64);
+        let mut idx = 0usize;
 
         while decoder.can_decode() {
             decoder.decode_out(&mut instr);
@@ -208,16 +227,27 @@ impl DisassemblerImpl {
             }
 
             let api_resolution = Self::resolve_api(&instr, iat_map);
-            instructions.push(InstructionInfo::from_iced(
+            slice[idx].write(InstructionInfo::from_iced(
                 &instr,
                 &mut formatter,
                 &mut mnem_buf,
                 &mut op_buf,
                 api_resolution,
             ));
+            idx += 1;
         }
 
-        instructions.shrink_to_fit();
+        assert_eq!(
+            idx, count,
+            "Decoded instruction count must match pre-counted instruction count"
+        );
+
+        // SAFETY: `uninit_arc` was allocated with capacity `count`. Pass 1 counted the exact number
+        // of valid non-Code::INVALID instructions in `text_bytes`, and pass 2 decodes with the exact
+        // same decoder configuration, writing an initialized `InstructionInfo` into every index `0..count`
+        // without early return. The `assert_eq!(idx, count)` assertion dynamically guarantees that all
+        // `count` elements in the slice were sequentially initialized.
+        let instructions = unsafe { uninit_arc.assume_init() };
 
         Ok(instructions)
     }
@@ -327,13 +357,55 @@ mod tests {
     }
 
     #[test]
-    fn test_iced_disasm_invalid_bytes() {
+    fn test_iced_disasm_invalid_bytes_error() {
         let disasm = DisassemblerImpl::new(BinaryArch::X64);
         // 0xFF 0xFF is an invalid x86 instruction
         let bytes = &[0xFF, 0xFF];
         let iat_map = IatMap::default();
-        let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
-        assert_eq!(insns.len(), 0);
+        let res = disasm.disassemble(bytes, 0x1000, &iat_map);
+        match res {
+            Err(RbatError::DisassembleInstructionError(msg)) => {
+                assert!(
+                    msg.contains("no instructions decoded"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected DisassembleInstructionError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_iced_disasm_empty_bytes_error() {
+        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let bytes = &[];
+        let iat_map = IatMap::default();
+        let res = disasm.disassemble(bytes, 0x1000, &iat_map);
+        match res {
+            Err(RbatError::DisassembleInstructionError(msg)) => {
+                assert!(
+                    msg.contains("no instructions decoded"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected DisassembleInstructionError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_iced_disasm_unsupported_arch_error() {
+        let disasm = DisassemblerImpl::new(BinaryArch::Arm);
+        let bytes = &[0x90, 0xC3];
+        let iat_map = IatMap::default();
+        let res = disasm.disassemble(bytes, 0x1000, &iat_map);
+        match res {
+            Err(RbatError::DisassembleInstructionError(msg)) => {
+                assert!(
+                    msg.contains("iced-x86 only supports x86 and x64"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected DisassembleInstructionError, got {other:?}"),
+        }
     }
 
     #[test]

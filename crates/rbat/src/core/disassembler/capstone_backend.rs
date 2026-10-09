@@ -49,7 +49,7 @@
 //! ```
 
 use super::InstructionInfo;
-use crate::core::types::result::RbatResult;
+use crate::core::types::result::{RbatError, RbatResult};
 use crate::core::{
     cfg::{ControlFlowGraph, InstructionClass},
     parser::{BinaryArch, IatMap},
@@ -112,19 +112,21 @@ impl DisassemblerImpl {
     ///
     /// # Returns
     ///
-    /// A vector of [`InstructionInfo`] structs representing the disassembled instructions in linear order.
+    /// An [`Arc<[InstructionInfo]>`](Arc) slice representing the disassembled instructions in linear order.
     ///
     /// # Errors
     ///
-    /// Returns an [`RbatError`](crate::core::types::result::RbatError) if:
+    /// Returns an [`RbatError`] if:
     /// - Capstone initialization fails for the requested architecture.
     /// - Setting disassembly mode, syntax, or skipdata options fails.
     /// - Linear disassembly fails fatally in the Capstone C engine.
+    /// - No valid instructions could be decoded from `text_bytes` (returns [`RbatError::DisassembleInstructionError`])
+    /// .
     ///
     /// # Allocation Behavior
     ///
     /// - Capstone's C engine allocates an internal instruction buffer during `disasm_all`.
-    /// - The resulting vector pre-allocates space for all decoded instructions.
+    /// - Constructs the [`Arc<[InstructionInfo]>`](Arc) directly via [`Arc::new_uninit_slice`], requiring only a single exact-size allocation and eliminating intermediate vector reallocations.
     /// - Text strings are stored inline via [`CompactString`] without dynamic heap allocations for strings <= 24 bytes.
     ///
     /// # Examples
@@ -146,7 +148,7 @@ impl DisassemblerImpl {
         text_bytes: &[u8],
         entry_addr: u64,
         iat_map: &IatMap,
-    ) -> RbatResult<Vec<InstructionInfo>> {
+    ) -> RbatResult<Arc<[InstructionInfo]>> {
         let mut cs = match self.arch {
             BinaryArch::X86 | BinaryArch::X64 => {
                 let mut x86 = Capstone::new().x86();
@@ -176,45 +178,70 @@ impl DisassemblerImpl {
         cs.set_skipdata(true)?;
 
         let cs_insns = cs.disasm_all(text_bytes, entry_addr)?;
+        let count = cs_insns.len();
+        let mut idx = 0usize;
 
-        let inst_vec: Vec<InstructionInfo> = cs_insns
-            .iter()
-            .map(|insn| {
-                let detail = cs.insn_detail(insn).ok();
-                let mut api_resolution = None;
-                if let Some(detail) = &detail {
-                    let arch_detail = detail.arch_detail();
-                    if let Some(x86) = arch_detail.x86() {
-                        for op in x86.operands() {
-                            match op.op_type {
-                                capstone::arch::x86::X86OperandType::Imm(imm) => {
-                                    if let Some(api) = iat_map.get(&(imm as u64)) {
-                                        api_resolution = Some(api.clone());
-                                        break;
-                                    }
+        if count == 0 {
+            return Err(RbatError::DisassembleInstructionError(
+                capstone::Error::CustomError("no instructions decoded from binary text bytes"),
+            ));
+        }
+
+        let mut uninit_arc = Arc::new_uninit_slice(count);
+        let slice = Arc::get_mut(&mut uninit_arc).expect("uniquely owned Arc slice");
+
+        for (i, insn) in cs_insns.iter().enumerate() {
+            let mut api_resolution = None;
+
+            let detail = cs.insn_detail(insn).ok();
+            if let Some(detail) = &detail {
+                let arch_detail = detail.arch_detail();
+                if let Some(x86) = arch_detail.x86() {
+                    for op in x86.operands() {
+                        match op.op_type {
+                            capstone::arch::x86::X86OperandType::Imm(imm) => {
+                                if let Some(api) = iat_map.get(&(imm as u64)) {
+                                    api_resolution = Some(api.clone());
+                                    break;
                                 }
-                                capstone::arch::x86::X86OperandType::Mem(mem) => {
-                                    if let Some(api) = iat_map.get(&(mem.disp() as u64)) {
-                                        api_resolution = Some(api.clone());
-                                        break;
-                                    }
-                                }
-                                _ => {}
                             }
+                            capstone::arch::x86::X86OperandType::Mem(mem) => {
+                                if let Some(api) = iat_map.get(&(mem.disp() as u64)) {
+                                    api_resolution = Some(api.clone());
+                                    break;
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
-                let inst_class = match &detail {
-                    Some(d) => Self::instruction_class_from_detail(insn, d),
-                    None => {
-                        ControlFlowGraph::classify_instr(insn.mnemonic().unwrap_or(""), &self.arch)
-                    }
-                };
-                InstructionInfo::from_capstone(insn, api_resolution, inst_class)
-            })
-            .collect();
+            }
 
-        Ok(inst_vec)
+            let inst_class = match &detail {
+                Some(d) => Self::instruction_class_from_detail(insn, d),
+                None => ControlFlowGraph::classify_instr(insn.mnemonic().unwrap_or(""), &self.arch),
+            };
+            slice[i].write(InstructionInfo::from_capstone(
+                insn,
+                api_resolution,
+                inst_class,
+            ));
+            idx += 1;
+        }
+
+        assert_eq!(
+            idx, count,
+            "Decoded instruction count must match pre-counted instruction count"
+        );
+
+        // SAFETY: `uninit_arc` was allocated with capacity `count`. The loop iterates
+        // through `cs_insns.iter().enumerate()` of exact length `count`, writing a fully
+        // initialized `InstructionInfo` into every element `slice[0..count]` via `slice[i].write(...)`
+        // without early returns. The immediately preceding `assert_eq!(idx, count)` assertion
+        // dynamically verifies that all `count` elements in the slice were sequentially initialized.
+        let instructions = unsafe { uninit_arc.assume_init() };
+
+        Ok(instructions)
     }
 
     /// Resolves a precise [`InstructionClass`] from Capstone instruction detail groups.
@@ -407,5 +434,39 @@ mod tests {
             mnems.iter().any(|m| m == "aesenc"),
             "missing aesenc: {mnems:?}"
         );
+    }
+
+    #[test]
+    fn test_capstone_disasm_empty_bytes_error() {
+        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let iat_map = IatMap::default();
+        let res = disasm.disassemble(&[], 0x1000, &iat_map);
+        match res {
+            Err(RbatError::DisassembleInstructionError(err)) => {
+                assert_eq!(
+                    err,
+                    capstone::Error::CustomError("no instructions decoded from binary text bytes")
+                );
+            }
+            other => panic!("expected DisassembleInstructionError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_capstone_disasm_zero_count_error_all_archs() {
+        for arch in [
+            BinaryArch::X86,
+            BinaryArch::X64,
+            BinaryArch::Arm,
+            BinaryArch::Arm64,
+        ] {
+            let disasm = DisassemblerImpl::new(arch);
+            let iat_map = IatMap::default();
+            let res = disasm.disassemble(&[], 0x1000, &iat_map);
+            assert!(
+                matches!(res, Err(RbatError::DisassembleInstructionError(_))),
+                "arch {arch:?} should return DisassembleInstructionError when count is 0"
+            );
+        }
     }
 }

@@ -209,10 +209,9 @@ impl Analyzer {
             iat_map,
         } = binary_data;
 
-        let factory = DisassemblerImpl::new(arch);
-        let instructions: Arc<[InstructionInfo]> = factory
-            .disassemble(&text_bytes, entry_addr, &iat_map)?
-            .into();
+        let disasn = DisassemblerImpl::new(arch);
+        let instructions: Arc<[InstructionInfo]> =
+            disasn.disassemble(&text_bytes, entry_addr, &iat_map)?;
         let entry_points =
             FlirtMatcher::collect_entry_points(&binary_object, &instructions, &arch, entry_addr);
 
@@ -357,7 +356,7 @@ impl Analyzer {
         if let Some(ref mut cfg) = analysis_result.cfg {
             self.needle.populate_cfg(cfg);
         }
-        let features = FeatureSet::from_analysis_result(&analysis_result);
+        let features = FeatureSet::new(&analysis_result, buffer);
         let matched_rules = Rule::evaluate(&features, &self.rules, &self.needle);
         let score = RiskAssessment::calculate_risk(&matched_rules, &self.classifier);
 
@@ -550,7 +549,7 @@ impl AnalyzerBuilder {
             Some(f) => f,
             None => FlirtMatcher::load_embedded(),
         };
-        let needle = Arc::new(NeedleIndex::build_from_rules(&rules));
+        let needle = Arc::new(NeedleIndex::new(&rules));
         Analyzer {
             rules,
             needle,
