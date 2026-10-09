@@ -34,7 +34,7 @@
 //! use rbat::core::types::analysis::AnalysisResult;
 //!
 //! let result = AnalysisResult::default();
-//! let _features = FeatureSet::from_analysis_result(&result);
+//! let _features = FeatureSet::new(&result, &[]);
 //! ```
 
 use crate::core::{
@@ -73,7 +73,7 @@ type Adj = Vec<SmallVec<[u32; 2]>>;
 /// use rbat::core::types::analysis::AnalysisResult;
 ///
 /// let result = AnalysisResult::default();
-/// let _features = FeatureSet::from_analysis_result(&result);
+/// let _features = FeatureSet::new(&result, &[]);
 /// ```
 #[derive(Debug, Clone)]
 pub struct FeatureSet<'buf> {
@@ -93,7 +93,6 @@ pub struct FeatureSet<'buf> {
     pub(crate) arch: String,
     /// Canonical binary format identifier (`pe`, `elf`, or `macho`).
     pub(crate) binary_format: String,
-    // CFG structural fields
     /// The total count of basic blocks.
     pub(crate) basic_blocks_count: usize,
     /// Indicates if a loop structure was detected.
@@ -104,19 +103,31 @@ pub struct FeatureSet<'buf> {
     pub(crate) blocks: Vec<&'buf BasicBlock>,
     /// Shared backing instructions for CFG basic block inspection.
     pub(crate) cfg_instructions: Arc<[InstructionInfo]>,
+    /// Raw binary buffer for direct regex and pattern verification.
+    pub(crate) raw_buffer: &'buf [u8],
 }
 
 impl<'buf> FeatureSet<'buf> {
-    /// Populates a `FeatureSet` from the aggregate analysis findings.
+    /// Populates a [`FeatureSet`] from the aggregate analysis findings and raw binary buffer.
     ///
     /// Executes the multi-stage extraction pipeline:
-    /// 1. Determines architecture and discovers FLIRT library function boundaries.
-    /// 2. Sorts and merges overlapping library ranges to filter out library basic blocks.
-    /// 3. Normalizes imports and exports into Aho-Corasick [`PatternID`] search sets.
-    /// 4. Collects and lowercases matched YARA string values.
-    /// 5. Filters non-library blocks, builds an adjacency graph, collapses parallel edges,
+    /// 1. Determines CPU architecture and discovers FLIRT library function boundaries.
+    /// 2. Sorts and merges overlapping library address ranges to exclude runtime boilerplate.
+    /// 3. Normalizes imports, exports, and API capabilities into Aho-Corasick [`PatternID`] search sets.
+    /// 4. Collects and lowercases matched YARA string values and detected string literals.
+    /// 5. Filters non-library basic blocks, constructs an adjacency graph, collapses parallel edges,
     ///    detects loops via DFS, and computes maximum McCabe cyclomatic complexity.
-    /// 6. Normalizes target OS, architecture, and binary format strings.
+    /// 6. Normalizes target operating system, architecture, and binary format strings.
+    /// 7. Stores references to the CFG instructions and `raw_buffer` for regex and pattern verification.
+    ///
+    /// # Parameters
+    ///
+    /// - `res`: Aggregated static analysis findings from heuristic plugins, FLIRT identification, and CFG extraction.
+    /// - `raw_buffer`: Raw executable binary byte slice used for direct regex evaluation and wide-character scanning.
+    ///
+    /// # Returns
+    ///
+    /// A fully populated [`FeatureSet`] ready for security rule evaluation.
     ///
     /// # Examples
     ///
@@ -125,9 +136,9 @@ impl<'buf> FeatureSet<'buf> {
     /// use rbat::core::types::analysis::AnalysisResult;
     ///
     /// let res = AnalysisResult::default();
-    /// let features = FeatureSet::from_analysis_result(&res);
+    /// let features = FeatureSet::new(&res, &[]);
     /// ```
-    pub fn from_analysis_result(res: &'buf AnalysisResult<'buf>) -> Self {
+    pub fn new(res: &'buf AnalysisResult<'buf>, raw_buffer: &'buf [u8]) -> Self {
         let arch_name = res.metadata.architecture_name();
 
         // ---- Library ranges ----
@@ -256,6 +267,7 @@ impl<'buf> FeatureSet<'buf> {
                 .as_ref()
                 .map(|c| Arc::clone(&c.instructions))
                 .unwrap_or_else(|| Arc::from([])),
+            raw_buffer,
         }
     }
 
@@ -433,7 +445,7 @@ mod tests {
         // simulate packer match
         res.packer_signatures.insert("UPX", vec![]);
 
-        let fs = FeatureSet::from_analysis_result(&res);
+        let fs = FeatureSet::new(&res, &[]);
 
         // Test APIs (both hooking and process injection should be merged)
         assert!(fs.apis.contains(&PatternID::must(10)));
@@ -455,7 +467,7 @@ mod tests {
     #[test]
     fn test_feature_set_creation_empty() {
         let res = AnalysisResult::default();
-        let fs = FeatureSet::from_analysis_result(&res);
+        let fs = FeatureSet::new(&res, &[]);
 
         assert!(fs.apis.is_empty());
         assert!(fs.strings.is_empty());
@@ -496,7 +508,7 @@ mod tests {
         // Add library function at 0x2000
         res.library_functions.insert(0x2000, "strlen".to_string());
 
-        let fs = FeatureSet::from_analysis_result(&res);
+        let fs = FeatureSet::new(&res, &[]);
 
         // The user block at 0x1000 should be retained
         assert!(fs.blocks.iter().any(|b| b.start_address == 0x1000));
@@ -571,7 +583,7 @@ mod tests {
         let cfg = ControlFlowGraph::new(insns.into(), &BinaryArch::X64);
         res.cfg = Some(cfg);
 
-        let fs = FeatureSet::from_analysis_result(&res);
+        let fs = FeatureSet::new(&res, &[]);
         assert_eq!(fs.max_cyclomatic_complexity, 2);
     }
 }

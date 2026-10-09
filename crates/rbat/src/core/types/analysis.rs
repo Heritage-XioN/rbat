@@ -326,7 +326,7 @@ impl BinaryMetadata {
 ///     text_bytes: &buffer,
 ///     entry_addr: 0x1000,
 ///     instructions: std::sync::Arc::from([]),
-///     needle: std::sync::Arc::new(rbat::core::types::NeedleIndex::build_from_rules(&[])),
+///     needle: std::sync::Arc::new(rbat::core::types::NeedleIndex::new(&[])),
 /// };
 /// ```
 pub(crate) struct AnalysisContext<'buf, 'ctx> {
