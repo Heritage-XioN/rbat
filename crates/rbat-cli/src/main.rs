@@ -187,7 +187,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     // ========================================================
     // Construct featureset and evaluate against loaded rules
     // ========================================================
-    let features = FeatureSet::from_analysis_result(&analysis_result);
+    let features = FeatureSet::new(&analysis_result, &buffer);
     let matched_rules = Rule::evaluate(&features, analyzer.rules(), analyzer.needle());
     let risk_assessment = RiskAssessment::calculate_risk(&matched_rules, analyzer.classifier());
 
