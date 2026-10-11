@@ -15,13 +15,11 @@ name = "rbat"
 path = "src/main.rs"
 
 [features]
-default = ["backend-capstone"]
-backend-capstone = ["rbat/backend-capstone"]
-backend-iced = ["rbat/backend-iced"]
-dhat-heap = ["rbat/dhat-heap"]
+dhat-heap = ["dep:dhat"]
 
 [dependencies]
-rbat = { path = "../rbat", default-features = false }
+dhat = { version = "0.3.3", optional = true }
+rbat = { path = "../rbat" }
 clap = { workspace = true }
 clap_complete = "4.5"
 color-eyre = { workspace = true }
