@@ -120,8 +120,8 @@ impl DisassemblerImpl {
     /// - Capstone initialization fails for the requested architecture.
     /// - Setting disassembly mode, syntax, or skipdata options fails.
     /// - Linear disassembly fails fatally in the Capstone C engine.
-    /// - No valid instructions could be decoded from `text_bytes` (returns [`RbatError::DisassembleInstructionError`])
-    /// .
+    /// - No valid instructions could be decoded from `text_bytes`
+    ///   (returns [`RbatError::DisassembleInstructionError`]).
     ///
     /// # Allocation Behavior
     ///
