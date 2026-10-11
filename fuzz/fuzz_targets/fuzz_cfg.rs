@@ -1,10 +1,11 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use rbat::core::disassembler::DisassemblerImpl;
-use rbat::core::traits::Disassembler;
-use rbat::core::{BinaryArch, ControlFlowGraph, IatMap};
-use std::sync::Arc;
+use rbat::core::{
+    cfg::ControlFlowGraph,
+    disassembler::DisassemblerImpl,
+    parser::{BinaryArch, IatMap},
+};
 
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
@@ -21,11 +22,10 @@ fuzz_target!(|data: &[u8]| {
     let iat_map = IatMap::default();
     if let Ok(insns) = dis.disassemble(code_bytes, 0x1000, &iat_map) {
         if !insns.is_empty() {
-            let insns_arc: Arc<[_]> = insns.into();
-            let cfg = ControlFlowGraph::new(insns_arc, &arch);
+            let cfg = ControlFlowGraph::new(insns, &arch);
             for block in cfg.blocks.values() {
-                let _ = cfg.block_instructions(block);
-                let _ = block.instruction_count();
+                let _ = cfg.as_block_instr(block);
+                let _ = block.instr_count();
             }
         }
     }

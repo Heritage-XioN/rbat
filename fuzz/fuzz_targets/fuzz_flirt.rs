@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use rbat::core::FlirtMatcher;
+use rbat::core::flirt::FlirtMatcher;
 use rustc_hash::FxHashSet;
 
 fuzz_target!(|data: &[u8]| {
