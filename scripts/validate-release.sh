@@ -37,11 +37,7 @@ echo 'lightningcss = { path = "/tmp/lightningcss-src" }' >> .cargo/config.toml
 echo -e "\n${YELLOW}🧪 1. Running Workspace Unit Tests...${NC}"
 cargo test --workspace --all-targets --verbose
 
-# 2. Verify client compilation and unit tests
-echo -e "\n${YELLOW}🧪 2. Verifying Next.js Client Compilation...${NC}"
-pnpm --dir rbat-client build
-
-# 3. Verify public API SemVer compliance using cargo-semver-checks
+# 2. Verify public API SemVer compliance using cargo-semver-checks
 echo -e "\n${YELLOW}🧪 3. Running SemVer Compatibility Checks (cargo-semver-checks)...${NC}"
 if ! command -v cargo-semver-checks &> /dev/null; then
   echo -e "${YELLOW}⚠️  cargo-semver-checks is not installed.${NC}"
@@ -62,10 +58,6 @@ else
   fi
   echo -e "${GREEN}✓ SemVer check passed successfully.${NC}"
 fi
-
-# 4. Run E2E Integration Tests (Client -> Server -> Storage -> Redis)
-echo -e "\n${YELLOW}🧪 4. Running End-to-End Integration Tests...${NC}"
-./scripts/run-integration-tests.sh
 
 echo -e "\n${GREEN}🎉 SUCCESS: All release validation gates passed successfully!${NC}"
 echo -e "The codebase is 100% ready for a stable release."

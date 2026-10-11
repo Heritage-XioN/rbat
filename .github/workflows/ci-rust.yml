@@ -4,18 +4,14 @@ on:
   pull_request:
     branches: [ master ]
     paths:
-      - 'rbat-core/**'
-      - 'rbat-server/**'
-      - 'rbat-server/proto/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/ci-rust.yml'
   push:
     branches: [ master ]
     paths:
-      - 'rbat-core/**'
-      - 'rbat-server/**'
-      - 'rbat-server/proto/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/ci-rust.yml'
@@ -33,7 +29,7 @@ env:
 
 jobs:
   lint-rust:
-    name: Lint & Format (Rust)
+    name: Lint & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +51,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
   test-rust:
-    name: Run Tests (Rust)
+    name: Run Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -30,8 +30,6 @@ To ensure a productive and welcoming community, please read and follow our [Code
 
 The workspace is structured as a cargo workspace containing:
 - `rbat-core`: Core static analysis engine and CLI tool.
-- `rbat-server`: gRPC backend daemon.
-- `rbat-client`: Next.js web application frontend.
 
 ### Prerequisites
 - [Rust](https://rustup.rs/) (Stable)

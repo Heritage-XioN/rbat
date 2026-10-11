@@ -29,14 +29,14 @@ mkdir -p "$CORPUS_DIR/fuzz_rules"
 echo "==> Generating seeds for fuzz_analyze..."
 
 # Seed: Small authentic PE DLL from fixtures (4.6 KB)
-if [ -f "$REPO_ROOT/crates/rbat-core/tests/capa-testfiles/e842958188274d5ffee7fbeffb803b2e.dll_" ]; then
-    cp "$REPO_ROOT/crates/rbat-core/tests/capa-testfiles/e842958188274d5ffee7fbeffb803b2e.dll_" \
+if [ -f "$REPO_ROOT/crates/rbat/tests/capa-testfiles/e842958188274d5ffee7fbeffb803b2e.dll_" ]; then
+    cp "$REPO_ROOT/crates/rbat/tests/capa-testfiles/e842958188274d5ffee7fbeffb803b2e.dll_" \
        "$CORPUS_DIR/fuzz_analyze/seed_pe_small_dll.bin"
 fi
 
 # Seed: Authentic ELF testfile (truncated to first 16KB for fast throughput)
-if [ -f "$REPO_ROOT/crates/rbat-core/tests/capa-testfiles/5e4263575796c6ea2445505a843e616111e0e540ec49441e3bb3fc99be7d3afb.elf_" ]; then
-    head -c 16384 "$REPO_ROOT/crates/rbat-core/tests/capa-testfiles/5e4263575796c6ea2445505a843e616111e0e540ec49441e3bb3fc99be7d3afb.elf_" \
+if [ -f "$REPO_ROOT/crates/rbat/tests/capa-testfiles/5e4263575796c6ea2445505a843e616111e0e540ec49441e3bb3fc99be7d3afb.elf_" ]; then
+    head -c 16384 "$REPO_ROOT/crates/rbat/tests/capa-testfiles/5e4263575796c6ea2445505a843e616111e0e540ec49441e3bb3fc99be7d3afb.elf_" \
        > "$CORPUS_DIR/fuzz_analyze/seed_elf_truncated.bin"
 fi
 
@@ -78,8 +78,8 @@ printf '\x03\xfd\x7b\xbf\xa9\x40\x00\x00\x34\x04\x00\x00\x94\xfd\x7b\xc1\xa8\xc0
 echo "==> Generating seeds for fuzz_flirt..."
 
 # Seed: Authentic Boost exception signature file (first 8KB)
-if [ -f "$REPO_ROOT/crates/rbat-core/assets/signatures_embedded/libboost_exception-vc142-mt-s-x64-1_72.sig" ]; then
-    head -c 8192 "$REPO_ROOT/crates/rbat-core/assets/signatures_embedded/libboost_exception-vc142-mt-s-x64-1_72.sig" \
+if [ -f "$REPO_ROOT/crates/rbat/assets/signatures_embedded/libboost_exception-vc142-mt-s-x64-1_72.sig" ]; then
+    head -c 8192 "$REPO_ROOT/crates/rbat/assets/signatures_embedded/libboost_exception-vc142-mt-s-x64-1_72.sig" \
        > "$CORPUS_DIR/fuzz_flirt/seed_boost_exception_sig.bin"
 fi
 
@@ -98,8 +98,8 @@ printf '\x49\x44\x41\x53\x47\x4e\x09\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00
 echo "==> Generating seeds for fuzz_rules..."
 
 # Seed 1: Authentic rule with subscope / basic block match
-if [ -f "$REPO_ROOT/crates/rbat-core/assets/capa-rules/compiler/ps2exe/compiled-with-ps2exe.yml" ]; then
-    cp "$REPO_ROOT/crates/rbat-core/assets/capa-rules/compiler/ps2exe/compiled-with-ps2exe.yml" \
+if [ -f "$REPO_ROOT/crates/rbat/assets/capa-rules/compiler/ps2exe/compiled-with-ps2exe.yml" ]; then
+    cp "$REPO_ROOT/crates/rbat/assets/capa-rules/compiler/ps2exe/compiled-with-ps2exe.yml" \
        "$CORPUS_DIR/fuzz_rules/seed_ps2exe.yml"
 fi
 
