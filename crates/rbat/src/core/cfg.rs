@@ -128,7 +128,7 @@ impl ControlFlowGraph {
                 InstructionClass::ConditionalJump
                 | InstructionClass::UnconditionalJump
                 | InstructionClass::Call => {
-                    if let Some(target) = insn.branch_target() {
+                    if let Some(target) = Self::parse_target_addr(&insn.op_str) {
                         leaders.insert(target);
                     }
                     if idx + 1 < instructions.len() {
@@ -196,7 +196,7 @@ impl ControlFlowGraph {
             };
 
             let class = last_insn.class(arch);
-            let target = last_insn.branch_target();
+            let target = Self::parse_target_addr(&last_insn.op_str);
             let next_block_addr = if idx + 1 < block_starts.len() {
                 Some(block_starts[idx + 1])
             } else {
