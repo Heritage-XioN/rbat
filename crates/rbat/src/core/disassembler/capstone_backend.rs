@@ -51,7 +51,7 @@
 use super::InstructionInfo;
 use crate::core::types::result::{RbatError, RbatResult};
 use crate::core::{
-    cfg::{ControlFlowGraph, InstructionClass},
+    cfg::InstructionClass,
     parser::{BinaryArch, IatMap},
 };
 use capstone::prelude::*;
@@ -219,7 +219,7 @@ impl DisassemblerImpl {
 
             let inst_class = match &detail {
                 Some(d) => Self::instruction_class_from_detail(insn, d),
-                None => ControlFlowGraph::classify_instr(insn.mnemonic().unwrap_or(""), &self.arch),
+                None => InstructionClass::classify(insn.mnemonic().unwrap_or(""), &self.arch),
             };
             slice[i].write(InstructionInfo::from_capstone(
                 insn,

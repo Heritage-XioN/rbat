@@ -407,30 +407,6 @@ impl ControlFlowGraph {
             cleaned.parse::<u64>().ok()
         }
     }
-
-    /// Classifies a disassembled instruction mnemonic into its control-flow role.
-    ///
-    /// Convenience forwarding function for [`InstructionClass::classify`].
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use rbat::core::cfg::{ControlFlowGraph, InstructionClass};
-    /// use rbat::core::parser::BinaryArch;
-    ///
-    /// assert_eq!(
-    ///     ControlFlowGraph::classify_instr("jmp", &BinaryArch::X64),
-    ///     InstructionClass::UnconditionalJump
-    /// );
-    /// assert_eq!(
-    ///     ControlFlowGraph::classify_instr("ret", &BinaryArch::X64),
-    ///     InstructionClass::Return
-    /// );
-    /// ```
-    #[cfg_attr(not(feature = "backend-capstone"), allow(dead_code))]
-    pub(crate) fn classify_instr(mnemonic: &str, arch: &BinaryArch) -> InstructionClass {
-        InstructionClass::classify(mnemonic, arch)
-    }
 }
 
 /// Represents a basic block: a straight-line sequence of execution with a single entry and exit.
