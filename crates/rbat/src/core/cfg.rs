@@ -7,6 +7,7 @@
 //!
 //! - [`ControlFlowGraph`]: Directed graph of basic blocks and control-flow transition edges.
 //! - [`BasicBlock`]: Straight-line instruction sequence with single-entry, single-exit execution.
+//! - [`Function`]: Reconstructed function subgraph comprising an entry block and its intra-procedural component.
 //! - [`EdgeType`]: Semantic classification of control-flow branch transitions.
 //! - [`InstructionClass`]: Control-flow classification of individual machine instructions.
 //!
@@ -54,6 +55,7 @@ use ahash::{HashMapExt, HashSetExt};
 use petgraph::graph::DiGraph;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 /// Directed Control Flow Graph of an executable binary.
@@ -95,6 +97,9 @@ pub struct ControlFlowGraph {
     pub blocks: FxHashMap<u64, BasicBlock>,
     /// Directed links representing control flow jumps.
     pub edges: Vec<(u64, u64, EdgeType)>,
+    /// Recovered functions mapped by function entry virtual address.
+    #[serde(default)]
+    pub functions: FxHashMap<u64, Function>,
 }
 
 impl ControlFlowGraph {
@@ -240,10 +245,13 @@ impl ControlFlowGraph {
             }
         }
 
+        let functions = Self::extract_functions(&blocks, &edges, &instructions);
+
         Self {
             instructions,
             blocks,
             edges,
+            functions,
         }
     }
 
@@ -407,6 +415,180 @@ impl ControlFlowGraph {
             cleaned.parse::<u64>().ok()
         }
     }
+
+    /// Returns the function that contains the basic block starting at `block_addr`, if any.
+    pub fn function_for_block(&self, block_addr: u64) -> Option<&Function> {
+        self.functions
+            .values()
+            .find(|f| f.basic_blocks.binary_search(&block_addr).is_ok())
+    }
+
+    /// Returns an iterator over references to all basic blocks belonging to the function.
+    pub fn as_function_blocks<'a>(
+        &'a self,
+        func: &Function,
+    ) -> impl Iterator<Item = &'a BasicBlock> {
+        func.basic_blocks
+            .iter()
+            .filter_map(|addr| self.blocks.get(addr))
+    }
+
+    /// Returns an iterator over references to all instructions belonging to the function.
+    pub fn as_function_instr<'a>(
+        &'a self,
+        func: &Function,
+    ) -> impl Iterator<Item = &'a InstructionInfo> {
+        self.as_function_blocks(func)
+            .flat_map(move |block| self.as_block_instr(block))
+    }
+
+    /// Extracts recovered functions by discovering entry points and computing intra-procedural reachable components.
+    fn extract_functions(
+        blocks: &FxHashMap<u64, BasicBlock>,
+        edges: &[(u64, u64, EdgeType)],
+        instructions: &[InstructionInfo],
+    ) -> FxHashMap<u64, Function> {
+        if blocks.is_empty() {
+            return FxHashMap::default();
+        }
+
+        let mut entry_candidates = FxHashSet::default();
+
+        // First instruction of the disassembled stream
+        if let Some(first_insn) = instructions.first()
+            && blocks.contains_key(&first_insn.address())
+        {
+            entry_candidates.insert(first_insn.address());
+        }
+
+        // All target blocks of inter-procedural Call edges
+        for (_, dst, edge_type) in edges {
+            if *edge_type == EdgeType::Call && blocks.contains_key(dst) {
+                entry_candidates.insert(*dst);
+            }
+        }
+
+        // Calculate intra-procedural in-degree and forward adjacency
+        let mut intra_in_degree: FxHashMap<u64, usize> = FxHashMap::default();
+        for &addr in blocks.keys() {
+            intra_in_degree.insert(addr, 0);
+        }
+
+        let mut intra_succs: FxHashMap<u64, Vec<u64>> = FxHashMap::default();
+        for &(src, dst, edge_type) in edges {
+            if edge_type != EdgeType::Call && blocks.contains_key(&dst) {
+                *intra_in_degree.entry(dst).or_default() += 1;
+                intra_succs.entry(src).or_default().push(dst);
+            }
+        }
+
+        // Any block with zero intra-procedural in-degree is an entry candidate
+        for (&addr, &deg) in &intra_in_degree {
+            if deg == 0 {
+                entry_candidates.insert(addr);
+            }
+        }
+
+        let mut functions = FxHashMap::default();
+        let mut assigned_blocks: FxHashSet<u64> = FxHashSet::default();
+
+        let mut sorted_entries: Vec<u64> = entry_candidates.into_iter().collect();
+        sorted_entries.sort_unstable();
+
+        // Partition blocks into functions from identified entry points
+        for &entry in &sorted_entries {
+            if assigned_blocks.contains(&entry) {
+                continue;
+            }
+
+            let mut func_blocks = Vec::new();
+            let mut queue = VecDeque::new();
+            queue.push_back(entry);
+            assigned_blocks.insert(entry);
+
+            while let Some(current) = queue.pop_front() {
+                func_blocks.push(current);
+
+                if let Some(succs) = intra_succs.get(&current) {
+                    for &next in succs {
+                        // Do not cross into another known function entry point
+                        if next != entry && sorted_entries.binary_search(&next).is_ok() {
+                            continue;
+                        }
+
+                        if !assigned_blocks.contains(&next) {
+                            assigned_blocks.insert(next);
+                            queue.push_back(next);
+                        }
+                    }
+                }
+            }
+
+            func_blocks.sort_unstable();
+            let end_address = func_blocks
+                .iter()
+                .filter_map(|addr| blocks.get(addr))
+                .map(|b| b.end_address)
+                .max()
+                .unwrap_or(entry);
+
+            functions.insert(
+                entry,
+                Function {
+                    start_address: entry,
+                    end_address,
+                    basic_blocks: func_blocks,
+                },
+            );
+        }
+
+        // Catch any orphan or disconnected basic blocks
+        let mut all_block_addrs: Vec<u64> = blocks.keys().copied().collect();
+        all_block_addrs.sort_unstable();
+
+        for orphan_entry in all_block_addrs {
+            if assigned_blocks.contains(&orphan_entry) {
+                continue;
+            }
+
+            let mut func_blocks = Vec::new();
+            let mut queue = VecDeque::new();
+            queue.push_back(orphan_entry);
+            assigned_blocks.insert(orphan_entry);
+
+            while let Some(current) = queue.pop_front() {
+                func_blocks.push(current);
+
+                if let Some(succs) = intra_succs.get(&current) {
+                    for &next in succs {
+                        if !assigned_blocks.contains(&next) {
+                            assigned_blocks.insert(next);
+                            queue.push_back(next);
+                        }
+                    }
+                }
+            }
+
+            func_blocks.sort_unstable();
+            let end_address = func_blocks
+                .iter()
+                .filter_map(|addr| blocks.get(addr))
+                .map(|b| b.end_address)
+                .max()
+                .unwrap_or(orphan_entry);
+
+            functions.insert(
+                orphan_entry,
+                Function {
+                    start_address: orphan_entry,
+                    end_address,
+                    basic_blocks: func_blocks,
+                },
+            );
+        }
+
+        functions
+    }
 }
 
 /// Represents a basic block: a straight-line sequence of execution with a single entry and exit.
@@ -484,6 +666,63 @@ impl BasicBlock {
     #[inline]
     pub fn instr_count(&self) -> usize {
         self.end_idx - self.start_idx
+    }
+}
+
+/// Represents a reconstructed function within the binary Control Flow Graph.
+///
+/// A function models an intra-procedural code execution subgraph originating at a dedicated
+/// entry basic block (`start_address`) and encompassing all basic blocks reachable through
+/// intra-procedural control-flow paths (branches, unconditional jumps, fallthroughs), excluding
+/// inter-procedural call destinations.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::cfg::Function;
+///
+/// let func = Function {
+///     start_address: 0x1000,
+///     end_address: 0x1020,
+///     basic_blocks: vec![0x1000, 0x1010],
+/// };
+/// assert_eq!(func.block_count(), 2);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Function {
+    /// Virtual memory address of the function entry point.
+    pub start_address: u64,
+    /// Virtual memory address of the end of the highest/last basic block in the function.
+    pub end_address: u64,
+    /// Sorted list of basic block start addresses belonging to this function.
+    pub basic_blocks: Vec<u64>,
+}
+
+impl Function {
+    /// Number of basic blocks in this function.
+    #[inline]
+    pub fn block_count(&self) -> usize {
+        self.basic_blocks.len()
+    }
+
+    /// Total number of instructions across all basic blocks in this function.
+    pub fn instr_count(&self, cfg: &ControlFlowGraph) -> usize {
+        self.basic_blocks
+            .iter()
+            .filter_map(|addr| cfg.blocks.get(addr))
+            .map(|b| b.instr_count())
+            .sum()
+    }
+
+    /// Checks if a virtual address falls within any of this function's basic blocks.
+    pub fn contains_address(&self, addr: u64, blocks: &FxHashMap<u64, BasicBlock>) -> bool {
+        self.basic_blocks.iter().any(|b_addr| {
+            if let Some(block) = blocks.get(b_addr) {
+                addr >= block.start_address && addr <= block.end_address
+            } else {
+                false
+            }
+        })
     }
 }
 
@@ -872,5 +1111,131 @@ mod tests {
             cfg.edges
                 .contains(&(0x1004, 0x1008, EdgeType::ConditionalFalse))
         );
+    }
+
+    #[test]
+    fn test_function_extraction_single_function() {
+        let instructions = vec![
+            insn(0x1000, "push", "rbp"),
+            insn(0x1001, "mov", "rbp, rsp"),
+            insn(0x1004, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
+
+        assert_eq!(cfg.functions.len(), 1);
+        let func = cfg
+            .functions
+            .get(&0x1000)
+            .expect("Function at 0x1000 should exist");
+        assert_eq!(func.start_address, 0x1000);
+        assert_eq!(func.end_address, 0x1004);
+        assert_eq!(func.basic_blocks, vec![0x1000]);
+        assert_eq!(func.block_count(), 1);
+        assert_eq!(func.instr_count(&cfg), 3);
+        assert!(func.contains_address(0x1001, &cfg.blocks));
+        assert!(!func.contains_address(0x2000, &cfg.blocks));
+
+        assert_eq!(
+            cfg.function_for_block(0x1000).unwrap().start_address,
+            0x1000
+        );
+        assert!(cfg.function_for_block(0x9999).is_none());
+
+        let insn_addrs: Vec<u64> = cfg.as_function_instr(func).map(|i| i.address()).collect();
+        assert_eq!(insn_addrs, vec![0x1000, 0x1001, 0x1004]);
+    }
+
+    #[test]
+    fn test_function_extraction_call_boundary() {
+        // Caller at 0x1000 calls callee at 0x2000 and falls through to 0x1008.
+        // Callee at 0x2000 ends with ret.
+        let instructions = vec![
+            insn(0x1000, "mov", "rdi, 1"),
+            insn(0x1003, "call", "0x2000"),
+            insn(0x1008, "nop", ""),
+            insn(0x1009, "ret", ""),
+            insn(0x2000, "push", "rbp"),
+            insn(0x2001, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
+
+        assert_eq!(
+            cfg.functions.len(),
+            2,
+            "Expected caller and callee to form two distinct functions"
+        );
+
+        // Caller function
+        let caller = cfg
+            .functions
+            .get(&0x1000)
+            .expect("Caller function at 0x1000");
+        assert_eq!(caller.start_address, 0x1000);
+        assert_eq!(caller.basic_blocks, vec![0x1000, 0x1008]);
+        assert_eq!(caller.end_address, 0x1009);
+
+        // Callee function
+        let callee = cfg
+            .functions
+            .get(&0x2000)
+            .expect("Callee function at 0x2000");
+        assert_eq!(callee.start_address, 0x2000);
+        assert_eq!(callee.basic_blocks, vec![0x2000]);
+        assert_eq!(callee.end_address, 0x2001);
+
+        assert_eq!(
+            cfg.function_for_block(0x1000).unwrap().start_address,
+            0x1000
+        );
+        assert_eq!(
+            cfg.function_for_block(0x1008).unwrap().start_address,
+            0x1000
+        );
+        assert_eq!(
+            cfg.function_for_block(0x2000).unwrap().start_address,
+            0x2000
+        );
+    }
+
+    #[test]
+    fn test_function_extraction_branch_and_loop() {
+        // Function with branching and self-loop: all blocks belong to the same function.
+        let instructions = vec![
+            insn(0x1000, "cmp", "eax, 0"),
+            insn(0x1002, "je", "0x1006"),
+            insn(0x1004, "nop", ""),
+            insn(0x1006, "dec", "ecx"),
+            insn(0x1007, "jnz", "0x1006"), // loop to 0x1006
+            insn(0x1009, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
+
+        assert_eq!(cfg.functions.len(), 1);
+        let func = cfg.functions.get(&0x1000).expect("Function at 0x1000");
+        assert_eq!(func.start_address, 0x1000);
+        assert_eq!(func.basic_blocks.len(), 4);
+        assert_eq!(func.basic_blocks, vec![0x1000, 0x1004, 0x1006, 0x1009]);
+        assert_eq!(func.end_address, 0x1009);
+    }
+
+    #[test]
+    fn test_function_extraction_orphan_blocks() {
+        // Two detached code sequences: 0x1000 and 0x3000 (neither calls the other)
+        let instructions = vec![
+            insn(0x1000, "nop", ""),
+            insn(0x1001, "ret", ""),
+            insn(0x3000, "xor", "eax, eax"),
+            insn(0x3002, "ret", ""),
+        ];
+        let cfg = ControlFlowGraph::new(instructions.into(), &BinaryArch::X64);
+
+        assert_eq!(cfg.functions.len(), 2);
+        assert!(cfg.functions.contains_key(&0x1000));
+        assert!(cfg.functions.contains_key(&0x3000));
+
+        let f1 = &cfg.functions[&0x1000];
+        let f2 = &cfg.functions[&0x3000];
+        assert_eq!(f1.basic_blocks, vec![0x1000]);
+        assert_eq!(f2.basic_blocks, vec![0x3000]);
     }
 }

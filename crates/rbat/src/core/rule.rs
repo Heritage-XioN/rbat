@@ -1766,6 +1766,7 @@ mod tests {
             instructions: vec![insn].into(),
             blocks: [(0x1000, block)].into_iter().collect(),
             edges: vec![],
+            functions: Default::default(),
         };
 
         needle.populate_cfg(&mut cfg);

@@ -4,7 +4,7 @@
 
 pub use crate::core::{
     analyzer::Analyzer,
-    cfg::{BasicBlock, ControlFlowGraph},
+    cfg::{BasicBlock, ControlFlowGraph, Function},
     features::FeatureSet,
     flirt::FlirtMatcher,
     needle::NeedleIndex,
