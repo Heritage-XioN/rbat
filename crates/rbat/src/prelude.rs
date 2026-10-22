@@ -5,7 +5,10 @@
 pub use crate::core::{
     analyzer::Analyzer,
     cfg::{BasicBlock, ControlFlowGraph, Function},
-    features::FeatureSet,
+    features::{
+        BlockScopeFeatures, FeatureSet, FileScopeFeatures, FunctionScopeFeatures,
+        GlobalScopeFeatures,
+    },
     flirt::FlirtMatcher,
     needle::NeedleIndex,
     rule::Rule,

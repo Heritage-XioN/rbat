@@ -855,7 +855,7 @@ impl RuleCondition {
             // capa Supported Feature Assertions
             Self::Api { api } => {
                 if let Some(id) = needle.lookup.get(api) {
-                    features.apis.contains(id)
+                    features.file_scope.apis.contains(id)
                         || needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
                     false
@@ -863,11 +863,19 @@ impl RuleCondition {
             }
             Self::String { string } => {
                 if Self::parse_capa_regex(string).is_some() {
-                    needle.matches_regex(string, features.raw_buffer, &features.strings)
+                    needle.matches_regex(
+                        string,
+                        features.file_scope.raw_buffer,
+                        &features.file_scope.strings,
+                    )
                 } else if let Some(id) = needle.lookup.get(string) {
                     needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
-                    features.strings.iter().any(|s| s.contains(string))
+                    features
+                        .file_scope
+                        .strings
+                        .iter()
+                        .any(|s| s.contains(string))
                 }
             }
             Self::Mnemonic { mnemonic } => {
@@ -879,35 +887,36 @@ impl RuleCondition {
             }
             Self::Match { match_name } => matched_rules.contains(match_name.as_str()),
             Self::Entropy { section, min } => features
+                .file_scope
                 .section_entropies
                 .get(section.as_str())
                 .map(|&e| e >= *min)
                 .unwrap_or(false),
             // codebase heuristics checks
-            Self::Tag(RuleTag::CodeCave) => features.has_code_cave,
-            Self::Tag(RuleTag::PackerSig) => features.has_packer_sig,
-            Self::Tag(RuleTag::Loop) => features.has_loop,
+            Self::Tag(RuleTag::CodeCave) => features.file_scope.has_code_cave,
+            Self::Tag(RuleTag::PackerSig) => features.file_scope.has_packer_sig,
+            Self::Tag(RuleTag::Loop) => features.file_scope.has_loop,
             // cfg and basic block checks
-            Self::BasicBlocksCount { count } => features.basic_blocks_count >= *count,
-            Self::CyclomaticComplexity { min } => features.max_cyclomatic_complexity >= *min,
+            Self::BasicBlocksCount { count } => features.file_scope.basic_blocks_count >= *count,
+            Self::CyclomaticComplexity { min } => {
+                features.file_scope.max_cyclomatic_complexity >= *min
+            }
             Self::BasicBlockScope { conditions } => {
                 if !conditions.iter().all(|cond| cond.is_present(needle)) {
                     return false;
                 }
-                features.blocks.iter().any(|block| {
-                    let instructions = block.as_instr(&features.cfg_instructions);
+                features.basic_block_scope.iter().any(|block| {
                     conditions
                         .iter()
-                        .all(|cond| cond.matches_block(instructions, needle))
+                        .all(|cond| cond.matches_block(block.instructions, needle))
                 })
             }
             Self::CallScope { conditions } => {
                 if !conditions.iter().all(|cond| cond.is_present(needle)) {
                     return false;
                 }
-                features.blocks.iter().any(|block| {
-                    let instructions = block.as_instr(&features.cfg_instructions);
-                    instructions.iter().any(|insn| {
+                features.basic_block_scope.iter().any(|block| {
+                    block.instructions.iter().any(|insn| {
                         conditions
                             .iter()
                             .all(|cond| cond.matches_instruction(insn, needle))
@@ -915,12 +924,12 @@ impl RuleCondition {
                 })
             }
             // Minimally match OS and Arch if present
-            Self::Os { os } => features.os.contains(os),
-            Self::Arch { arch } => features.arch.contains(arch),
-            Self::Format { format } => features.binary_format.contains(format),
+            Self::Os { os } => features.global_scope.os.contains(os),
+            Self::Arch { arch } => features.global_scope.arch.contains(arch),
+            Self::Format { format } => features.global_scope.binary_format.contains(format),
             Self::Import { import } => {
                 if let Some(id) = needle.lookup.get(import) {
-                    features.apis.contains(id)
+                    features.file_scope.apis.contains(id)
                         || needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
                     false
@@ -928,15 +937,18 @@ impl RuleCondition {
             }
             Self::Export { export } => {
                 if let Some(id) = needle.lookup.get(export) {
-                    features.apis.contains(id)
+                    features.file_scope.apis.contains(id)
                         || needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
                     false
                 }
             }
-            Self::Section { section } => features.section_entropies.contains_key(section.as_str()),
+            Self::Section { section } => features
+                .file_scope
+                .section_entropies
+                .contains_key(section.as_str()),
             Self::Characteristic { characteristic } if characteristic.contains("packed") => {
-                features.has_packer_sig
+                features.file_scope.has_packer_sig
             }
             // Supported count/offset/number features
             Self::Number { number } | Self::Offset { offset: number } => {
@@ -953,8 +965,8 @@ impl RuleCondition {
                             0 == *count
                         } else {
                             let mut accumulated = 0;
-                            'outer_api: for b in &features.blocks {
-                                for insn in b.as_instr(&features.cfg_instructions) {
+                            'outer_api: for b in &features.basic_block_scope {
+                                for insn in b.instructions {
                                     if insn.matched.contains(id) {
                                         accumulated += 1;
                                         if accumulated >= *count {
@@ -976,7 +988,7 @@ impl RuleCondition {
                         }
                         if let Some((re, _)) = needle.regex_lookup.get(string) {
                             let mut accumulated = 0;
-                            for s in &features.strings {
+                            for s in &features.file_scope.strings {
                                 if re.is_match(s.as_bytes()) {
                                     accumulated += 1;
                                     if accumulated >= *count {
@@ -984,9 +996,9 @@ impl RuleCondition {
                                     }
                                 }
                             }
-                            if accumulated < *count && !features.raw_buffer.is_empty() {
+                            if accumulated < *count && !features.file_scope.raw_buffer.is_empty() {
                                 let buffer_matches = re
-                                    .find_iter(features.raw_buffer)
+                                    .find_iter(features.file_scope.raw_buffer)
                                     .take(*count - accumulated)
                                     .count();
                                 accumulated += buffer_matches;
@@ -1002,7 +1014,7 @@ impl RuleCondition {
                             return 0 == *count;
                         }
                         let mut accumulated = 0;
-                        for s in &features.strings {
+                        for s in &features.file_scope.strings {
                             if s.contains(string) {
                                 accumulated += 1;
                                 if accumulated >= *count {
@@ -1019,8 +1031,8 @@ impl RuleCondition {
                             return 0 == *count;
                         }
                         let mut accumulated = 0;
-                        'outer_mnem: for b in &features.blocks {
-                            for insn in b.as_instr(&features.cfg_instructions) {
+                        'outer_mnem: for b in &features.basic_block_scope {
+                            for insn in b.instructions {
                                 if insn.matched.contains(id) {
                                     accumulated += 1;
                                     if accumulated >= *count {
@@ -1349,6 +1361,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::core::features::{BlockScopeFeatures, FileScopeFeatures, GlobalScopeFeatures};
     use ahash::{AHashMap, AHashSet};
     use rustc_hash::FxHashSet;
     use std::sync::Arc;
@@ -1359,20 +1372,25 @@ mod tests {
         section_entropies.insert(".text", 7.8);
 
         let features = FeatureSet {
-            apis: FxHashSet::from_iter([aho_corasick::PatternID::must(0)]),
-            strings: AHashSet::new(),
-            section_entropies: &section_entropies,
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: "linux".to_string(),
-            arch: "x86_64".to_string(),
-            binary_format: "elf".to_string(),
-            basic_blocks_count: 0,
-            has_loop: false,
-            max_cyclomatic_complexity: 0,
-            blocks: Vec::new(),
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::from_iter([aho_corasick::PatternID::must(0)]),
+                strings: AHashSet::new(),
+                section_entropies: &section_entropies,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 0,
+                has_loop: false,
+                max_cyclomatic_complexity: 0,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: Vec::new(),
+            global_scope: GlobalScopeFeatures {
+                os: "linux".to_string(),
+                arch: "x86_64".to_string(),
+                binary_format: "elf".to_string(),
+            },
             cfg_instructions: Arc::from([]),
-            raw_buffer: &[],
         };
 
         // Simple API Match Rule
@@ -1515,21 +1533,35 @@ mod tests {
         }
 
         let empty_entropy = AHashMap::new();
-        let features = FeatureSet {
+        let cfg_instructions: Arc<[InstructionInfo]> = insns.clone().into();
+        let block_scope = BlockScopeFeatures {
+            start_address: block1.start_address,
+            end_address: block1.end_address,
+            instructions: &insns,
+            patterns: FxHashSet::default(),
             apis: FxHashSet::default(),
-            strings: AHashSet::new(),
-            section_entropies: &empty_entropy,
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: "Windows".to_owned(),
-            arch: "x86_64".to_owned(),
-            binary_format: "pe".to_owned(),
-            basic_blocks_count: 1,
-            has_loop: true,
-            max_cyclomatic_complexity: 5,
-            blocks: vec![&block1],
-            cfg_instructions: insns.into(),
-            raw_buffer: &[],
+            is_tight_loop: false,
+        };
+        let features = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 1,
+                has_loop: true,
+                max_cyclomatic_complexity: 5,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: vec![block_scope],
+            global_scope: GlobalScopeFeatures {
+                os: "Windows".to_owned(),
+                arch: "x86_64".to_owned(),
+                binary_format: "pe".to_owned(),
+            },
+            cfg_instructions,
         };
 
         let matches = Rule::evaluate(&features, &rules, &needle);
@@ -1543,20 +1575,25 @@ mod tests {
     fn test_format_condition_matching() {
         let empty_entropy = AHashMap::new();
         let features = FeatureSet {
-            apis: FxHashSet::default(),
-            strings: AHashSet::new(),
-            section_entropies: &empty_entropy,
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: "windows pe".to_owned(),
-            arch: "x86".to_owned(),
-            binary_format: "pe".to_owned(),
-            basic_blocks_count: 0,
-            has_loop: false,
-            max_cyclomatic_complexity: 0,
-            blocks: Vec::new(),
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 0,
+                has_loop: false,
+                max_cyclomatic_complexity: 0,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: Vec::new(),
+            global_scope: GlobalScopeFeatures {
+                os: "windows pe".to_owned(),
+                arch: "x86".to_owned(),
+                binary_format: "pe".to_owned(),
+            },
             cfg_instructions: Arc::from([]),
-            raw_buffer: &[],
         };
 
         let rule_pe = RuleCondition::Format {
@@ -1621,20 +1658,25 @@ mod tests {
         }
 
         let features = FeatureSet {
-            apis,
-            strings: AHashSet::new(),
-            section_entropies: &empty_entropy,
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: "windows pe".to_owned(),
-            arch: "x86_64".to_owned(),
-            binary_format: "pe".to_owned(),
-            basic_blocks_count: 0,
-            has_loop: false,
-            max_cyclomatic_complexity: 0,
-            blocks: Vec::new(),
+            file_scope: FileScopeFeatures {
+                apis,
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 0,
+                has_loop: false,
+                max_cyclomatic_complexity: 0,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: Vec::new(),
+            global_scope: GlobalScopeFeatures {
+                os: "windows pe".to_owned(),
+                arch: "x86_64".to_owned(),
+                binary_format: "pe".to_owned(),
+            },
             cfg_instructions: Arc::from([]),
-            raw_buffer: &[],
         };
 
         let matched = Rule::evaluate(&features, &rules, &needle);
@@ -1695,21 +1737,35 @@ mod tests {
         };
 
         let empty_entropy = AHashMap::new();
-        let features_two_calls = FeatureSet {
+        let cfg_instructions: Arc<[InstructionInfo]> = insns.clone().into();
+        let block_scope = BlockScopeFeatures {
+            start_address: block.start_address,
+            end_address: block.end_address,
+            instructions: &insns,
+            patterns: FxHashSet::default(),
             apis: FxHashSet::default(),
-            strings: AHashSet::new(),
-            section_entropies: &empty_entropy,
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: "windows".to_owned(),
-            arch: "x86_64".to_owned(),
-            binary_format: "pe".to_owned(),
-            basic_blocks_count: 1,
-            has_loop: false,
-            max_cyclomatic_complexity: 1,
-            blocks: vec![&block],
-            cfg_instructions: insns.into(),
-            raw_buffer: &[],
+            is_tight_loop: false,
+        };
+        let features_two_calls = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 1,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: vec![block_scope],
+            global_scope: GlobalScopeFeatures {
+                os: "windows".to_owned(),
+                arch: "x86_64".to_owned(),
+                binary_format: "pe".to_owned(),
+            },
+            cfg_instructions,
         };
 
         let matched = Rule::evaluate(&features_two_calls, &rules, &needle);
@@ -1813,20 +1869,25 @@ mod tests {
 
         let empty_entropy = AHashMap::new();
         let features = FeatureSet {
-            apis: FxHashSet::default(),
-            strings: AHashSet::new(),
-            section_entropies: &empty_entropy,
-            has_code_cave: false,
-            has_packer_sig: false,
-            os: "windows".to_owned(),
-            arch: "x86_64".to_owned(),
-            binary_format: "pe".to_owned(),
-            basic_blocks_count: 0,
-            has_loop: false,
-            max_cyclomatic_complexity: 0,
-            blocks: Vec::new(),
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 0,
+                has_loop: false,
+                max_cyclomatic_complexity: 0,
+                raw_buffer: buf,
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: Vec::new(),
+            global_scope: GlobalScopeFeatures {
+                os: "windows".to_owned(),
+                arch: "x86_64".to_owned(),
+                binary_format: "pe".to_owned(),
+            },
             cfg_instructions: Arc::from([]),
-            raw_buffer: buf,
         };
 
         let matches = Rule::evaluate(&features, &rules, &needle);
