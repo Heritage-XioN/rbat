@@ -10,7 +10,7 @@
 //! - [`RuleInner`]: Inner structure containing rule metadata ([`RuleMeta`]) and condition trees ([`RuleCondition`])
 //! - [`RuleMeta`]: Rule metadata including namespace, authors, MITRE ATT&CK techniques, and severity
 //! - [`RuleCondition`]: Untagged AST node representing boolean logic, feature assertions, and localized scopes
-//! - [`RuleTag`]: Pre-defined heuristic capability tags (code caves, packers, loops)
+//! - [`CapaCharacteristic`]: Strongly-typed enumeration of Mandiant Capa and binary heuristics characteristics
 //! - [`StringOrVec`]: Deserialization helper accepting either a scalar string or a string vector
 //!
 //! ## Overview
@@ -72,9 +72,9 @@
 //!
 //! [`Rayon`]: rayon
 
-use crate::core::disassembler::InstructionInfo;
 use crate::core::{
-    features::FeatureSet,
+    disassembler::InstructionInfo,
+    features::{BlockScopeFeatures, FeatureSet, FunctionScopeFeatures},
     needle::NeedleIndex,
     types::result::{RbatError, RbatResult},
 };
@@ -161,7 +161,52 @@ impl Rule {
         Ok(rule_var)
     }
 
-    /// Evaluates whether the extracted features satisfy this rule's conditions given previously matched rules.
+    /// Returns the static evaluation scope for this rule.
+    ///
+    /// Inspects `rule.meta.scopes["static"]` if specified; defaults to [`RuleScope::File`]
+    /// when no scope annotation is present to preserve backwards compatibility.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::rule::{Rule, RuleScope};
+    ///
+    /// let yaml = b"rule:\n  meta:\n    name: test\n    scopes:\n      static: function\n  features:\n    - api: CreateFileA\n";
+    /// let rule = Rule::from_slice(yaml).unwrap();
+    /// assert_eq!(rule.static_scope(), RuleScope::Function);
+    /// ```
+    #[inline]
+    pub fn static_scope(&self) -> RuleScope {
+        match self
+            .rule
+            .meta
+            .scopes
+            .as_ref()
+            .and_then(|s| s.get("static"))
+            .map(|s| s.trim())
+        {
+            Some("function") => RuleScope::Function,
+            Some("basic block") => RuleScope::BasicBlock,
+            Some("instruction") => RuleScope::Instruction,
+            Some("file") => RuleScope::File,
+            Some("unsupported") => RuleScope::Unsupported,
+            _ => RuleScope::File,
+        }
+    }
+
+    /// Evaluates if the extracted features satisfy this rule's conditions given previously matched rules.
+    ///
+    /// Dispatches condition evaluation according to the rule's static scope ([`Rule::static_scope`]):
+    /// - [`RuleScope::File`]: Evaluated globally against whole-binary metrics and aggregated symbols.
+    /// - [`RuleScope::Function`]: Iterates over non-library functions, matching if $\ge 1$ function
+    ///   satisfies all top-level conditions within its local scope.
+    /// - [`RuleScope::BasicBlock`]: Iterates over non-library basic blocks, matching if $\ge 1$ block
+    ///   satisfies all top-level conditions.
+    /// - [`RuleScope::Instruction`]: Iterates over machine instructions, matching if $\ge 1$ instruction
+    ///   satisfies all top-level conditions.
+    /// - [`RuleScope::Unsupported`]: Evaluates to `false`.
+    ///
+    /// Rules are pruned in $O(1)$ time via [`NeedleIndex`] before any scope iterations occur.
     ///
     /// # Parameters
     ///
@@ -209,10 +254,43 @@ impl Rule {
         needle: &NeedleIndex,
         matched_rules: &AHashSet<&str>,
     ) -> bool {
-        self.rule
+        if !self
+            .rule
             .features
             .iter()
-            .all(|c| c.matches(features, needle, matched_rules))
+            .all(|c| c.is_present(needle, features))
+        {
+            return false;
+        }
+
+        match self.static_scope() {
+            RuleScope::Unsupported => false,
+            RuleScope::File => self
+                .rule
+                .features
+                .iter()
+                .all(|c| c.matches_file_scope(features, needle, matched_rules)),
+            RuleScope::Function => features.function_scope.iter().any(|func| {
+                self.rule
+                    .features
+                    .iter()
+                    .all(|c| c.matches_function_scope(func, features, needle, matched_rules))
+            }),
+            RuleScope::BasicBlock => features.basic_block_scope.iter().any(|block| {
+                self.rule
+                    .features
+                    .iter()
+                    .all(|c| c.matches_basic_block_scope(block, features, needle, matched_rules))
+            }),
+            RuleScope::Instruction => features.basic_block_scope.iter().any(|block| {
+                block.instructions.iter().any(|insn| {
+                    self.rule
+                        .features
+                        .iter()
+                        .all(|c| c.matches_instruction_scope(insn, features, needle, matched_rules))
+                })
+            }),
+        }
     }
 
     /// Returns `true` if this rule directly or recursively contains a `match:` rule dependency.
@@ -589,9 +667,6 @@ pub enum RuleCondition {
         /// The minimum entropy threshold.
         min: f64,
     },
-    // codebase heuristics feature
-    /// Requires a specific heuristic tag to be present.
-    Tag(RuleTag),
     // CFG properties & localized scopes
     /// Requires a minimum number of basic blocks in the function.
     BasicBlocksCount {
@@ -615,6 +690,12 @@ pub enum RuleCondition {
     CallScope {
         /// The scoped conditions.
         #[serde(rename = "call")]
+        conditions: Vec<RuleCondition>,
+    },
+    /// Requires conditions to be met within a single machine instruction.
+    InstructionScope {
+        /// The scoped conditions.
+        #[serde(rename = "instruction")]
         conditions: Vec<RuleCondition>,
     },
     // other capa feature checks
@@ -648,10 +729,10 @@ pub enum RuleCondition {
         /// The binary format name (e.g. `pe`).
         format: String,
     },
-    /// Requires a specific PE characteristic flag.
+    /// Requires a specific Capa or binary heuristic characteristic flag.
     Characteristic {
-        /// The characteristic flag name.
-        characteristic: String,
+        /// The characteristic kind.
+        characteristic: CapaCharacteristic,
     },
     /// Requires a specific number constant.
     Number {
@@ -724,6 +805,19 @@ impl RuleCondition {
                     conditions: sanitized,
                 })
             }
+            Self::InstructionScope { conditions } => {
+                let sanitized: Vec<RuleCondition> = conditions
+                    .into_iter()
+                    .filter_map(|c| c.sanitize())
+                    .collect();
+                if sanitized.is_empty() {
+                    None
+                } else {
+                    Some(Self::InstructionScope {
+                        conditions: sanitized,
+                    })
+                }
+            }
             Self::Api { api } => Some(Self::Api {
                 api: Self::strip_inline_desc(&api).to_lowercase(),
             }),
@@ -760,8 +854,12 @@ impl RuleCondition {
             Self::Format { format } => Some(Self::Format {
                 format: Self::strip_inline_desc(&format).to_lowercase(),
             }),
-            Self::Characteristic { characteristic } => Some(Self::Characteristic {
-                characteristic: Self::strip_inline_desc(&characteristic).to_lowercase(),
+            Self::Characteristic { characteristic } => {
+                Some(Self::Characteristic { characteristic })
+            }
+            Self::Count { condition, count } => condition.sanitize().map(|c| Self::Count {
+                condition: Box::new(c),
+                count,
             }),
             Self::Number { number } => Some(Self::Number {
                 number: Self::strip_inline_desc(&number).to_lowercase(),
@@ -776,7 +874,19 @@ impl RuleCondition {
 
                     if key == "description" {
                         return None;
-                    } else if key == "number" {
+                    } else if key == "code_cave" || key == "code cave" {
+                        return Some(Self::Characteristic {
+                            characteristic: CapaCharacteristic::CodeCave,
+                        });
+                    } else if key == "packer_sig" || key == "packer sig" || key == "packed" {
+                        return Some(Self::Characteristic {
+                            characteristic: CapaCharacteristic::Packed,
+                        });
+                    } else if key == "loop" {
+                        return Some(Self::Characteristic {
+                            characteristic: CapaCharacteristic::Loop,
+                        });
+                    } else if key == "number" || key.ends_with(".number") {
                         let mut v = val.clone();
                         if let serde_json::Value::String(s) = &mut v {
                             *s = Self::strip_inline_desc(s).to_string();
@@ -785,7 +895,7 @@ impl RuleCondition {
                         return Some(Self::Number {
                             number: target_num.to_lowercase(),
                         });
-                    } else if key == "offset" {
+                    } else if key == "offset" || key.ends_with(".offset") {
                         let mut v = val.clone();
                         if let serde_json::Value::String(s) = &mut v {
                             *s = Self::strip_inline_desc(s).to_string();
@@ -812,8 +922,42 @@ impl RuleCondition {
                             Some(Self::Mnemonic {
                                 mnemonic: inner_str[9..inner_str.len() - 1].to_string(),
                             })
+                        } else if inner_str.starts_with("characteristic(") {
+                            Some(Self::Characteristic {
+                                characteristic: CapaCharacteristic::parse(
+                                    &inner_str[15..inner_str.len() - 1],
+                                ),
+                            })
+                        } else if inner_str.starts_with("number(") {
+                            Some(Self::Number {
+                                number: inner_str[7..inner_str.len() - 1].to_string(),
+                            })
+                        } else if inner_str.starts_with("offset(") {
+                            Some(Self::Offset {
+                                offset: inner_str[7..inner_str.len() - 1].to_string(),
+                            })
+                        } else if inner_str == "basic block"
+                            || inner_str == "basic_block"
+                            || inner_str == "basic blocks"
+                        {
+                            Some(Self::BasicBlockScope {
+                                conditions: Vec::new(),
+                            })
+                        } else if inner_str == "instruction" || inner_str == "instructions" {
+                            Some(Self::InstructionScope {
+                                conditions: Vec::new(),
+                            })
+                        } else if inner_str == "call" || inner_str == "calls" {
+                            Some(Self::CallScope {
+                                conditions: Vec::new(),
+                            })
                         } else {
-                            None
+                            let characteristic = CapaCharacteristic::parse(inner_str);
+                            if characteristic != CapaCharacteristic::Unsupported {
+                                Some(Self::Characteristic { characteristic })
+                            } else {
+                                None
+                            }
                         };
 
                         if let Some(cond) = inner_cond {
@@ -836,8 +980,41 @@ impl RuleCondition {
         }
     }
 
-    /// Recursively evaluates the condition against the feature set and previously matched rule dependencies.
-    fn matches(
+    /// Checks whether an instruction represents a non-zeroing XOR operation (`xor dst, src` with `dst != src`).
+    pub(crate) fn is_nzxor(insn: &InstructionInfo) -> bool {
+        if insn.mnemonic != "xor" {
+            return false;
+        }
+        if let Some((dst, src)) = insn.op_str.split_once(',') {
+            let dst = dst.trim();
+            let src = src.trim();
+            !dst.is_empty() && !src.is_empty() && dst != src
+        } else {
+            false
+        }
+    }
+
+    /// Checks whether an instruction accesses the Process Environment Block (`fs:[0x30]` on x86, `gs:[0x60]` on x64).
+    pub(crate) fn is_peb_access(insn: &InstructionInfo) -> bool {
+        let ops = insn.op_str.to_ascii_lowercase();
+        (ops.contains("fs:")
+            && (ops.contains("0x30") || ops.contains("[48]") || ops.contains(" 48")))
+            || (ops.contains("gs:")
+                && (ops.contains("0x60") || ops.contains("[96]") || ops.contains(" 96")))
+    }
+
+    /// Checks whether an instruction references the `fs:` segment register.
+    pub(crate) fn is_fs_access(insn: &InstructionInfo) -> bool {
+        insn.op_str.to_ascii_lowercase().contains("fs:")
+    }
+
+    /// Checks whether an instruction references the `gs:` segment register.
+    pub(crate) fn is_gs_access(insn: &InstructionInfo) -> bool {
+        insn.op_str.to_ascii_lowercase().contains("gs:")
+    }
+
+    /// Evaluates the condition against whole-binary file scope features.
+    fn matches_file_scope(
         &self,
         features: &FeatureSet,
         needle: &NeedleIndex,
@@ -847,11 +1024,11 @@ impl RuleCondition {
             // Logic Operators
             Self::And { and } => and
                 .iter()
-                .all(|c| c.matches(features, needle, matched_rules)),
+                .all(|c| c.matches_file_scope(features, needle, matched_rules)),
             Self::Or { or } => or
                 .iter()
-                .any(|c| c.matches(features, needle, matched_rules)),
-            Self::Not { not } => !not.matches(features, needle, matched_rules),
+                .any(|c| c.matches_file_scope(features, needle, matched_rules)),
+            Self::Not { not } => !not.matches_file_scope(features, needle, matched_rules),
             // capa Supported Feature Assertions
             Self::Api { api } => {
                 if let Some(id) = needle.lookup.get(api) {
@@ -892,34 +1069,36 @@ impl RuleCondition {
                 .get(section.as_str())
                 .map(|&e| e >= *min)
                 .unwrap_or(false),
-            // codebase heuristics checks
-            Self::Tag(RuleTag::CodeCave) => features.file_scope.has_code_cave,
-            Self::Tag(RuleTag::PackerSig) => features.file_scope.has_packer_sig,
-            Self::Tag(RuleTag::Loop) => features.file_scope.has_loop,
             // cfg and basic block checks
             Self::BasicBlocksCount { count } => features.file_scope.basic_blocks_count >= *count,
             Self::CyclomaticComplexity { min } => {
                 features.file_scope.max_cyclomatic_complexity >= *min
             }
             Self::BasicBlockScope { conditions } => {
-                if !conditions.iter().all(|cond| cond.is_present(needle)) {
+                if !conditions
+                    .iter()
+                    .all(|cond| cond.is_present(needle, features))
+                {
                     return false;
                 }
                 features.basic_block_scope.iter().any(|block| {
-                    conditions
-                        .iter()
-                        .all(|cond| cond.matches_block(block.instructions, needle))
+                    conditions.iter().all(|cond| {
+                        cond.matches_basic_block_scope(block, features, needle, matched_rules)
+                    })
                 })
             }
-            Self::CallScope { conditions } => {
-                if !conditions.iter().all(|cond| cond.is_present(needle)) {
+            Self::CallScope { conditions } | Self::InstructionScope { conditions } => {
+                if !conditions
+                    .iter()
+                    .all(|cond| cond.is_present(needle, features))
+                {
                     return false;
                 }
                 features.basic_block_scope.iter().any(|block| {
                     block.instructions.iter().any(|insn| {
-                        conditions
-                            .iter()
-                            .all(|cond| cond.matches_instruction(insn, needle))
+                        conditions.iter().all(|cond| {
+                            cond.matches_instruction_scope(insn, features, needle, matched_rules)
+                        })
                     })
                 })
             }
@@ -947,9 +1126,40 @@ impl RuleCondition {
                 .file_scope
                 .section_entropies
                 .contains_key(section.as_str()),
-            Self::Characteristic { characteristic } if characteristic.contains("packed") => {
-                features.file_scope.has_packer_sig
-            }
+            Self::Characteristic { characteristic } => match characteristic {
+                CapaCharacteristic::Packed => features.file_scope.has_packer_sig,
+                CapaCharacteristic::CodeCave => features.file_scope.has_code_cave,
+                CapaCharacteristic::Loop => features.file_scope.has_loop,
+                CapaCharacteristic::TightLoop => {
+                    features.basic_block_scope.iter().any(|b| b.is_tight_loop)
+                }
+                CapaCharacteristic::RecursiveCall => {
+                    features.function_scope.iter().any(|f| f.is_recursive)
+                }
+                CapaCharacteristic::CallsFrom => {
+                    features.function_scope.iter().any(|f| f.calls_from > 0)
+                }
+                CapaCharacteristic::Nzxor => features
+                    .basic_block_scope
+                    .iter()
+                    .any(|b| b.instructions.iter().any(Self::is_nzxor)),
+                CapaCharacteristic::PebAccess => features
+                    .basic_block_scope
+                    .iter()
+                    .any(|b| b.instructions.iter().any(Self::is_peb_access)),
+                CapaCharacteristic::FsAccess => features
+                    .basic_block_scope
+                    .iter()
+                    .any(|b| b.instructions.iter().any(Self::is_fs_access)),
+                CapaCharacteristic::GsAccess => features
+                    .basic_block_scope
+                    .iter()
+                    .any(|b| b.instructions.iter().any(Self::is_gs_access)),
+                CapaCharacteristic::CrossSectionFlow
+                | CapaCharacteristic::IndirectCall
+                | CapaCharacteristic::UnmanagedCall
+                | CapaCharacteristic::Unsupported => false,
+            },
             // Supported count/offset/number features
             Self::Number { number } | Self::Offset { offset: number } => {
                 if let Some(id) = needle.lookup.get(number) {
@@ -1028,23 +1238,507 @@ impl RuleCondition {
                 Self::Mnemonic { mnemonic } => {
                     if let Some(id) = needle.lookup.get(mnemonic) {
                         if !needle.present[id.as_usize()].load(Ordering::Relaxed) {
-                            return 0 == *count;
+                            0 == *count
+                        } else {
+                            let mut accumulated = 0;
+                            'outer_mnem: for b in &features.basic_block_scope {
+                                for insn in b.instructions {
+                                    if insn.matched.contains(id) {
+                                        accumulated += 1;
+                                        if accumulated >= *count {
+                                            break 'outer_mnem;
+                                        }
+                                    }
+                                }
+                            }
+                            accumulated >= *count
                         }
+                    } else {
+                        false
+                    }
+                }
+                Self::Number { number } | Self::Offset { offset: number } => {
+                    if let Some(id) = needle.lookup.get(number) {
+                        if !needle.present[id.as_usize()].load(Ordering::Relaxed) {
+                            0 == *count
+                        } else {
+                            let mut accumulated = 0;
+                            'outer_num: for b in &features.basic_block_scope {
+                                for insn in b.instructions {
+                                    if insn.matched.contains(id) {
+                                        accumulated += 1;
+                                        if accumulated >= *count {
+                                            break 'outer_num;
+                                        }
+                                    }
+                                }
+                            }
+                            accumulated >= *count
+                        }
+                    } else {
+                        false
+                    }
+                }
+                Self::BasicBlockScope { conditions } => {
+                    features
+                        .basic_block_scope
+                        .iter()
+                        .filter(|block| {
+                            conditions.iter().all(|c| {
+                                c.matches_basic_block_scope(block, features, needle, matched_rules)
+                            })
+                        })
+                        .count()
+                        >= *count
+                }
+                Self::CallScope { conditions } | Self::InstructionScope { conditions } => {
+                    let mut accumulated = 0;
+                    'outer_file_insn: for b in &features.basic_block_scope {
+                        for insn in b.instructions {
+                            if conditions.iter().all(|c| {
+                                c.matches_instruction_scope(insn, features, needle, matched_rules)
+                            }) {
+                                accumulated += 1;
+                                if accumulated >= *count {
+                                    break 'outer_file_insn;
+                                }
+                            }
+                        }
+                    }
+                    accumulated >= *count
+                }
+                Self::Characteristic { characteristic } => match characteristic {
+                    CapaCharacteristic::Nzxor => {
                         let mut accumulated = 0;
-                        'outer_mnem: for b in &features.basic_block_scope {
+                        'outer_nzxor: for b in &features.basic_block_scope {
                             for insn in b.instructions {
-                                if insn.matched.contains(id) {
+                                if Self::is_nzxor(insn) {
                                     accumulated += 1;
                                     if accumulated >= *count {
-                                        break 'outer_mnem;
+                                        break 'outer_nzxor;
                                     }
                                 }
                             }
                         }
                         accumulated >= *count
+                    }
+                    CapaCharacteristic::CallsFrom => {
+                        features
+                            .function_scope
+                            .iter()
+                            .map(|f| f.calls_from)
+                            .sum::<usize>()
+                            >= *count
+                    }
+                    CapaCharacteristic::TightLoop => {
+                        features
+                            .basic_block_scope
+                            .iter()
+                            .filter(|b| b.is_tight_loop)
+                            .count()
+                            >= *count
+                    }
+                    CapaCharacteristic::PebAccess => {
+                        let mut accumulated = 0;
+                        'outer_peb: for b in &features.basic_block_scope {
+                            for insn in b.instructions {
+                                if Self::is_peb_access(insn) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_peb;
+                                    }
+                                }
+                            }
+                        }
+                        accumulated >= *count
+                    }
+                    CapaCharacteristic::FsAccess => {
+                        let mut accumulated = 0;
+                        'outer_fs: for b in &features.basic_block_scope {
+                            for insn in b.instructions {
+                                if Self::is_fs_access(insn) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_fs;
+                                    }
+                                }
+                            }
+                        }
+                        accumulated >= *count
+                    }
+                    CapaCharacteristic::GsAccess => {
+                        let mut accumulated = 0;
+                        'outer_gs: for b in &features.basic_block_scope {
+                            for insn in b.instructions {
+                                if Self::is_gs_access(insn) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_gs;
+                                    }
+                                }
+                            }
+                        }
+                        accumulated >= *count
+                    }
+                    _ => false,
+                },
+                Self::Match { match_name } => {
+                    let matched_cnt = if matched_rules.contains(match_name.as_str()) {
+                        1
+                    } else {
+                        0
+                    };
+                    matched_cnt >= *count
+                }
+                _ => false,
+            },
+            // Explicit unhandled / unsupported variant.
+            Self::Other(_) => false,
+        }
+    }
+
+    /// Evaluates the condition against a single function and its constituent basic blocks.
+    fn matches_function_scope(
+        &self,
+        func: &FunctionScopeFeatures,
+        features: &FeatureSet,
+        needle: &NeedleIndex,
+        matched_rules: &AHashSet<&str>,
+    ) -> bool {
+        match self {
+            Self::And { and } => and
+                .iter()
+                .all(|c| c.matches_function_scope(func, features, needle, matched_rules)),
+            Self::Or { or } => or
+                .iter()
+                .any(|c| c.matches_function_scope(func, features, needle, matched_rules)),
+            Self::Not { not } => !not.matches_function_scope(func, features, needle, matched_rules),
+            Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
+                if let Some(id) = needle.lookup.get(api) {
+                    func.apis.contains(id) || func.patterns.contains(id)
+                } else {
+                    false
+                }
+            }
+            Self::String { string } => {
+                if Self::parse_capa_regex(string).is_some() {
+                    func.block_indices.iter().any(|&i| {
+                        features.basic_block_scope[i]
+                            .instructions
+                            .iter()
+                            .any(|insn| needle.matches_regex_instruction(string, insn))
+                    })
+                } else if let Some(id) = needle.lookup.get(string) {
+                    func.patterns.contains(id)
+                } else {
+                    false
+                }
+            }
+            Self::Mnemonic { mnemonic } => {
+                if let Some(id) = needle.lookup.get(mnemonic) {
+                    func.patterns.contains(id)
+                } else {
+                    false
+                }
+            }
+            Self::Match { match_name } => matched_rules.contains(match_name.as_str()),
+            Self::Entropy { section, min } => features
+                .file_scope
+                .section_entropies
+                .get(section.as_str())
+                .map(|&e| e >= *min)
+                .unwrap_or(false),
+            Self::BasicBlocksCount { count } => func.basic_blocks_count >= *count,
+            Self::CyclomaticComplexity { min } => func.cyclomatic_complexity >= *min,
+            Self::BasicBlockScope { conditions } => {
+                if !conditions
+                    .iter()
+                    .all(|cond| cond.is_present(needle, features))
+                {
+                    return false;
+                }
+                func.block_indices.iter().any(|&i| {
+                    conditions.iter().all(|cond| {
+                        cond.matches_basic_block_scope(
+                            &features.basic_block_scope[i],
+                            features,
+                            needle,
+                            matched_rules,
+                        )
+                    })
+                })
+            }
+            Self::CallScope { conditions } | Self::InstructionScope { conditions } => {
+                if !conditions
+                    .iter()
+                    .all(|cond| cond.is_present(needle, features))
+                {
+                    return false;
+                }
+                func.block_indices.iter().any(|&i| {
+                    features.basic_block_scope[i]
+                        .instructions
+                        .iter()
+                        .any(|insn| {
+                            conditions.iter().all(|cond| {
+                                cond.matches_instruction_scope(
+                                    insn,
+                                    features,
+                                    needle,
+                                    matched_rules,
+                                )
+                            })
+                        })
+                })
+            }
+            Self::Os { os } => features.global_scope.os.contains(os),
+            Self::Arch { arch } => features.global_scope.arch.contains(arch),
+            Self::Format { format } => features.global_scope.binary_format.contains(format),
+            Self::Section { section } => features
+                .file_scope
+                .section_entropies
+                .contains_key(section.as_str()),
+            Self::Characteristic { characteristic } => match characteristic {
+                CapaCharacteristic::Packed => features.file_scope.has_packer_sig,
+                CapaCharacteristic::CodeCave => features.file_scope.has_code_cave,
+                CapaCharacteristic::Loop => func.has_loop,
+                CapaCharacteristic::TightLoop => func
+                    .block_indices
+                    .iter()
+                    .any(|&i| features.basic_block_scope[i].is_tight_loop),
+                CapaCharacteristic::RecursiveCall => func.is_recursive,
+                CapaCharacteristic::CallsFrom => func.calls_from > 0,
+                CapaCharacteristic::Nzxor => func.block_indices.iter().any(|&i| {
+                    features.basic_block_scope[i]
+                        .instructions
+                        .iter()
+                        .any(Self::is_nzxor)
+                }),
+                CapaCharacteristic::PebAccess => func.block_indices.iter().any(|&i| {
+                    features.basic_block_scope[i]
+                        .instructions
+                        .iter()
+                        .any(Self::is_peb_access)
+                }),
+                CapaCharacteristic::FsAccess => func.block_indices.iter().any(|&i| {
+                    features.basic_block_scope[i]
+                        .instructions
+                        .iter()
+                        .any(Self::is_fs_access)
+                }),
+                CapaCharacteristic::GsAccess => func.block_indices.iter().any(|&i| {
+                    features.basic_block_scope[i]
+                        .instructions
+                        .iter()
+                        .any(Self::is_gs_access)
+                }),
+                CapaCharacteristic::CrossSectionFlow
+                | CapaCharacteristic::IndirectCall
+                | CapaCharacteristic::UnmanagedCall
+                | CapaCharacteristic::Unsupported => false,
+            },
+            Self::Number { number } | Self::Offset { offset: number } => {
+                if let Some(id) = needle.lookup.get(number) {
+                    func.patterns.contains(id)
+                } else {
+                    false
+                }
+            }
+            Self::Count { condition, count } => match &**condition {
+                Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
+                    if let Some(id) = needle.lookup.get(api) {
+                        if !func.patterns.contains(id) {
+                            0 == *count
+                        } else {
+                            let mut accumulated = 0;
+                            'outer_fn_api: for &i in &func.block_indices {
+                                for insn in features.basic_block_scope[i].instructions {
+                                    if insn.matched.contains(id) {
+                                        accumulated += 1;
+                                        if accumulated >= *count {
+                                            break 'outer_fn_api;
+                                        }
+                                    }
+                                }
+                            }
+                            accumulated >= *count
+                        }
                     } else {
                         false
                     }
+                }
+                Self::String { string } => {
+                    let mut accumulated = 0;
+                    if Self::parse_capa_regex(string).is_some() {
+                        'outer_fn_re: for &i in &func.block_indices {
+                            for insn in features.basic_block_scope[i].instructions {
+                                if needle.matches_regex_instruction(string, insn) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_fn_re;
+                                    }
+                                }
+                            }
+                        }
+                    } else if let Some(id) = needle.lookup.get(string) {
+                        'outer_fn_str: for &i in &func.block_indices {
+                            for insn in features.basic_block_scope[i].instructions {
+                                if insn.matched.contains(id) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_fn_str;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    accumulated >= *count
+                }
+                Self::Mnemonic { mnemonic } => {
+                    if let Some(id) = needle.lookup.get(mnemonic) {
+                        if !func.patterns.contains(id) {
+                            0 == *count
+                        } else {
+                            let mut accumulated = 0;
+                            'outer_fn_mnem: for &i in &func.block_indices {
+                                for insn in features.basic_block_scope[i].instructions {
+                                    if insn.matched.contains(id) {
+                                        accumulated += 1;
+                                        if accumulated >= *count {
+                                            break 'outer_fn_mnem;
+                                        }
+                                    }
+                                }
+                            }
+                            accumulated >= *count
+                        }
+                    } else {
+                        false
+                    }
+                }
+                Self::Number { number } | Self::Offset { offset: number } => {
+                    if let Some(id) = needle.lookup.get(number) {
+                        if !func.patterns.contains(id) {
+                            0 == *count
+                        } else {
+                            let mut accumulated = 0;
+                            'outer_fn_num: for &i in &func.block_indices {
+                                for insn in features.basic_block_scope[i].instructions {
+                                    if insn.matched.contains(id) {
+                                        accumulated += 1;
+                                        if accumulated >= *count {
+                                            break 'outer_fn_num;
+                                        }
+                                    }
+                                }
+                            }
+                            accumulated >= *count
+                        }
+                    } else {
+                        false
+                    }
+                }
+                Self::BasicBlockScope { conditions } => {
+                    func.block_indices
+                        .iter()
+                        .filter(|&&i| {
+                            conditions.iter().all(|c| {
+                                c.matches_basic_block_scope(
+                                    &features.basic_block_scope[i],
+                                    features,
+                                    needle,
+                                    matched_rules,
+                                )
+                            })
+                        })
+                        .count()
+                        >= *count
+                }
+                Self::CallScope { conditions } | Self::InstructionScope { conditions } => {
+                    let mut accumulated = 0;
+                    'outer_fn_insn_cnt: for &i in &func.block_indices {
+                        for insn in features.basic_block_scope[i].instructions {
+                            if conditions.iter().all(|c| {
+                                c.matches_instruction_scope(insn, features, needle, matched_rules)
+                            }) {
+                                accumulated += 1;
+                                if accumulated >= *count {
+                                    break 'outer_fn_insn_cnt;
+                                }
+                            }
+                        }
+                    }
+                    accumulated >= *count
+                }
+                Self::Characteristic { characteristic } => match characteristic {
+                    CapaCharacteristic::Nzxor => {
+                        let mut accumulated = 0;
+                        'outer_fn_nzxor: for &i in &func.block_indices {
+                            for insn in features.basic_block_scope[i].instructions {
+                                if Self::is_nzxor(insn) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_fn_nzxor;
+                                    }
+                                }
+                            }
+                        }
+                        accumulated >= *count
+                    }
+                    CapaCharacteristic::CallsFrom => func.calls_from >= *count,
+                    CapaCharacteristic::TightLoop => {
+                        func.block_indices
+                            .iter()
+                            .filter(|&&i| features.basic_block_scope[i].is_tight_loop)
+                            .count()
+                            >= *count
+                    }
+                    CapaCharacteristic::PebAccess => {
+                        let mut accumulated = 0;
+                        'outer_fn_peb: for &i in &func.block_indices {
+                            for insn in features.basic_block_scope[i].instructions {
+                                if Self::is_peb_access(insn) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_fn_peb;
+                                    }
+                                }
+                            }
+                        }
+                        accumulated >= *count
+                    }
+                    CapaCharacteristic::FsAccess => {
+                        let mut accumulated = 0;
+                        'outer_fn_fs: for &i in &func.block_indices {
+                            for insn in features.basic_block_scope[i].instructions {
+                                if Self::is_fs_access(insn) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_fn_fs;
+                                    }
+                                }
+                            }
+                        }
+                        accumulated >= *count
+                    }
+                    CapaCharacteristic::GsAccess => {
+                        let mut accumulated = 0;
+                        'outer_fn_gs: for &i in &func.block_indices {
+                            for insn in features.basic_block_scope[i].instructions {
+                                if Self::is_gs_access(insn) {
+                                    accumulated += 1;
+                                    if accumulated >= *count {
+                                        break 'outer_fn_gs;
+                                    }
+                                }
+                            }
+                        }
+                        accumulated >= *count
+                    }
+                    _ => false,
+                },
+                Self::BasicBlocksCount { count: bb_min } => {
+                    func.basic_blocks_count >= *bb_min && func.basic_blocks_count >= *count
                 }
                 Self::Match { match_name } => {
                     let matched_cnt = if matched_rules.contains(match_name.as_str()) {
@@ -1056,17 +1750,256 @@ impl RuleCondition {
                 }
                 _ => false,
             },
-            // Catch-all for currently unhandled or unsupported conditions.
-            _ => false,
+            // Explicit unhandled / unsupported variant.
+            Self::Other(_) => false,
         }
     }
 
-    /// Evaluates the condition directly against a single instruction via the pre-computed NeedleIndex match set.
-    fn matches_instruction(&self, insn: &InstructionInfo, needle: &NeedleIndex) -> bool {
+    /// Evaluates the condition against a single basic block.
+    fn matches_basic_block_scope(
+        &self,
+        block: &BlockScopeFeatures,
+        features: &FeatureSet,
+        needle: &NeedleIndex,
+        matched_rules: &AHashSet<&str>,
+    ) -> bool {
         match self {
-            Self::And { and } => and.iter().all(|c| c.matches_instruction(insn, needle)),
-            Self::Or { or } => or.iter().any(|c| c.matches_instruction(insn, needle)),
-            Self::Not { not } => !not.matches_instruction(insn, needle),
+            Self::And { and } => and
+                .iter()
+                .all(|c| c.matches_basic_block_scope(block, features, needle, matched_rules)),
+            Self::Or { or } => or
+                .iter()
+                .any(|c| c.matches_basic_block_scope(block, features, needle, matched_rules)),
+            Self::Not { not } => {
+                !not.matches_basic_block_scope(block, features, needle, matched_rules)
+            }
+            Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
+                if let Some(id) = needle.lookup.get(api) {
+                    block.apis.contains(id)
+                        || block.patterns.contains(id)
+                        || block
+                            .instructions
+                            .iter()
+                            .any(|insn| insn.matched.contains(id))
+                } else {
+                    false
+                }
+            }
+            Self::String { string } => {
+                if Self::parse_capa_regex(string).is_some() {
+                    block
+                        .instructions
+                        .iter()
+                        .any(|insn| needle.matches_regex_instruction(string, insn))
+                } else if let Some(id) = needle.lookup.get(string) {
+                    block.patterns.contains(id)
+                        || block
+                            .instructions
+                            .iter()
+                            .any(|insn| insn.matched.contains(id))
+                } else {
+                    false
+                }
+            }
+            Self::Mnemonic { mnemonic } => {
+                if let Some(id) = needle.lookup.get(mnemonic) {
+                    block.patterns.contains(id)
+                        || block
+                            .instructions
+                            .iter()
+                            .any(|insn| insn.matched.contains(id))
+                } else {
+                    false
+                }
+            }
+            Self::Match { match_name } => matched_rules.contains(match_name.as_str()),
+            Self::Entropy { section, min } => features
+                .file_scope
+                .section_entropies
+                .get(section.as_str())
+                .map(|&e| e >= *min)
+                .unwrap_or(false),
+            Self::BasicBlockScope { conditions } => conditions
+                .iter()
+                .all(|cond| cond.matches_basic_block_scope(block, features, needle, matched_rules)),
+            Self::CallScope { conditions } | Self::InstructionScope { conditions } => {
+                block.instructions.iter().any(|insn| {
+                    conditions.iter().all(|cond| {
+                        cond.matches_instruction_scope(insn, features, needle, matched_rules)
+                    })
+                })
+            }
+            Self::Os { os } => features.global_scope.os.contains(os),
+            Self::Arch { arch } => features.global_scope.arch.contains(arch),
+            Self::Format { format } => features.global_scope.binary_format.contains(format),
+            Self::Section { section } => features
+                .file_scope
+                .section_entropies
+                .contains_key(section.as_str()),
+            Self::Characteristic { characteristic } => match characteristic {
+                CapaCharacteristic::Packed => features.file_scope.has_packer_sig,
+                CapaCharacteristic::CodeCave => features.file_scope.has_code_cave,
+                CapaCharacteristic::TightLoop | CapaCharacteristic::Loop => block.is_tight_loop,
+                CapaCharacteristic::Nzxor => block.instructions.iter().any(Self::is_nzxor),
+                CapaCharacteristic::PebAccess => block.instructions.iter().any(Self::is_peb_access),
+                CapaCharacteristic::FsAccess => block.instructions.iter().any(Self::is_fs_access),
+                CapaCharacteristic::GsAccess => block.instructions.iter().any(Self::is_gs_access),
+                _ => false,
+            },
+            Self::Number { number } | Self::Offset { offset: number } => {
+                if let Some(id) = needle.lookup.get(number) {
+                    block.patterns.contains(id)
+                        || block
+                            .instructions
+                            .iter()
+                            .any(|insn| insn.matched.contains(id))
+                } else {
+                    false
+                }
+            }
+            Self::Count { condition, count } => match &**condition {
+                Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
+                    let cnt = if let Some(id) = needle.lookup.get(api) {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| insn.matched.contains(id))
+                            .count()
+                    } else {
+                        0
+                    };
+                    cnt >= *count
+                }
+                Self::String { string } => {
+                    let cnt = if Self::parse_capa_regex(string).is_some() {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| needle.matches_regex_instruction(string, insn))
+                            .count()
+                    } else if let Some(id) = needle.lookup.get(string) {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| insn.matched.contains(id))
+                            .count()
+                    } else {
+                        0
+                    };
+                    cnt >= *count
+                }
+                Self::Mnemonic { mnemonic } => {
+                    let cnt = if let Some(id) = needle.lookup.get(mnemonic) {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| insn.matched.contains(id))
+                            .count()
+                    } else {
+                        0
+                    };
+                    cnt >= *count
+                }
+                Self::Number { number } | Self::Offset { offset: number } => {
+                    let cnt = if let Some(id) = needle.lookup.get(number) {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| insn.matched.contains(id))
+                            .count()
+                    } else {
+                        0
+                    };
+                    cnt >= *count
+                }
+                Self::Characteristic { characteristic } => match characteristic {
+                    CapaCharacteristic::Nzxor => {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| Self::is_nzxor(insn))
+                            .count()
+                            >= *count
+                    }
+                    CapaCharacteristic::TightLoop | CapaCharacteristic::Loop => {
+                        (if block.is_tight_loop { 1 } else { 0 }) >= *count
+                    }
+                    CapaCharacteristic::PebAccess => {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| Self::is_peb_access(insn))
+                            .count()
+                            >= *count
+                    }
+                    CapaCharacteristic::FsAccess => {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| Self::is_fs_access(insn))
+                            .count()
+                            >= *count
+                    }
+                    CapaCharacteristic::GsAccess => {
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|insn| Self::is_gs_access(insn))
+                            .count()
+                            >= *count
+                    }
+                    _ => false,
+                },
+                Self::Match { match_name } => {
+                    let matched_cnt = if matched_rules.contains(match_name.as_str()) {
+                        1
+                    } else {
+                        0
+                    };
+                    matched_cnt >= *count
+                }
+                _ => {
+                    let mut actual = 0;
+                    for insn in block.instructions {
+                        if condition.matches_instruction_scope(
+                            insn,
+                            features,
+                            needle,
+                            matched_rules,
+                        ) {
+                            actual += 1;
+                            if actual >= *count {
+                                return true;
+                            }
+                        }
+                    }
+                    actual >= *count
+                }
+            },
+            Self::BasicBlocksCount { .. } | Self::CyclomaticComplexity { .. } | Self::Other(_) => {
+                false
+            }
+        }
+    }
+
+    /// Evaluates the condition against a single machine instruction.
+    fn matches_instruction_scope(
+        &self,
+        insn: &InstructionInfo,
+        features: &FeatureSet,
+        needle: &NeedleIndex,
+        matched_rules: &AHashSet<&str>,
+    ) -> bool {
+        match self {
+            Self::And { and } => and
+                .iter()
+                .all(|c| c.matches_instruction_scope(insn, features, needle, matched_rules)),
+            Self::Or { or } => or
+                .iter()
+                .any(|c| c.matches_instruction_scope(insn, features, needle, matched_rules)),
+            Self::Not { not } => {
+                !not.matches_instruction_scope(insn, features, needle, matched_rules)
+            }
             Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
                 needle
                     .lookup
@@ -1087,100 +2020,76 @@ impl RuleCondition {
                 .lookup
                 .get(mnemonic)
                 .is_some_and(|id| insn.matched.contains(id)),
-            Self::Match { .. } => false,
+            Self::Match { match_name } => matched_rules.contains(match_name.as_str()),
+            Self::Entropy { section, min } => features
+                .file_scope
+                .section_entropies
+                .get(section.as_str())
+                .map(|&e| e >= *min)
+                .unwrap_or(false),
+            Self::InstructionScope { conditions } | Self::CallScope { conditions } => conditions
+                .iter()
+                .all(|c| c.matches_instruction_scope(insn, features, needle, matched_rules)),
+            Self::Os { os } => features.global_scope.os.contains(os),
+            Self::Arch { arch } => features.global_scope.arch.contains(arch),
+            Self::Format { format } => features.global_scope.binary_format.contains(format),
+            Self::Section { section } => features
+                .file_scope
+                .section_entropies
+                .contains_key(section.as_str()),
+            Self::Characteristic { characteristic } => match characteristic {
+                CapaCharacteristic::Packed => features.file_scope.has_packer_sig,
+                CapaCharacteristic::CodeCave => features.file_scope.has_code_cave,
+                CapaCharacteristic::Nzxor => Self::is_nzxor(insn),
+                CapaCharacteristic::PebAccess => Self::is_peb_access(insn),
+                CapaCharacteristic::FsAccess => Self::is_fs_access(insn),
+                CapaCharacteristic::GsAccess => Self::is_gs_access(insn),
+                _ => false,
+            },
             Self::Number { number } | Self::Offset { offset: number } => needle
                 .lookup
                 .get(number)
                 .is_some_and(|id| insn.matched.contains(id)),
             Self::Count { condition, count } => {
-                let actual = if condition.matches_instruction(insn, needle) {
-                    1
-                } else {
-                    0
-                };
+                let actual =
+                    if condition.matches_instruction_scope(insn, features, needle, matched_rules) {
+                        1
+                    } else {
+                        0
+                    };
                 actual >= *count
             }
-            _ => false,
+            Self::BasicBlocksCount { .. }
+            | Self::CyclomaticComplexity { .. }
+            | Self::BasicBlockScope { .. }
+            | Self::Other(_) => false,
         }
     }
 
-    /// Evaluates the condition directly against a basic block via the pre-computed NeedleIndex match sets.
-    fn matches_block(&self, instructions: &[InstructionInfo], needle: &NeedleIndex) -> bool {
+    /// Checks if the condition has a chance of matching based on globally present NeedleIndex patterns and extracted file-level features.
+    fn is_present(&self, needle: &NeedleIndex, features: &FeatureSet) -> bool {
         match self {
-            Self::And { and } => and.iter().all(|c| c.matches_block(instructions, needle)),
-            Self::Or { or } => or.iter().any(|c| c.matches_block(instructions, needle)),
-            Self::Not { not } => !not.matches_block(instructions, needle),
-            Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
-                needle
-                    .lookup
-                    .get(api)
-                    .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id)))
-            }
-            Self::String { string } => {
-                if Self::parse_capa_regex(string).is_some() {
-                    instructions
-                        .iter()
-                        .any(|insn| needle.matches_regex_instruction(string, insn))
-                } else {
-                    needle
-                        .lookup
-                        .get(string)
-                        .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id)))
-                }
-            }
-            Self::Mnemonic { mnemonic } => needle
-                .lookup
-                .get(mnemonic)
-                .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id))),
-            Self::Match { .. } => false,
-            Self::BasicBlockScope { conditions } => conditions
-                .iter()
-                .all(|cond| cond.matches_block(instructions, needle)),
-            Self::CallScope { conditions } => instructions.iter().any(|insn| {
-                conditions
-                    .iter()
-                    .all(|cond| cond.matches_instruction(insn, needle))
-            }),
-            Self::Number { number } | Self::Offset { offset: number } => needle
-                .lookup
-                .get(number)
-                .is_some_and(|id| instructions.iter().any(|insn| insn.matched.contains(id))),
-            Self::Count { condition, count } => {
-                let mut actual = 0;
-                for insn in instructions.iter() {
-                    if condition.matches_instruction(insn, needle) {
-                        actual += 1;
-                        if actual >= *count {
-                            return true;
-                        }
-                    }
-                }
-                actual >= *count
-            }
-            _ => false,
-        }
-    }
-
-    /// Checks if the condition has a chance of matching based on globally present NeedleIndex patterns.
-    fn is_present(&self, needle: &NeedleIndex) -> bool {
-        match self {
-            Self::And { and } => and.iter().all(|c| c.is_present(needle)),
-            Self::Or { or } => or.iter().any(|c| c.is_present(needle)),
+            Self::And { and } => and.iter().all(|c| c.is_present(needle, features)),
+            Self::Or { or } => or.iter().any(|c| c.is_present(needle, features)),
             Self::Not { .. } => true, // Conservative
             Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
-                needle
-                    .lookup
-                    .get(api)
-                    .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed))
+                needle.lookup.get(api).is_some_and(|id| {
+                    needle.present[id.as_usize()].load(Ordering::Relaxed)
+                        || features.file_scope.apis.contains(id)
+                })
             }
             Self::String { string } => {
                 if Self::parse_capa_regex(string).is_some() {
                     needle.is_regex_present(string)
+                } else if let Some(id) = needle.lookup.get(string) {
+                    needle.present[id.as_usize()].load(Ordering::Relaxed)
+                        || features.file_scope.strings.contains(string)
                 } else {
-                    needle
-                        .lookup
-                        .get(string)
-                        .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed))
+                    features
+                        .file_scope
+                        .strings
+                        .iter()
+                        .any(|s| s.contains(string))
                 }
             }
             Self::Mnemonic { mnemonic } => needle
@@ -1192,7 +2101,12 @@ impl RuleCondition {
                 .lookup
                 .get(number)
                 .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed)),
-            Self::Count { condition, .. } => condition.is_present(needle),
+            Self::Count { condition, .. } => condition.is_present(needle, features),
+            Self::BasicBlockScope { conditions }
+            | Self::CallScope { conditions }
+            | Self::InstructionScope { conditions } => {
+                conditions.iter().all(|c| c.is_present(needle, features))
+            }
             _ => true,
         }
     }
@@ -1205,7 +2119,9 @@ impl RuleCondition {
             Self::Or { or } => or.iter().any(|c| c.has_match_dependency()),
             Self::Not { not } => not.has_match_dependency(),
             Self::Count { condition, .. } => condition.has_match_dependency(),
-            Self::BasicBlockScope { conditions } | Self::CallScope { conditions } => {
+            Self::BasicBlockScope { conditions }
+            | Self::CallScope { conditions }
+            | Self::InstructionScope { conditions } => {
                 conditions.iter().any(|c| c.has_match_dependency())
             }
             _ => false,
@@ -1248,16 +2164,121 @@ impl RuleCondition {
     }
 }
 
-/// Supported tag-based feature conditions represented as raw strings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RuleTag {
-    /// Signifies a code cave (NOP sled or null padding).
-    CodeCave,
-    /// Signifies a known packer signature.
-    PackerSig,
-    /// Signifies a tight loop construct.
+/// Canonical characteristic flags supported by Mandiant Capa and binary heuristics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CapaCharacteristic {
+    /// Graph cycle in function CFG.
     Loop,
+    /// Basic block self-loop or cycle within a single basic block.
+    TightLoop,
+    /// Function directly or indirectly calling itself.
+    RecursiveCall,
+    /// Function makes external calls.
+    CallsFrom,
+    /// Non-zeroing XOR operation (`xor reg1, reg2` with `reg1 != reg2`).
+    Nzxor,
+    /// Packed executable / packer signature detected.
+    Packed,
+    /// Code cave / NOP sled / trap padding detected.
+    CodeCave,
+    /// Access to Process Environment Block (`fs:[0x30]` on x86, `gs:[0x60]` on x64).
+    PebAccess,
+    /// Direct segment register access (`fs:` segment).
+    FsAccess,
+    /// Direct segment register access (`gs:` segment).
+    GsAccess,
+    /// Control flow crossing binary section boundaries.
+    CrossSectionFlow,
+    /// Indirect function call (`call reg` / `call [mem]`).
+    IndirectCall,
+    /// Native unmanaged call transition.
+    UnmanagedCall,
+    /// Unsupported or unrecognized characteristic.
+    Unsupported,
+}
+
+impl CapaCharacteristic {
+    /// Parses a characteristic string into its canonical enumeration.
+    ///
+    /// Handles case insensitivity, underscores, hyphens, and common Capa/rbat aliases.
+    pub fn parse(s: &str) -> Self {
+        let norm = s.trim().to_ascii_lowercase().replace(['_', '-'], " ");
+        match norm.as_str() {
+            "loop" => Self::Loop,
+            "tight loop" => Self::TightLoop,
+            "recursive call" | "recursive" => Self::RecursiveCall,
+            "calls from" => Self::CallsFrom,
+            "nzxor" => Self::Nzxor,
+            "packed" | "packer" | "packer sig" | "packer signature" | "embedded pe" => Self::Packed,
+            "code cave" | "codecave" => Self::CodeCave,
+            "peb access" | "peb" => Self::PebAccess,
+            "fs access" | "fs" => Self::FsAccess,
+            "gs access" | "gs" => Self::GsAccess,
+            "cross section flow" => Self::CrossSectionFlow,
+            "indirect call" => Self::IndirectCall,
+            "unmanaged call" => Self::UnmanagedCall,
+            _ => Self::Unsupported,
+        }
+    }
+
+    /// Returns the canonical Capa specification string for this characteristic.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Loop => "loop",
+            Self::TightLoop => "tight loop",
+            Self::RecursiveCall => "recursive call",
+            Self::CallsFrom => "calls from",
+            Self::Nzxor => "nzxor",
+            Self::Packed => "packed",
+            Self::CodeCave => "code cave",
+            Self::PebAccess => "peb access",
+            Self::FsAccess => "fs access",
+            Self::GsAccess => "gs access",
+            Self::CrossSectionFlow => "cross section flow",
+            Self::IndirectCall => "indirect call",
+            Self::UnmanagedCall => "unmanaged call",
+            Self::Unsupported => "unsupported",
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CapaCharacteristic {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Self::parse(&s))
+    }
+}
+
+impl Serialize for CapaCharacteristic {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// Canonical static evaluation scope assigned to a security rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Hash)]
+pub enum RuleScope {
+    /// File scope: evaluated over whole-binary structures and aggregate symbols (default).
+    #[default]
+    #[serde(alias = "file")]
+    File,
+    /// Function scope: evaluated across individual recovered functions.
+    #[serde(alias = "function")]
+    Function,
+    /// Basic block scope: evaluated across individual basic blocks.
+    #[serde(alias = "basic block", alias = "basic_block", alias = "bb")]
+    BasicBlock,
+    /// Instruction scope: evaluated across individual machine instructions.
+    #[serde(alias = "instruction")]
+    Instruction,
+    /// Unsupported static scope (e.g. dynamic-only rule).
+    Unsupported,
 }
 
 /// Helper enum to deserialize either a single string scalar or a list of strings from Serde.
@@ -1365,6 +2386,77 @@ mod tests {
     use ahash::{AHashMap, AHashSet};
     use rustc_hash::FxHashSet;
     use std::sync::Arc;
+
+    fn make_test_insn(
+        address: u64,
+        mnemonic: &str,
+        op_str: &str,
+        matched: &[aho_corasick::PatternID],
+    ) -> InstructionInfo {
+        InstructionInfo {
+            address,
+            mnemonic: mnemonic.into(),
+            op_str: op_str.into(),
+            api_resolution: None,
+            matched: smallvec::SmallVec::from_slice(matched),
+            inst_class: Default::default(),
+        }
+    }
+
+    fn make_test_block<'buf>(
+        start_address: u64,
+        end_address: u64,
+        instructions: &'buf [InstructionInfo],
+        is_tight_loop: bool,
+    ) -> BlockScopeFeatures<'buf> {
+        let mut patterns = FxHashSet::default();
+        let mut apis = FxHashSet::default();
+        for insn in instructions {
+            for &p in &insn.matched {
+                patterns.insert(p);
+                apis.insert(p);
+            }
+        }
+        BlockScopeFeatures {
+            start_address,
+            end_address,
+            instructions,
+            patterns,
+            apis,
+            is_tight_loop,
+        }
+    }
+
+    fn make_test_function<'buf>(
+        start_address: u64,
+        end_address: u64,
+        block_indices: Vec<usize>,
+        blocks: &[BlockScopeFeatures<'buf>],
+        has_loop: bool,
+        is_recursive: bool,
+        calls_from: usize,
+    ) -> FunctionScopeFeatures<'buf> {
+        let mut patterns = FxHashSet::default();
+        let mut apis = FxHashSet::default();
+        for &idx in &block_indices {
+            patterns.extend(&blocks[idx].patterns);
+            apis.extend(&blocks[idx].apis);
+        }
+        FunctionScopeFeatures {
+            start_address,
+            end_address,
+            basic_blocks_count: block_indices.len(),
+            block_indices,
+            patterns,
+            apis,
+            has_loop,
+            cyclomatic_complexity: 1,
+            is_recursive,
+            calls_from,
+            name: None,
+            _marker: std::marker::PhantomData,
+        }
+    }
 
     #[test]
     fn test_rule_evaluation() {
@@ -1484,7 +2576,9 @@ mod tests {
                     ..Default::default()
                 },
                 features: vec![
-                    RuleCondition::Tag(RuleTag::Loop),
+                    RuleCondition::Characteristic {
+                        characteristic: CapaCharacteristic::Loop,
+                    },
                     RuleCondition::CyclomaticComplexity { min: 4 },
                 ],
             },
@@ -1605,8 +2699,8 @@ mod tests {
         let needle = NeedleIndex::new(&[]);
 
         let empty_set = ahash::AHashSet::new();
-        assert!(rule_pe.matches(&features, &needle, &empty_set));
-        assert!(!rule_elf.matches(&features, &needle, &empty_set));
+        assert!(rule_pe.matches_file_scope(&features, &needle, &empty_set));
+        assert!(!rule_elf.matches_file_scope(&features, &needle, &empty_set));
     }
 
     #[test]
@@ -1893,5 +2987,582 @@ mod tests {
         let matches = Rule::evaluate(&features, &rules, &needle);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].name, "DeleteShadowCopies");
+    }
+
+    #[test]
+    fn test_function_scope_false_positive_prevention() {
+        let yaml = br#"
+rule:
+  meta:
+    name: process injection
+    scopes:
+      static: function
+  features:
+    - and:
+      - api: CreateProcessA
+      - api: VirtualAllocEx
+"#;
+        let rule = Rule::from_slice(yaml).unwrap();
+        assert_eq!(rule.static_scope(), RuleScope::Function);
+
+        let rules = vec![rule.clone()];
+        let needle = NeedleIndex::new(&rules);
+        let pid_create_process = needle.lookup.get("createprocessa").copied().unwrap();
+        let pid_virtual_alloc = needle.lookup.get("virtualallocex").copied().unwrap();
+
+        needle.present[pid_create_process.as_usize()].store(true, Ordering::Relaxed);
+        needle.present[pid_virtual_alloc.as_usize()].store(true, Ordering::Relaxed);
+
+        let insns_fn1 = vec![make_test_insn(
+            0x1000,
+            "call",
+            "CreateProcessA",
+            &[pid_create_process],
+        )];
+        let insns_fn2 = vec![make_test_insn(
+            0x2000,
+            "call",
+            "VirtualAllocEx",
+            &[pid_virtual_alloc],
+        )];
+
+        let blocks = vec![
+            make_test_block(0x1000, 0x1005, &insns_fn1, false),
+            make_test_block(0x2000, 0x2005, &insns_fn2, false),
+        ];
+
+        let fn1 = make_test_function(0x1000, 0x1005, vec![0], &blocks, false, false, 0);
+        let fn2 = make_test_function(0x2000, 0x2005, vec![1], &blocks, false, false, 0);
+
+        let empty_entropy = AHashMap::new();
+        let mut file_apis = FxHashSet::default();
+        file_apis.insert(pid_create_process);
+        file_apis.insert(pid_virtual_alloc);
+
+        let features = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: file_apis,
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 2,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: vec![fn1, fn2],
+            basic_block_scope: blocks,
+            global_scope: GlobalScopeFeatures {
+                os: "windows".to_owned(),
+                arch: "x86".to_owned(),
+                binary_format: "pe".to_owned(),
+            },
+            cfg_instructions: Arc::from([]),
+        };
+
+        let empty_matched = AHashSet::new();
+        assert!(!rule.matches(&features, &needle, &empty_matched));
+    }
+
+    #[test]
+    fn test_function_scope_positive_match() {
+        let yaml = br#"
+  rule:
+    meta:
+      name: process injection
+      scopes:
+        static: function
+    features:
+      - and:
+        - api: CreateProcessA
+        - api: VirtualAllocEx
+  "#;
+        let rule = Rule::from_slice(yaml).unwrap();
+        let rules = vec![rule.clone()];
+        let needle = NeedleIndex::new(&rules);
+        let pid_create_process = needle.lookup.get("createprocessa").copied().unwrap();
+        let pid_virtual_alloc = needle.lookup.get("virtualallocex").copied().unwrap();
+
+        needle.present[pid_create_process.as_usize()].store(true, Ordering::Relaxed);
+        needle.present[pid_virtual_alloc.as_usize()].store(true, Ordering::Relaxed);
+
+        let insns_b0 = vec![make_test_insn(
+            0x1000,
+            "call",
+            "CreateProcessA",
+            &[pid_create_process],
+        )];
+        let insns_b1 = vec![make_test_insn(
+            0x1010,
+            "call",
+            "VirtualAllocEx",
+            &[pid_virtual_alloc],
+        )];
+
+        let blocks = vec![
+            make_test_block(0x1000, 0x1005, &insns_b0, false),
+            make_test_block(0x1010, 0x1015, &insns_b1, false),
+        ];
+
+        let func = make_test_function(0x1000, 0x1015, vec![0, 1], &blocks, false, false, 0);
+
+        let empty_entropy = AHashMap::new();
+        let mut file_apis = FxHashSet::default();
+        file_apis.insert(pid_create_process);
+        file_apis.insert(pid_virtual_alloc);
+
+        let features = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: file_apis,
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 2,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: vec![func],
+            basic_block_scope: blocks,
+            global_scope: GlobalScopeFeatures {
+                os: "windows".to_owned(),
+                arch: "x86".to_owned(),
+                binary_format: "pe".to_owned(),
+            },
+            cfg_instructions: Arc::from([]),
+        };
+
+        let empty_matched = AHashSet::new();
+        assert!(rule.matches(&features, &needle, &empty_matched));
+    }
+
+    #[test]
+    fn test_basic_block_scope_rule() {
+        let yaml = br#"
+rule:
+  meta:
+    name: xor decrypt loop
+    scopes:
+      static: basic block
+  features:
+    - and:
+      - mnemonic: xor
+      - number: 0x5a
+"#;
+        let rule = Rule::from_slice(yaml).unwrap();
+        assert_eq!(rule.static_scope(), RuleScope::BasicBlock);
+
+        let rules = vec![rule.clone()];
+        let needle = NeedleIndex::new(&rules);
+        let pid_xor = needle.lookup.get("xor").copied().unwrap();
+        let pid_num = needle.lookup.get("90").copied().unwrap();
+
+        needle.present[pid_xor.as_usize()].store(true, Ordering::Relaxed);
+        needle.present[pid_num.as_usize()].store(true, Ordering::Relaxed);
+
+        let insns_b1 = vec![make_test_insn(
+            0x1000,
+            "xor",
+            "eax, 0x5a",
+            &[pid_xor, pid_num],
+        )];
+        let insns_b2 = vec![make_test_insn(0x2000, "xor", "eax, ebx", &[pid_xor])];
+        let insns_b3 = vec![make_test_insn(0x3000, "mov", "eax, 0x5a", &[pid_num])];
+
+        let blocks_disjoint = vec![
+            make_test_block(0x2000, 0x2005, &insns_b2, false),
+            make_test_block(0x3000, 0x3005, &insns_b3, false),
+        ];
+
+        let empty_entropy = AHashMap::new();
+        let features_disjoint = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 2,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: blocks_disjoint,
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+
+        let empty_matched = AHashSet::new();
+        assert!(!rule.matches(&features_disjoint, &needle, &empty_matched));
+
+        let blocks_match = vec![make_test_block(0x1000, 0x1005, &insns_b1, false)];
+        let features_match = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 1,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: blocks_match,
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+
+        assert!(rule.matches(&features_match, &needle, &empty_matched));
+    }
+
+    #[test]
+    fn test_instruction_scope_rule() {
+        let yaml = br#"
+rule:
+  meta:
+    name: test cmp int3
+    scopes:
+      static: instruction
+  features:
+    - and:
+      - mnemonic: cmp
+      - number: 0xcc
+"#;
+        let rule = Rule::from_slice(yaml).unwrap();
+        assert_eq!(rule.static_scope(), RuleScope::Instruction);
+
+        let rules = vec![rule.clone()];
+        let needle = NeedleIndex::new(&rules);
+        let pid_cmp = needle.lookup.get("cmp").copied().unwrap();
+        let pid_num = needle.lookup.get("204").copied().unwrap();
+
+        needle.present[pid_cmp.as_usize()].store(true, Ordering::Relaxed);
+        needle.present[pid_num.as_usize()].store(true, Ordering::Relaxed);
+
+        let insns_match = vec![make_test_insn(
+            0x1000,
+            "cmp",
+            "byte ptr [rax], 0xcc",
+            &[pid_cmp, pid_num],
+        )];
+        let blocks_match = vec![make_test_block(0x1000, 0x1004, &insns_match, false)];
+
+        let empty_entropy = AHashMap::new();
+        let features_match = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 1,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: blocks_match,
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+
+        let empty_matched = AHashSet::new();
+        assert!(rule.matches(&features_match, &needle, &empty_matched));
+
+        let insns_split = vec![
+            make_test_insn(0x1000, "cmp", "eax, ebx", &[pid_cmp]),
+            make_test_insn(0x1002, "mov", "edx, 0xcc", &[pid_num]),
+        ];
+        let blocks_split = vec![make_test_block(0x1000, 0x1007, &insns_split, false)];
+
+        let features_split = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 1,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: blocks_split,
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+
+        assert!(!rule.matches(&features_split, &needle, &empty_matched));
+    }
+
+    #[test]
+    fn test_scope_characteristics() {
+        let insn_zeroing = make_test_insn(0x1000, "xor", "eax, eax", &[]);
+        let insn_nonzeroing = make_test_insn(0x1002, "xor", "eax, ebx", &[]);
+        let insn_not_xor = make_test_insn(0x1004, "mov", "eax, ebx", &[]);
+
+        assert!(!RuleCondition::is_nzxor(&insn_zeroing));
+        assert!(RuleCondition::is_nzxor(&insn_nonzeroing));
+        assert!(!RuleCondition::is_nzxor(&insn_not_xor));
+
+        let yaml_loop = br#"
+rule:
+  meta:
+    name: has loop
+    scopes:
+      static: function
+  features:
+    - characteristic: loop
+"#;
+        let rule_loop = Rule::from_slice(yaml_loop).unwrap();
+        let needle_loop = NeedleIndex::new(std::slice::from_ref(&rule_loop));
+
+        let insns = vec![insn_nonzeroing];
+        let blocks = vec![make_test_block(0x1000, 0x1005, &insns, true)];
+        let func = make_test_function(0x1000, 0x1005, vec![0], &blocks, true, true, 3);
+
+        let empty_entropy = AHashMap::new();
+        let features = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 1,
+                has_loop: true,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: vec![func],
+            basic_block_scope: blocks,
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+
+        let empty_matched = AHashSet::new();
+        assert!(rule_loop.matches(&features, &needle_loop, &empty_matched));
+
+        let yaml_tight = br#"
+rule:
+  meta:
+    name: tight loop block
+    scopes:
+      static: basic block
+  features:
+    - characteristic: tight loop
+"#;
+        let rule_tight = Rule::from_slice(yaml_tight).unwrap();
+        let needle_tight = NeedleIndex::new(std::slice::from_ref(&rule_tight));
+        assert!(rule_tight.matches(&features, &needle_tight, &empty_matched));
+
+        let yaml_rec = br#"
+rule:
+  meta:
+    name: recursive function
+    scopes:
+      static: function
+  features:
+    - characteristic: recursive call
+"#;
+        let rule_rec = Rule::from_slice(yaml_rec).unwrap();
+        let needle_rec = NeedleIndex::new(std::slice::from_ref(&rule_rec));
+        assert!(rule_rec.matches(&features, &needle_rec, &empty_matched));
+
+        let yaml_insn_block = br#"
+rule:
+  meta:
+    name: nzxor instruction block
+  features:
+    - instruction:
+      - mnemonic: xor
+      - characteristic: nzxor
+"#;
+        let rule_insn_block = Rule::from_slice(yaml_insn_block).unwrap();
+        let needle_insn_block = NeedleIndex::new(std::slice::from_ref(&rule_insn_block));
+        let pid_xor = needle_insn_block.lookup.get("xor").copied().unwrap();
+        needle_insn_block.present[pid_xor.as_usize()].store(true, Ordering::Relaxed);
+
+        let insns_with_xor = vec![make_test_insn(0x1002, "xor", "eax, ebx", &[pid_xor])];
+        let blocks_with_xor = vec![make_test_block(0x1000, 0x1005, &insns_with_xor, false)];
+        let features_insn_block = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 1,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: blocks_with_xor,
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+
+        assert!(rule_insn_block.matches(&features_insn_block, &needle_insn_block, &empty_matched));
+    }
+
+    #[test]
+    fn test_unsupported_scope() {
+        let yaml = br#"
+rule:
+  meta:
+    name: dynamic only
+    scopes:
+      static: unsupported
+  features:
+    - string: "evil"
+"#;
+        let rule = Rule::from_slice(yaml).unwrap();
+        assert_eq!(rule.static_scope(), RuleScope::Unsupported);
+
+        let needle = NeedleIndex::new(std::slice::from_ref(&rule));
+        let empty_entropy = AHashMap::new();
+        let features = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::from_iter(["evil".to_string()]),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 0,
+                has_loop: false,
+                max_cyclomatic_complexity: 0,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: Vec::new(),
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+
+        let empty_matched = AHashSet::new();
+        assert!(!rule.matches(&features, &needle, &empty_matched));
+    }
+
+    #[test]
+    fn test_capa_characteristics_and_counting_scopes() {
+        let yaml_peb = br#"
+rule:
+  meta:
+    name: peb access instruction
+    scopes:
+      static: instruction
+  features:
+    - characteristic: peb access
+"#;
+        let rule_peb = Rule::from_slice(yaml_peb).unwrap();
+        assert_eq!(
+            rule_peb.rule.features[0],
+            RuleCondition::Characteristic {
+                characteristic: CapaCharacteristic::PebAccess
+            }
+        );
+        let needle_peb = NeedleIndex::new(std::slice::from_ref(&rule_peb));
+
+        let insn_peb = make_test_insn(0x1000, "mov", "eax, fs:[0x30]", &[]);
+        let insns = vec![insn_peb];
+        let blocks = vec![make_test_block(0x1000, 0x1005, &insns, false)];
+        let empty_entropy = AHashMap::new();
+        let features = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: true,
+                has_packer_sig: true,
+                basic_blocks_count: 1,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: Vec::new(),
+            basic_block_scope: blocks,
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+        let empty_matched = AHashSet::new();
+        assert!(rule_peb.matches(&features, &needle_peb, &empty_matched));
+
+        // Test CodeCave and Packed characteristics
+        let yaml_heuristics = br#"
+rule:
+  meta:
+    name: codecave and packed
+    scopes:
+      static: file
+  features:
+    - and:
+      - characteristic: code cave
+      - characteristic: packed
+"#;
+        let rule_heur = Rule::from_slice(yaml_heuristics).unwrap();
+        let needle_heur = NeedleIndex::new(std::slice::from_ref(&rule_heur));
+        assert!(rule_heur.matches(&features, &needle_heur, &empty_matched));
+
+        // Test counting basic blocks in file scope and function scope
+        let yaml_count_bb = br#"
+rule:
+  meta:
+    name: multiple basic blocks
+    scopes:
+      static: file
+  features:
+    - count(basic block): 2
+"#;
+        let rule_count_bb = Rule::from_slice(yaml_count_bb).unwrap();
+        let needle_count_bb = NeedleIndex::new(std::slice::from_ref(&rule_count_bb));
+
+        let insns1 = vec![make_test_insn(0x1000, "nop", "", &[])];
+        let insns2 = vec![make_test_insn(0x1010, "nop", "", &[])];
+        let blocks2 = vec![
+            make_test_block(0x1000, 0x1005, &insns1, false),
+            make_test_block(0x1010, 0x1015, &insns2, false),
+        ];
+        let func = make_test_function(0x1000, 0x1015, vec![0, 1], &blocks2, false, false, 0);
+
+        let features_multi_bb = FeatureSet {
+            file_scope: FileScopeFeatures {
+                apis: FxHashSet::default(),
+                strings: AHashSet::new(),
+                section_entropies: &empty_entropy,
+                has_code_cave: false,
+                has_packer_sig: false,
+                basic_blocks_count: 2,
+                has_loop: false,
+                max_cyclomatic_complexity: 1,
+                raw_buffer: &[],
+            },
+            function_scope: vec![func],
+            basic_block_scope: blocks2,
+            global_scope: GlobalScopeFeatures::default(),
+            cfg_instructions: Arc::from([]),
+        };
+
+        assert!(rule_count_bb.matches(&features_multi_bb, &needle_count_bb, &empty_matched));
+
+        // Test count(basic block) in function scope
+        let yaml_count_fn_bb = br#"
+rule:
+  meta:
+    name: function multiple blocks
+    scopes:
+      static: function
+  features:
+    - count(basic block): 2
+"#;
+        let rule_count_fn_bb = Rule::from_slice(yaml_count_fn_bb).unwrap();
+        let needle_count_fn_bb = NeedleIndex::new(std::slice::from_ref(&rule_count_fn_bb));
+        assert!(rule_count_fn_bb.matches(&features_multi_bb, &needle_count_fn_bb, &empty_matched));
     }
 }

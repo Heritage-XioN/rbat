@@ -5,13 +5,10 @@
 pub use crate::core::{
     analyzer::Analyzer,
     cfg::{BasicBlock, ControlFlowGraph, Function},
-    features::{
-        BlockScopeFeatures, FeatureSet, FileScopeFeatures, FunctionScopeFeatures,
-        GlobalScopeFeatures,
-    },
+    features::{BlockScopeFeatures, FeatureSet, FunctionScopeFeatures, GlobalScopeFeatures},
     flirt::FlirtMatcher,
     needle::NeedleIndex,
-    rule::Rule,
+    rule::{CapaCharacteristic, Rule, RuleScope},
     scoring::{
         classifier::{SeverityClass, SeverityClassifier},
         risk::{FindingCounts, RiskAssessment},

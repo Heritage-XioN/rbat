@@ -184,7 +184,8 @@ impl NeedleIndex {
                 Self::collect_regexes(not, regex_lookup, lookup);
             }
             RuleCondition::BasicBlockScope { conditions }
-            | RuleCondition::CallScope { conditions } => {
+            | RuleCondition::CallScope { conditions }
+            | RuleCondition::InstructionScope { conditions } => {
                 conditions
                     .iter()
                     .for_each(|c| Self::collect_regexes(c, regex_lookup, lookup));
@@ -233,12 +234,9 @@ impl NeedleIndex {
             RuleCondition::Not { not } => {
                 Self::collect_patterns(not, patterns);
             }
-            RuleCondition::BasicBlockScope { conditions } => {
-                conditions
-                    .iter()
-                    .for_each(|c| Self::collect_patterns(c, patterns));
-            }
-            RuleCondition::CallScope { conditions } => {
+            RuleCondition::BasicBlockScope { conditions }
+            | RuleCondition::CallScope { conditions }
+            | RuleCondition::InstructionScope { conditions } => {
                 conditions
                     .iter()
                     .for_each(|c| Self::collect_patterns(c, patterns));
