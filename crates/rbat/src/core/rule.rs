@@ -2435,7 +2435,7 @@ mod tests {
         has_loop: bool,
         is_recursive: bool,
         calls_from: usize,
-    ) -> FunctionScopeFeatures<'buf> {
+    ) -> FunctionScopeFeatures {
         let mut patterns = FxHashSet::default();
         let mut apis = FxHashSet::default();
         for &idx in &block_indices {
@@ -2454,7 +2454,6 @@ mod tests {
             is_recursive,
             calls_from,
             name: None,
-            _marker: std::marker::PhantomData,
         }
     }
 

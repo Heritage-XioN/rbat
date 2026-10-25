@@ -82,7 +82,7 @@ pub struct FeatureSet<'buf> {
     /// File-level structural and symbol features.
     pub(crate) file_scope: FileScopeFeatures<'buf>,
     /// Reconstructed non-library functions and their scoped features.
-    pub(crate) function_scope: Vec<FunctionScopeFeatures<'buf>>,
+    pub(crate) function_scope: Vec<FunctionScopeFeatures>,
     /// All non-library basic blocks and their scoped features.
     pub(crate) basic_block_scope: Vec<BlockScopeFeatures<'buf>>,
     /// Global architecture, OS, and format features valid across all scopes.
@@ -251,7 +251,7 @@ impl<'buf> FeatureSet<'buf> {
         block_scopes: &[BlockScopeFeatures<'buf>],
         is_lib_block: impl Fn(u64) -> bool,
         library_functions: &FxHashMap<u64, String>,
-    ) -> Vec<FunctionScopeFeatures<'buf>> {
+    ) -> Vec<FunctionScopeFeatures> {
         let addr_to_block_idx: FxHashMap<u64, usize> = block_scopes
             .iter()
             .enumerate()
@@ -355,7 +355,6 @@ impl<'buf> FeatureSet<'buf> {
                 is_recursive,
                 calls_from,
                 name,
-                _marker: std::marker::PhantomData,
             });
         }
 
@@ -365,7 +364,7 @@ impl<'buf> FeatureSet<'buf> {
     /// Aggregates global file-level features across functions, imports, exports, and data sections.
     fn extract_file_scope(
         res: &'buf AnalysisResult<'buf>,
-        function_scopes: &[FunctionScopeFeatures<'buf>],
+        function_scopes: &[FunctionScopeFeatures],
         total_blocks: usize,
         raw_buffer: &'buf [u8],
     ) -> FileScopeFeatures<'buf> {
@@ -433,7 +432,7 @@ impl<'buf> FeatureSet<'buf> {
 
     /// Returns the non-library functions extracted at function scope.
     #[inline]
-    pub fn function_scope(&self) -> &[FunctionScopeFeatures<'buf>] {
+    pub fn function_scope(&self) -> &[FunctionScopeFeatures] {
         &self.function_scope
     }
 
@@ -450,7 +449,7 @@ impl<'buf> FeatureSet<'buf> {
     }
 
     /// Finds a function scope by its entry virtual address.
-    pub fn function_at(&self, address: u64) -> Option<&FunctionScopeFeatures<'buf>> {
+    pub fn function_at(&self, address: u64) -> Option<&FunctionScopeFeatures> {
         self.function_scope
             .iter()
             .find(|f| f.start_address == address)
@@ -697,7 +696,7 @@ impl<'buf> BlockScopeFeatures<'buf> {
 
 /// Localized features, control-flow metrics, and constituent basic blocks for a single function.
 #[derive(Debug, Clone)]
-pub struct FunctionScopeFeatures<'buf> {
+pub struct FunctionScopeFeatures {
     /// Function entry virtual memory address.
     pub(crate) start_address: u64,
     /// Function end virtual memory address across constituent blocks.
@@ -720,11 +719,9 @@ pub struct FunctionScopeFeatures<'buf> {
     pub(crate) calls_from: usize,
     /// FLIRT or symbol-recovered function name, if identified.
     pub(crate) name: Option<String>,
-    /// Phantom marker for lifetime `'buf`.
-    pub(crate) _marker: std::marker::PhantomData<&'buf ()>,
 }
 
-impl<'buf> FunctionScopeFeatures<'buf> {
+impl FunctionScopeFeatures {
     /// Returns the function entry virtual memory address.
     #[inline]
     pub fn start_address(&self) -> u64 {
