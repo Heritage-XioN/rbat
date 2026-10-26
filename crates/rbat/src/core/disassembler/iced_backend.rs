@@ -4,7 +4,7 @@
 //!
 //! ## Overview
 //!
-//! The [`DisassemblerImpl`] engine provides fast, memory-safe instruction decoding for:
+//! The [`IcedBackend`] engine provides fast, memory-safe instruction decoding for:
 //! - `x86` (32-bit protected mode)
 //! - `x64` (64-bit long mode)
 //!
@@ -34,29 +34,29 @@
 //!
 //! ```rust
 //! use rbat::core::{
-//!   disassembler::DisassemblerImpl,
+//!   disassembler::{IcedBackend},
+//!   traits::Disassembler,
 //!   parser::{BinaryArch, IatMap},
 //! };
 //!
-//! let disasm = DisassemblerImpl::new(BinaryArch::X64);
+//! let disasm = IcedBackend;
 //! let iat_map = IatMap::default();
 //! let bytes = [0x90, 0xc3]; // nop; ret
-//! let instructions = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+//! let instructions = disasm.disassemble(&bytes, 0x1000, BinaryArch::X64, &iat_map).unwrap();
 //!
 //! assert_eq!(instructions.len(), 2);
 //! assert_eq!(instructions[0].format_mnemonic(), "nop");
 //! assert_eq!(instructions[1].format_mnemonic(), "ret");
 //! ```
 
-use super::InstructionInfo;
 use crate::core::{
     cfg::InstructionClass,
+    disassembler::InstructionInfo,
     parser::{BinaryArch, IatMap},
+    traits::Disassembler,
     types::result::{RbatError, RbatResult},
 };
-use compact_str::CompactString;
 use iced_x86::{Code, Decoder, DecoderOptions, FlowControl, Formatter};
-use smallvec::SmallVec;
 use std::{fmt::Write, sync::Arc};
 
 /// High-performance x86/x64 disassembly engine powered by [`iced-x86`].
@@ -67,64 +67,22 @@ use std::{fmt::Write, sync::Arc};
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::disassembler::DisassemblerImpl;
-/// use rbat::core::parser::BinaryArch;
+/// use rbat::core::disassembler::IcedBackend;
 ///
-/// let disasm = DisassemblerImpl::new(BinaryArch::X64);
+/// let disasm = IcedBackend;
 /// ```
 ///
 /// [`iced-x86`]: iced_x86
-#[derive(Debug)]
-pub struct DisassemblerImpl {
-    arch: BinaryArch,
-}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IcedBackend;
 
-impl DisassemblerImpl {
-    /// Creates a new iced-x86 [`DisassemblerImpl`] configured for the specified [`BinaryArch`].
-    ///
-    /// # Parameters
-    ///
-    /// - `arch`: Target architecture (must be [`BinaryArch::X86`] or [`BinaryArch::X64`]).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use rbat::core::disassembler::DisassemblerImpl;
-    /// use rbat::core::parser::BinaryArch;
-    ///
-    /// let disasm = DisassemblerImpl::new(BinaryArch::X64);
-    /// ```
-    pub fn new(arch: BinaryArch) -> Self {
-        Self { arch }
+impl Disassembler for IcedBackend {
+    fn name(&self) -> &'static str {
+        "iced"
     }
 
-    /// Creates an [`IntelFormatter`] configured with Capstone-compatible settings:
-    /// lowercase hex prefix (`0x`), no suffix, and lowercase formatting.
-    #[must_use]
-    fn create_formatter() -> iced_x86::IntelFormatter {
-        let mut formatter = iced_x86::IntelFormatter::new();
-        formatter.options_mut().set_hex_prefix("0x");
-        formatter.options_mut().set_hex_suffix("");
-        formatter.options_mut().set_uppercase_hex(false);
-        formatter
-    }
-
-    /// Resolves direct branch targets or memory displacements against `iat_map` for imported API detection.
-    #[inline]
-    fn resolve_api(instr: &iced_x86::Instruction, iat_map: &IatMap) -> Option<Arc<str>> {
-        let target = instr.near_branch64();
-        if target != 0
-            && let Some(api) = iat_map.get(&target)
-        {
-            return Some(api.clone());
-        }
-        let disp = instr.memory_displacement64();
-        if disp != 0
-            && let Some(api) = iat_map.get(&disp)
-        {
-            return Some(api.clone());
-        }
-        None
+    fn supports_arch(&self, arch: BinaryArch) -> bool {
+        matches!(arch, BinaryArch::X86 | BinaryArch::X64)
     }
 
     /// Decodes and disassembles all x86/x64 instructions in the provided byte slice.
@@ -137,6 +95,7 @@ impl DisassemblerImpl {
     ///
     /// - `text_bytes`: Raw executable machine code bytes.
     /// - `entry_addr`: Virtual memory base address corresponding to the start of `text_bytes`.
+    /// - `arch`: Architecture classification (must be [`BinaryArch::X86`] or [`BinaryArch::X64`]).
     /// - `iat_map`: Import Address Table mapping virtual addresses to API symbol names.
     ///
     /// # Returns
@@ -146,7 +105,7 @@ impl DisassemblerImpl {
     /// # Errors
     ///
     /// Returns an [`RbatError::DisassembleInstructionError`] if:
-    /// - `self.arch` is not [`BinaryArch::X86`] or [`BinaryArch::X64`] (e.g. ARM or ARM64, which are only supported by the Capstone backend).
+    /// - `arch` is not [`BinaryArch::X86`] or [`BinaryArch::X64`] (e.g. ARM or ARM64, which are only supported by the Capstone backend).
     /// - No valid instructions could be decoded from `text_bytes`.
     ///
     /// # Allocation Behavior
@@ -160,31 +119,37 @@ impl DisassemblerImpl {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::disassembler::DisassemblerImpl;
-    /// use rbat::core::parser::{BinaryArch, IatMap};
+    /// use rbat::core::{
+    ///   disassembler::{IcedBackend},
+    ///   traits::Disassembler,
+    ///   parser::{BinaryArch, IatMap},
+    /// };
     ///
-    /// let disasm = DisassemblerImpl::new(BinaryArch::X86);
+    /// let disasm = IcedBackend;
     /// let iat = IatMap::default();
     /// let code = [0xb8, 0x01, 0x00, 0x00, 0x00]; // mov eax, 1
-    /// let insns = disasm.disassemble(&code, 0x400000, &iat).unwrap();
+    /// let insns = disasm.disassemble(&code, 0x400000, BinaryArch::X86, &iat).unwrap();
     ///
     /// assert_eq!(insns.len(), 1);
     /// assert_eq!(insns[0].format_mnemonic(), "mov");
     /// ```
-    pub fn disassemble(
+    fn disassemble(
         &self,
         text_bytes: &[u8],
         entry_addr: u64,
+        arch: BinaryArch,
         iat_map: &IatMap,
     ) -> RbatResult<Arc<[InstructionInfo]>> {
-        let bitness = match self.arch {
+        if !self.supports_arch(arch) {
+            return Err(RbatError::DisassembleInstructionError(
+                "iced-x86 only supports x86 and x64 architectures".into(),
+            ));
+        }
+
+        let bitness = match arch {
             BinaryArch::X64 => 64,
             BinaryArch::X86 => 32,
-            _ => {
-                return Err(RbatError::DisassembleInstructionError(
-                    "iced-x86 only supports x86 and x64 architectures".into(),
-                ));
-            }
+            _ => unreachable!(),
         };
 
         // Pass 1: Fast zero-allocation instruction count
@@ -227,11 +192,20 @@ impl DisassemblerImpl {
             }
 
             let api_resolution = Self::resolve_api(&instr, iat_map);
-            slice[idx].write(InstructionInfo::from_iced(
-                &instr,
-                &mut formatter,
-                &mut mnem_buf,
-                &mut op_buf,
+            let inst_class = Self::classify_flow(instr.flow_control());
+
+            mnem_buf.clear();
+            let _ = write!(mnem_buf, "{:?}", instr.mnemonic());
+            mnem_buf.make_ascii_lowercase();
+
+            op_buf.clear();
+            formatter.format_all_operands(&instr, &mut op_buf);
+
+            slice[idx].write(InstructionInfo::new(
+                instr.ip(),
+                mnem_buf.as_str(),
+                op_buf.as_str(),
+                inst_class,
                 api_resolution,
             ));
             idx += 1;
@@ -251,6 +225,37 @@ impl DisassemblerImpl {
 
         Ok(instructions)
     }
+}
+
+impl IcedBackend {
+    /// Creates an [`IntelFormatter`] configured with Capstone-compatible settings:
+    /// lowercase hex prefix (`0x`), no suffix, and lowercase formatting.
+    #[must_use]
+    pub fn create_formatter() -> iced_x86::IntelFormatter {
+        let mut formatter = iced_x86::IntelFormatter::new();
+        formatter.options_mut().set_hex_prefix("0x");
+        formatter.options_mut().set_hex_suffix("");
+        formatter.options_mut().set_uppercase_hex(false);
+        formatter
+    }
+
+    /// Resolves direct branch targets or memory displacements against `iat_map` for imported API detection.
+    #[inline]
+    fn resolve_api(instr: &iced_x86::Instruction, iat_map: &IatMap) -> Option<Arc<str>> {
+        let target = instr.near_branch64();
+        if target != 0
+            && let Some(api) = iat_map.get(&target)
+        {
+            return Some(api.clone());
+        }
+        let disp = instr.memory_displacement64();
+        if disp != 0
+            && let Some(api) = iat_map.get(&disp)
+        {
+            return Some(api.clone());
+        }
+        None
+    }
 
     /// Maps an `iced_x86::FlowControl` descriptor to an [`InstructionClass`].
     ///
@@ -264,53 +269,13 @@ impl DisassemblerImpl {
     /// # Returns
     ///
     /// The corresponding [`InstructionClass`].
-    fn classify_flow(flow: iced_x86::FlowControl) -> InstructionClass {
+    pub fn classify_flow(flow: iced_x86::FlowControl) -> InstructionClass {
         match flow {
             FlowControl::UnconditionalBranch => InstructionClass::UnconditionalJump,
             FlowControl::ConditionalBranch => InstructionClass::ConditionalJump,
             FlowControl::Call | FlowControl::IndirectCall => InstructionClass::Call,
             FlowControl::Return => InstructionClass::Return,
             _ => InstructionClass::Normal,
-        }
-    }
-}
-
-impl InstructionInfo {
-    /// High-throughput constructor reusing caller-allocated scratch buffers and formatter.
-    ///
-    /// Avoids dynamic memory allocations in tight disassembly loops while ensuring consistent
-    /// control-flow classification and string inlining.
-    ///
-    /// # Parameters
-    ///
-    /// - `instr`: Reference to the native [`iced_x86::Instruction`].
-    /// - `formatter`: Mutable reference to the configured [`iced_x86::IntelFormatter`].
-    /// - `mnem_buf`: Scratch buffer for mnemonic formatting. Cleared before use.
-    /// - `op_buf`: Scratch buffer for operand formatting. Cleared before use.
-    /// - `api_resolution`: Optional [`Arc<str>`] representing an imported API resolved from IAT.
-    fn from_iced(
-        instr: &iced_x86::Instruction,
-        formatter: &mut iced_x86::IntelFormatter,
-        mnem_buf: &mut String,
-        op_buf: &mut String,
-        api_resolution: Option<Arc<str>>,
-    ) -> Self {
-        mnem_buf.clear();
-        let _ = write!(mnem_buf, "{:?}", instr.mnemonic());
-        mnem_buf.make_ascii_lowercase();
-
-        op_buf.clear();
-        formatter.format_all_operands(instr, op_buf);
-
-        let inst_class = DisassemblerImpl::classify_flow(instr.flow_control());
-
-        InstructionInfo {
-            address: instr.ip(),
-            mnemonic: CompactString::new(mnem_buf.as_str()),
-            op_str: CompactString::new(op_buf.as_str()),
-            api_resolution,
-            matched: SmallVec::new(),
-            inst_class,
         }
     }
 }
@@ -322,11 +287,13 @@ mod tests {
 
     #[test]
     fn test_iced_disasm_factory_x64_intel() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let disasm = IcedBackend;
         // NOP, RET
         let bytes = &[0x90, 0xC3];
         let iat_map = IatMap::default();
-        let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
+        let insns = disasm
+            .disassemble(bytes, 0x1000, BinaryArch::X64, &iat_map)
+            .unwrap();
         assert_eq!(insns.len(), 2);
 
         assert_eq!(insns[0].address(), 0x1000);
@@ -338,11 +305,13 @@ mod tests {
 
     #[test]
     fn test_iced_disasm_factory_x86_intel() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X86);
+        let disasm = IcedBackend;
         // MOV EAX, 1
         let bytes = &[0xB8, 0x01, 0x00, 0x00, 0x00];
         let iat_map = IatMap::default();
-        let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
+        let insns = disasm
+            .disassemble(bytes, 0x1000, BinaryArch::X86, &iat_map)
+            .unwrap();
         assert_eq!(insns.len(), 1);
 
         assert_eq!(insns[0].address(), 0x1000);
@@ -358,11 +327,11 @@ mod tests {
 
     #[test]
     fn test_iced_disasm_invalid_bytes_error() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let disasm = IcedBackend;
         // 0xFF 0xFF is an invalid x86 instruction
         let bytes = &[0xFF, 0xFF];
         let iat_map = IatMap::default();
-        let res = disasm.disassemble(bytes, 0x1000, &iat_map);
+        let res = disasm.disassemble(bytes, 0x1000, BinaryArch::X64, &iat_map);
         match res {
             Err(RbatError::DisassembleInstructionError(msg)) => {
                 assert!(
@@ -376,10 +345,10 @@ mod tests {
 
     #[test]
     fn test_iced_disasm_empty_bytes_error() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let disasm = IcedBackend;
         let bytes = &[];
         let iat_map = IatMap::default();
-        let res = disasm.disassemble(bytes, 0x1000, &iat_map);
+        let res = disasm.disassemble(bytes, 0x1000, BinaryArch::X64, &iat_map);
         match res {
             Err(RbatError::DisassembleInstructionError(msg)) => {
                 assert!(
@@ -393,10 +362,10 @@ mod tests {
 
     #[test]
     fn test_iced_disasm_unsupported_arch_error() {
-        let disasm = DisassemblerImpl::new(BinaryArch::Arm);
+        let disasm = IcedBackend;
         let bytes = &[0x90, 0xC3];
         let iat_map = IatMap::default();
-        let res = disasm.disassemble(bytes, 0x1000, &iat_map);
+        let res = disasm.disassemble(bytes, 0x1000, BinaryArch::Arm, &iat_map);
         match res {
             Err(RbatError::DisassembleInstructionError(msg)) => {
                 assert!(
@@ -412,16 +381,23 @@ mod tests {
     fn test_from_iced_constructors() {
         let mut decoder = Decoder::with_ip(64, &[0xC3], 0x401000, DecoderOptions::NONE);
         let instr = decoder.decode();
-        // High-throughput constructor with reusable buffers
-        let mut formatter = DisassemblerImpl::create_formatter();
+        let mut formatter = IcedBackend::create_formatter();
         let mut mnem_buf = String::with_capacity(16);
         let mut op_buf = String::with_capacity(64);
         let api_sym: Arc<str> = Arc::from("dummy_api");
-        let info_buf = InstructionInfo::from_iced(
-            &instr,
-            &mut formatter,
-            &mut mnem_buf,
-            &mut op_buf,
+
+        mnem_buf.clear();
+        let _ = write!(mnem_buf, "{:?}", instr.mnemonic());
+        mnem_buf.make_ascii_lowercase();
+
+        op_buf.clear();
+        formatter.format_all_operands(&instr, &mut op_buf);
+
+        let info_buf = InstructionInfo::new(
+            instr.ip(),
+            mnem_buf.as_str(),
+            op_buf.as_str(),
+            IcedBackend::classify_flow(instr.flow_control()),
             Some(api_sym.clone()),
         );
         assert_eq!(info_buf.address(), 0x401000);

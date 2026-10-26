@@ -3,7 +3,7 @@
 use libfuzzer_sys::fuzz_target;
 use rbat::core::{
     cfg::ControlFlowGraph,
-    disassembler::DisassemblerImpl,
+    disassembler::{Disassembler, DisassemblerBackend},
     parser::{BinaryArch, IatMap},
 };
 
@@ -18,9 +18,9 @@ fuzz_target!(|data: &[u8]| {
         _ => BinaryArch::Arm64,
     };
     let code_bytes = &data[1..];
-    let dis = DisassemblerImpl::new(arch);
+    let dis = DisassemblerBackend::default();
     let iat_map = IatMap::default();
-    if let Ok(insns) = dis.disassemble(code_bytes, 0x1000, &iat_map) {
+    if let Ok(insns) = dis.disassemble(code_bytes, 0x1000, arch, &iat_map) {
         if !insns.is_empty() {
             let cfg = ControlFlowGraph::new(insns, &arch);
             for block in cfg.blocks.values() {

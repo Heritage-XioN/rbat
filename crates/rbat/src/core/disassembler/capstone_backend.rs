@@ -4,7 +4,7 @@
 //!
 //! ## Overview
 //!
-//! The [`DisassemblerImpl`] engine supports multi-architecture disassembly across:
+//! The [`CapstoneBackend`] engine supports multi-architecture disassembly across:
 //! - `x86` (32-bit Intel syntax)
 //! - `x64` (64-bit Intel syntax)
 //! - `ARM` (32-bit little-endian)
@@ -17,7 +17,7 @@
 //!
 //! In compiled binaries, code sections frequently interleave non-code elements (alignment padding,
 //! embedded jump tables, literal pools, inline data). Standard linear disassembly would halt upon
-//! encountering undecodable byte sequences. `DisassemblerImpl` enables Capstone's `skipdata`
+//! encountering undecodable byte sequences. `CapstoneBackend` enables Capstone's `skipdata`
 //! mode (`cs.set_skipdata(true)`), skipping invalid bytes and resuming disassembly at the next
 //! aligned sequence to maintain complete section coverage.
 //!
@@ -35,28 +35,30 @@
 //! ## Examples
 //!
 //! ```rust
-//! use rbat::core::disassembler::DisassemblerImpl;
-//! use rbat::core::parser::{BinaryArch, IatMap};
+//! use rbat::core::{
+//!   disassembler::{CapstoneBackend},
+//!   traits::Disassembler,
+//!   parser::{BinaryArch, IatMap},
+//! };
 //!
-//! let disasm = DisassemblerImpl::new(BinaryArch::X64);
+//! let disasm = CapstoneBackend;
 //! let iat_map = IatMap::default();
 //! let bytes = [0x90, 0xc3]; // nop; ret
-//! let instructions = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+//! let instructions = disasm.disassemble(&bytes, 0x1000, BinaryArch::X64, &iat_map).unwrap();
 //!
 //! assert_eq!(instructions.len(), 2);
 //! assert_eq!(instructions[0].format_mnemonic(), "nop");
 //! assert_eq!(instructions[1].format_mnemonic(), "ret");
 //! ```
 
-use super::InstructionInfo;
-use crate::core::types::result::{RbatError, RbatResult};
 use crate::core::{
     cfg::InstructionClass,
+    disassembler::InstructionInfo,
     parser::{BinaryArch, IatMap},
+    traits::Disassembler,
+    types::result::{RbatError, RbatResult},
 };
 use capstone::prelude::*;
-use compact_str::CompactString;
-use smallvec::SmallVec;
 use std::sync::Arc;
 
 /// Multi-architecture disassembly engine powered by Capstone.
@@ -68,39 +70,28 @@ use std::sync::Arc;
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::disassembler::DisassemblerImpl;
-/// use rbat::core::parser::BinaryArch;
+/// use rbat::core::disassembler::CapstoneBackend;
 ///
-/// let disasm = DisassemblerImpl::new(BinaryArch::X64);
+/// let disasm = CapstoneBackend;
 /// ```
-#[derive(Debug)]
-pub struct DisassemblerImpl {
-    arch: BinaryArch,
-}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CapstoneBackend;
 
-impl DisassemblerImpl {
-    /// Creates a new Capstone-backed [`DisassemblerImpl`] configured for the specified [`BinaryArch`].
-    ///
-    /// # Parameters
-    ///
-    /// - `arch`: Target binary architecture ([`BinaryArch::X86`], [`BinaryArch::X64`],
-    ///   [`BinaryArch::Arm`], or [`BinaryArch::Arm64`]).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use rbat::core::disassembler::DisassemblerImpl;
-    /// use rbat::core::parser::BinaryArch;
-    ///
-    /// let disasm = DisassemblerImpl::new(BinaryArch::X64);
-    /// ```
-    pub fn new(arch: BinaryArch) -> Self {
-        Self { arch }
+impl Disassembler for CapstoneBackend {
+    fn name(&self) -> &'static str {
+        "capstone"
+    }
+
+    fn supports_arch(&self, arch: BinaryArch) -> bool {
+        matches!(
+            arch,
+            BinaryArch::X86 | BinaryArch::X64 | BinaryArch::Arm | BinaryArch::Arm64
+        )
     }
 
     /// Disassembles all machine code instructions from the provided byte slice.
     ///
-    /// Configures the Capstone engine for `self.arch` with Intel syntax and detail tracking enabled.
+    /// Configures the Capstone engine for `arch` with Intel syntax and detail tracking enabled.
     /// Inlines mnemonic and operand strings, inspects operands against `iat_map` to resolve
     /// imported API calls, and assigns control-flow classifications.
     ///
@@ -108,6 +99,8 @@ impl DisassemblerImpl {
     ///
     /// - `text_bytes`: Raw executable machine code bytes (typically from `.text` or executable section).
     /// - `entry_addr`: Virtual memory base address corresponding to the start of `text_bytes`.
+    /// - `arch`: Target binary architecture ([`BinaryArch::X86`], [`BinaryArch::X64`],
+    ///   [`BinaryArch::Arm`], or [`BinaryArch::Arm64`]).
     /// - `iat_map`: Import Address Table mapping virtual addresses / displacements to API symbol names.
     ///
     /// # Returns
@@ -132,27 +125,31 @@ impl DisassemblerImpl {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::disassembler::DisassemblerImpl;
-    /// use rbat::core::parser::{BinaryArch, IatMap};
+    /// use rbat::core::{
+    ///   disassembler::{CapstoneBackend},
+    ///   traits::Disassembler,
+    ///   parser::{BinaryArch, IatMap},
+    /// };
     ///
-    /// let disasm = DisassemblerImpl::new(BinaryArch::X86);
+    /// let disasm = CapstoneBackend;
     /// let iat = IatMap::default();
     /// let code = [0xb8, 0x01, 0x00, 0x00, 0x00]; // mov eax, 1
-    /// let insns = disasm.disassemble(&code, 0x400000, &iat).unwrap();
+    /// let insns = disasm.disassemble(&code, 0x400000, BinaryArch::X86, &iat).unwrap();
     ///
     /// assert_eq!(insns.len(), 1);
     /// assert_eq!(insns[0].format_mnemonic(), "mov");
     /// ```
-    pub fn disassemble(
+    fn disassemble(
         &self,
         text_bytes: &[u8],
         entry_addr: u64,
+        arch: BinaryArch,
         iat_map: &IatMap,
     ) -> RbatResult<Arc<[InstructionInfo]>> {
-        let mut cs = match self.arch {
+        let mut cs = match arch {
             BinaryArch::X86 | BinaryArch::X64 => {
                 let mut x86 = Capstone::new().x86();
-                if self.arch == BinaryArch::X64 {
+                if arch == BinaryArch::X64 {
                     x86 = x86.mode(arch::x86::ArchMode::Mode64);
                 } else {
                     x86 = x86.mode(arch::x86::ArchMode::Mode32);
@@ -183,7 +180,7 @@ impl DisassemblerImpl {
 
         if count == 0 {
             return Err(RbatError::DisassembleInstructionError(
-                capstone::Error::CustomError("no instructions decoded from binary text bytes"),
+                "no instructions decoded from binary text bytes".to_string(),
             ));
         }
 
@@ -219,12 +216,14 @@ impl DisassemblerImpl {
 
             let inst_class = match &detail {
                 Some(d) => Self::instruction_class_from_detail(insn, d),
-                None => InstructionClass::classify(insn.mnemonic().unwrap_or(""), &self.arch),
+                None => InstructionClass::classify(insn.mnemonic().unwrap_or(""), &arch),
             };
-            slice[i].write(InstructionInfo::from_capstone(
-                insn,
-                api_resolution,
+            slice[i].write(InstructionInfo::new(
+                insn.address(),
+                insn.mnemonic().unwrap_or(""),
+                insn.op_str().unwrap_or(""),
                 inst_class,
+                api_resolution,
             ));
             idx += 1;
         }
@@ -243,7 +242,9 @@ impl DisassemblerImpl {
 
         Ok(instructions)
     }
+}
 
+impl CapstoneBackend {
     /// Resolves a precise [`InstructionClass`] from Capstone instruction detail groups.
     ///
     /// Inspects architecture group flags to identify calls, returns, and jumps, disambiguating
@@ -291,30 +292,6 @@ impl DisassemblerImpl {
     }
 }
 
-impl InstructionInfo {
-    /// Instantiates an [`InstructionInfo`] from a Capstone instruction and resolved metadata.
-    ///
-    /// # Parameters
-    ///
-    /// - `insn`: Reference to the native [`capstone::Insn`].
-    /// - `api_resolution`: Optional [`Arc<str>`] representing an imported API resolved from IAT.
-    /// - `inst_class`: Control flow classification resolved from Capstone detail groups.
-    fn from_capstone(
-        insn: &capstone::Insn,
-        api_resolution: Option<Arc<str>>,
-        inst_class: InstructionClass,
-    ) -> Self {
-        Self {
-            address: insn.address(),
-            mnemonic: CompactString::new(insn.mnemonic().unwrap_or("")),
-            op_str: CompactString::new(insn.op_str().unwrap_or("")),
-            api_resolution,
-            matched: SmallVec::new(),
-            inst_class,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,62 +302,66 @@ mod tests {
 
     #[test]
     fn test_disasm_factory_x64_intel() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let disasm = CapstoneBackend;
         let iat_map = IatMap::default();
-        let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();
+        let insns = disasm
+            .disassemble(&[0x90], 0x1000, BinaryArch::X64, &iat_map)
+            .unwrap();
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "nop");
     }
 
     #[test]
     fn test_disasm_factory_x86_intel() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X86);
+        let disasm = CapstoneBackend;
         let iat_map = IatMap::default();
-        let insns = disasm.disassemble(&[0x90], 0x1000, &iat_map).unwrap();
+        let insns = disasm
+            .disassemble(&[0x90], 0x1000, BinaryArch::X86, &iat_map)
+            .unwrap();
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "nop");
     }
 
     #[test]
     fn test_disasm_factory_arm() {
-        let disasm = DisassemblerImpl::new(BinaryArch::Arm);
+        let disasm = CapstoneBackend;
         // NOP in ARM (little endian): 0x00, 0xF0, 0x20, 0xE3
         let bytes = &[0x00, 0xF0, 0x20, 0xE3];
 
-        #[cfg(feature = "backend-capstone")]
-        {
-            let iat_map = IatMap::default();
-            let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
-            assert_eq!(insns.len(), 1);
-            assert_eq!(insns[0].format_mnemonic(), "nop");
-        }
+        let iat_map = IatMap::default();
+        let insns = disasm
+            .disassemble(bytes, 0x1000, BinaryArch::Arm, &iat_map)
+            .unwrap();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].format_mnemonic(), "nop");
     }
 
     #[test]
     fn test_disasm_factory_arm64() {
-        let disasm = DisassemblerImpl::new(BinaryArch::Arm64);
+        let disasm = CapstoneBackend;
         // NOP in ARM64: 0x1F, 0x20, 0x03, 0xD5
         let bytes = &[0x1F, 0x20, 0x03, 0xD5];
 
-        #[cfg(feature = "backend-capstone")]
-        {
-            let iat_map = IatMap::default();
-            let insns = disasm.disassemble(bytes, 0x1000, &iat_map).unwrap();
-            assert_eq!(insns.len(), 1);
-            assert_eq!(insns[0].format_mnemonic(), "nop");
-        }
+        let iat_map = IatMap::default();
+        let insns = disasm
+            .disassemble(bytes, 0x1000, BinaryArch::Arm64, &iat_map)
+            .unwrap();
+        assert_eq!(insns.len(), 1);
+        assert_eq!(insns[0].format_mnemonic(), "nop");
     }
 
     #[test]
     fn test_capstone_precise_control_flow_class() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let disasm = CapstoneBackend;
         let iat_map = IatMap::default();
         // call rel32 ; ret ; jmp short ; je short ; rdtsc ; aesenc xmm0,xmm0
         let bytes = [
             0xe8, 0x00, 0x00, 0x00, 0x00, 0xc3, 0xeb, 0x00, 0x74, 0x00, 0x0f, 0x31, 0x66, 0x0f,
             0x38, 0xdc, 0xc0,
         ];
-        let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+        let insns = disasm
+            .disassemble(&bytes, 0x1000, BinaryArch::X64, &iat_map)
+            .unwrap();
         let class: Vec<InstructionClass> =
             insns.iter().map(|i| i.class(&BinaryArch::X64)).collect();
 
@@ -396,11 +377,13 @@ mod tests {
 
     #[test]
     fn test_capstone_arm_unconditional_branch_class() {
-        let disasm = DisassemblerImpl::new(BinaryArch::Arm);
+        let disasm = CapstoneBackend;
         let iat_map = IatMap::default();
         // b #0 (ARM32 little endian: 0x00, 0x00, 0x00, 0xEA)
         let bytes = [0x00, 0x00, 0x00, 0xEA];
-        let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+        let insns = disasm
+            .disassemble(&bytes, 0x1000, BinaryArch::Arm, &iat_map)
+            .unwrap();
 
         assert_eq!(insns.len(), 1);
         assert_eq!(insns[0].format_mnemonic(), "b");
@@ -412,11 +395,13 @@ mod tests {
 
     #[test]
     fn test_capstone_resumes_after_invalid_bytes() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let disasm = CapstoneBackend;
         let iat_map = IatMap::default();
         // nop ; 0x06 (invalid in long mode) ; rdtsc ; aesenc xmm0, xmm0
         let bytes = [0x90, 0x06, 0x0f, 0x31, 0x66, 0x0f, 0x38, 0xdc, 0xc0];
-        let insns = disasm.disassemble(&bytes, 0x1000, &iat_map).unwrap();
+        let insns = disasm
+            .disassemble(&bytes, 0x1000, BinaryArch::X64, &iat_map)
+            .unwrap();
 
         // Without skipdata capstone truncates at the first invalid byte (only `nop`);
         // with skipdata it decodes everything, so instructions past 0x06 survive.
@@ -438,14 +423,14 @@ mod tests {
 
     #[test]
     fn test_capstone_disasm_empty_bytes_error() {
-        let disasm = DisassemblerImpl::new(BinaryArch::X64);
+        let disasm = CapstoneBackend;
         let iat_map = IatMap::default();
-        let res = disasm.disassemble(&[], 0x1000, &iat_map);
+        let res = disasm.disassemble(&[], 0x1000, BinaryArch::X64, &iat_map);
         match res {
             Err(RbatError::DisassembleInstructionError(err)) => {
-                assert_eq!(
-                    err,
-                    capstone::Error::CustomError("no instructions decoded from binary text bytes")
+                assert!(
+                    err.contains("no instructions decoded"),
+                    "unexpected error message: {err}"
                 );
             }
             other => panic!("expected DisassembleInstructionError, got {other:?}"),
@@ -460,9 +445,9 @@ mod tests {
             BinaryArch::Arm,
             BinaryArch::Arm64,
         ] {
-            let disasm = DisassemblerImpl::new(arch);
+            let disasm = CapstoneBackend;
             let iat_map = IatMap::default();
-            let res = disasm.disassemble(&[], 0x1000, &iat_map);
+            let res = disasm.disassemble(&[], 0x1000, arch, &iat_map);
             assert!(
                 matches!(res, Err(RbatError::DisassembleInstructionError(_))),
                 "arch {arch:?} should return DisassembleInstructionError when count is 0"

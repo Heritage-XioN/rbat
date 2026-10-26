@@ -70,13 +70,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use crate::core::{
-    disassembler::{DisassemblerImpl, InstructionInfo},
+    disassembler::{DisassemblerBackend, InstructionInfo},
     features::FeatureSet,
     flirt::FlirtMatcher,
     needle::NeedleIndex,
     parser::{ParsedBinaryContext, Parser},
     rule::Rule,
     scoring::{classifier::SeverityClassifier, risk::RiskAssessment},
+    traits::Disassembler,
     traits::HeuristicPlugin,
     types::{
         analysis::{AnalysisContext, AnalysisProgress, AnalysisResult, SectionRange},
@@ -130,6 +131,7 @@ pub struct Analyzer {
     needle: Arc<NeedleIndex>,
     flirt: FlirtMatcher,
     classifier: SeverityClassifier,
+    backend: DisassemblerBackend,
     error_state: Mutex<Option<RbatError>>,
     cancel_flag: AtomicBool,
 }
@@ -209,9 +211,9 @@ impl Analyzer {
             iat_map,
         } = binary_data;
 
-        let disasn = DisassemblerImpl::new(arch);
         let instructions: Arc<[InstructionInfo]> =
-            disasn.disassemble(&text_bytes, entry_addr, &iat_map)?;
+            self.backend
+                .disassemble(&text_bytes, entry_addr, arch, &iat_map)?;
         let entry_points =
             FlirtMatcher::collect_entry_points(&binary_object, &instructions, &arch, entry_addr);
 
@@ -398,6 +400,12 @@ impl Analyzer {
     pub fn classifier(&self) -> &SeverityClassifier {
         &self.classifier
     }
+
+    /// Returns a reference to the configured [`DisassemblerBackend`].
+    #[inline]
+    pub fn backend(&self) -> &DisassemblerBackend {
+        &self.backend
+    }
 }
 
 /// Configuration options for binary analysis.
@@ -409,6 +417,8 @@ struct AnalysisConfig {
     custom_rules: Option<Vec<Rule>>,
     /// Optional custom severity classifier (defaults to embedded table).
     custom_classifier: Option<SeverityClassifier>,
+    /// Configured disassembler backend.
+    backend: DisassemblerBackend,
 }
 
 /// Fluent builder for constructing and configuring an [`Analyzer`].
@@ -516,6 +526,24 @@ impl AnalyzerBuilder {
         Ok(self)
     }
 
+    /// Configures the disassembler backend engine using enum dispatch or a custom disassembler.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rbat::core::{
+    ///   analyzer::AnalyzerBuilder,
+    ///   disassembler::DisassemblerBackend,
+    /// };
+    ///
+    /// let builder = AnalyzerBuilder::new()
+    ///     .with_backend(DisassemblerBackend::default());
+    /// ```
+    pub fn with_backend(mut self, backend: DisassemblerBackend) -> Self {
+        self.config.backend = backend;
+        self
+    }
+
     /// Builds and returns the configured [`Analyzer`] instance, pre-compiling rule search indices.
     ///
     /// If no custom configuration methods (`with_rules`, `with_flirt`, `with_classifier`) were called,
@@ -555,6 +583,7 @@ impl AnalyzerBuilder {
             needle,
             flirt,
             classifier,
+            backend: self.config.backend,
             error_state: Mutex::new(None),
             cancel_flag: AtomicBool::new(false),
         }
@@ -567,6 +596,41 @@ mod tests {
     use crate::utils::test_helpers;
     use std::fs;
     use tempfile::tempdir;
+
+    #[derive(Debug)]
+    struct MockCustomDisassembler;
+
+    impl Disassembler for MockCustomDisassembler {
+        fn name(&self) -> &'static str {
+            "mock-custom"
+        }
+
+        fn disassemble(
+            &self,
+            _text_bytes: &[u8],
+            entry_addr: u64,
+            _arch: crate::core::parser::BinaryArch,
+            _iat_map: &crate::core::parser::IatMap,
+        ) -> RbatResult<Arc<[InstructionInfo]>> {
+            let insns = vec![
+                InstructionInfo::new(
+                    entry_addr,
+                    "nop",
+                    "",
+                    crate::core::cfg::InstructionClass::Normal,
+                    None,
+                ),
+                InstructionInfo::new(
+                    entry_addr + 1,
+                    "ret",
+                    "",
+                    crate::core::cfg::InstructionClass::Return,
+                    None,
+                ),
+            ];
+            Ok(insns.into())
+        }
+    }
 
     #[test]
     fn test_analyze_batch_elf() {
@@ -716,5 +780,54 @@ mod tests {
             events_received.load(Ordering::Relaxed) > 0,
             "plugins should execute and emit progress events"
         );
+    }
+
+    #[cfg(feature = "backend-capstone")]
+    #[test]
+    fn test_analyzer_with_backend_capstone() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mock_elf");
+        test_helpers::generate_elf(&path);
+        let buffer = fs::read(&path).unwrap();
+
+        let analyzer = Analyzer::builder()
+            .with_backend(DisassemblerBackend::Capstone)
+            .build();
+        assert_eq!(analyzer.backend().name(), "capstone");
+
+        let result = analyzer.batch(&buffer);
+        assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "backend-iced")]
+    #[test]
+    fn test_analyzer_with_backend_iced() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mock_elf");
+        test_helpers::generate_elf(&path);
+        let buffer = fs::read(&path).unwrap();
+
+        let analyzer = Analyzer::builder()
+            .with_backend(DisassemblerBackend::Iced)
+            .build();
+        assert_eq!(analyzer.backend().name(), "iced");
+
+        let result = analyzer.batch(&buffer);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_analyzer_with_custom_disassembler() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mock_elf");
+        test_helpers::generate_elf(&path);
+        let buffer = fs::read(&path).unwrap();
+
+        let custom_backend = DisassemblerBackend::custom(MockCustomDisassembler);
+        let analyzer = Analyzer::builder().with_backend(custom_backend).build();
+        assert_eq!(analyzer.backend().name(), "mock-custom");
+
+        let result = analyzer.batch(&buffer);
+        assert!(result.is_ok());
     }
 }

@@ -11,7 +11,7 @@ keywords = ["binary-analysis", "security", "reverse-engineering", "disassembly"]
 categories = ["parsing", "security"]
 
 [features]
-default = ["backend-capstone"]
+default = ["backend-capstone", "backend-iced"]
 backend-iced = ["dep:iced-x86"]
 backend-capstone = ["dep:capstone"]
 

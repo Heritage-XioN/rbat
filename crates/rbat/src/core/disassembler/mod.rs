@@ -6,16 +6,17 @@
 //!
 //! ## Backend Architecture
 //!
-//! `rbat` provides two pluggable, mutually exclusive disassembly backends selectable
-//! at compile time:
+//! `rbat` provides pluggable disassembly backends with runtime selection via [`DisassemblerBackend`]:
 //!
 //! - **Capstone** (`backend-capstone`, default): `x86`, `x64`, `ARM`, `ARM64`, C-library bindings via `capstone`, Broad multi-architecture binary analysis.
 //! - **Iced-x86** (`backend-iced`): `x86`, `x64` Pure-Rust decoder via `iced-x86`, High-throughput x86/x64 analysis with bounded memory.
+//! - **Custom**: User-provided disassembler engines implementing the [`Disassembler`] trait.
 //!
 //! ## Core Types
 //!
 //! - [`InstructionInfo`]: Unified, backend-agnostic representation of a disassembled machine instruction.
-//! - [`DisassemblerImpl`]: Concrete disassembler engine configured for the active CPU architecture.
+//! - [`Disassembler`]: Common trait implemented by disassembler engines.
+//! - [`DisassemblerBackend`]: Runtime backend selector using enum dispatch for zero-cost abstraction.
 //!
 //! ## Memory & Performance Characteristics
 //!
@@ -30,21 +31,18 @@
 //! ## Examples
 //!
 //! ```rust
-//! use compact_str::CompactString;
-//! use smallvec::SmallVec;
 //! use rbat::core::{
 //!   cfg::InstructionClass,
 //!   disassembler::InstructionInfo,
 //! };
 //!
-//! let insn = InstructionInfo {
-//!     address: 0x401000,
-//!     mnemonic: CompactString::new("mov"),
-//!     op_str: CompactString::new("eax, 0x1"),
-//!     api_resolution: None,
-//!     matched: SmallVec::new(),
-//!     inst_class: InstructionClass::Normal,
-//! };
+//! let insn = InstructionInfo::new(
+//!     0x401000,
+//!     "mov",
+//!     "eax, 0x1",
+//!     InstructionClass::Normal,
+//!     None,
+//! );
 //!
 //! assert_eq!(insn.address(), 0x401000);
 //! assert_eq!(insn.format_mnemonic(), "mov");
@@ -53,7 +51,9 @@
 
 use crate::core::{
     cfg::{ControlFlowGraph, InstructionClass},
-    parser::BinaryArch,
+    parser::{BinaryArch, IatMap},
+    traits::Disassembler,
+    types::result::RbatResult,
 };
 use aho_corasick::PatternID;
 use compact_str::CompactString;
@@ -61,28 +61,86 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::sync::Arc;
 
-#[cfg(all(feature = "backend-capstone", feature = "backend-iced"))]
-compile_error!(
-    "Conflicting disassembly backends: `backend-capstone` and `backend-iced` are both enabled. \
-     Pick exactly ONE — for the iced backend use \
-     `cargo build --release --no-default-features --features backend-iced`."
-);
-
 #[cfg(not(any(feature = "backend-capstone", feature = "backend-iced")))]
 compile_error!(
-    "No disassembly backend selected: enable exactly one of \
-     `backend-capstone` (default) or `backend-iced`."
+    "No disassembly backend selected: enable at least one of \
+     `backend-capstone` or `backend-iced`."
 );
 
 #[cfg(feature = "backend-capstone")]
-mod capstone_backend;
+pub mod capstone_backend;
 #[cfg(feature = "backend-capstone")]
-pub use capstone_backend::DisassemblerImpl;
+pub use capstone_backend::CapstoneBackend;
 
 #[cfg(feature = "backend-iced")]
-mod iced_backend;
+pub mod iced_backend;
 #[cfg(feature = "backend-iced")]
-pub use iced_backend::DisassemblerImpl;
+pub use iced_backend::IcedBackend;
+
+/// Runtime disassembler backend selector using enum dispatch.
+#[derive(Clone, Default, Debug)]
+pub enum DisassemblerBackend {
+    /// Multi-architecture Capstone C-library disassembler backend.
+    #[cfg(feature = "backend-capstone")]
+    #[default]
+    Capstone,
+    /// High-throughput pure-Rust iced-x86 disassembler backend.
+    #[cfg(feature = "backend-iced")]
+    Iced,
+    /// Custom user-provided disassembler implementation.
+    Custom(Arc<dyn Disassembler>),
+}
+
+impl Disassembler for DisassemblerBackend {
+    fn disassemble(
+        &self,
+        text_bytes: &[u8],
+        entry_addr: u64,
+        arch: BinaryArch,
+        iat_map: &IatMap,
+    ) -> RbatResult<Arc<[InstructionInfo]>> {
+        match self {
+            #[cfg(feature = "backend-capstone")]
+            DisassemblerBackend::Capstone => {
+                CapstoneBackend.disassemble(text_bytes, entry_addr, arch, iat_map)
+            }
+            #[cfg(feature = "backend-iced")]
+            DisassemblerBackend::Iced => {
+                IcedBackend.disassemble(text_bytes, entry_addr, arch, iat_map)
+            }
+            DisassemblerBackend::Custom(custom) => {
+                custom.disassemble(text_bytes, entry_addr, arch, iat_map)
+            }
+        }
+    }
+
+    fn supports_arch(&self, arch: BinaryArch) -> bool {
+        match self {
+            #[cfg(feature = "backend-capstone")]
+            DisassemblerBackend::Capstone => CapstoneBackend.supports_arch(arch),
+            #[cfg(feature = "backend-iced")]
+            DisassemblerBackend::Iced => IcedBackend.supports_arch(arch),
+            DisassemblerBackend::Custom(custom) => custom.supports_arch(arch),
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            #[cfg(feature = "backend-capstone")]
+            DisassemblerBackend::Capstone => "capstone",
+            #[cfg(feature = "backend-iced")]
+            DisassemblerBackend::Iced => "iced",
+            DisassemblerBackend::Custom(custom) => custom.name(),
+        }
+    }
+}
+
+impl DisassemblerBackend {
+    /// Wraps a custom disassembler implementation into a [`DisassemblerBackend::Custom`].
+    pub fn custom<D: Disassembler + 'static>(disassembler: D) -> Self {
+        Self::Custom(Arc::new(disassembler))
+    }
+}
 
 /// A disassembled machine instruction with cached text representation and analysis metadata.
 ///
@@ -128,6 +186,82 @@ pub struct InstructionInfo {
 }
 
 impl InstructionInfo {
+    /// Creates a new disassembled instruction with specified operands, control flow class,
+    /// and optional resolved IAT API symbol.
+    ///
+    /// Initializes `matched` with an empty inline [`SmallVec`] for downstream Aho-Corasick tracking.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   cfg::InstructionClass,
+    ///   disassembler::InstructionInfo,
+    /// };
+    ///
+    /// let insn = InstructionInfo::new(
+    ///     0x401000,
+    ///     "mov",
+    ///     "eax, 1",
+    ///     InstructionClass::Normal,
+    ///     None,
+    /// );
+    /// assert_eq!(insn.address(), 0x401000);
+    /// assert_eq!(insn.format_mnemonic(), "mov");
+    /// assert_eq!(insn.format_operands(), "eax, 1");
+    /// ```
+    #[inline]
+    pub fn new(
+        address: u64,
+        mnemonic: impl Into<CompactString>,
+        op_str: impl Into<CompactString>,
+        inst_class: InstructionClass,
+        api_resolution: Option<Arc<str>>,
+    ) -> Self {
+        Self {
+            address,
+            mnemonic: mnemonic.into(),
+            op_str: op_str.into(),
+            api_resolution,
+            matched: SmallVec::new(),
+            inst_class,
+        }
+    }
+
+    /// Creates a new disassembled instruction, automatically classifying its control flow
+    /// class from its mnemonic and the target architecture.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   cfg::InstructionClass,
+    ///   disassembler::InstructionInfo,
+    ///   parser::BinaryArch,
+    /// };
+    ///
+    /// let insn = InstructionInfo::with_classified_flow(
+    ///     0x401000,
+    ///     "ret",
+    ///     "",
+    ///     &BinaryArch::X64,
+    ///     None,
+    /// );
+    /// assert_eq!(insn.inst_class, InstructionClass::Return);
+    /// ```
+    #[inline]
+    pub fn with_classified_flow(
+        address: u64,
+        mnemonic: impl Into<CompactString>,
+        op_str: impl Into<CompactString>,
+        arch: &BinaryArch,
+        api_resolution: Option<Arc<str>>,
+    ) -> Self {
+        let mnemonic = mnemonic.into();
+        let inst_class = InstructionClass::classify(&mnemonic, arch);
+        Self::new(address, mnemonic, op_str, inst_class, api_resolution)
+    }
+
     /// Returns the virtual memory address of this instruction.
     ///
     /// # Examples

@@ -5,6 +5,7 @@
 pub use crate::core::{
     analyzer::Analyzer,
     cfg::{BasicBlock, ControlFlowGraph, Function},
+    disassembler::{DisassemblerBackend, InstructionInfo},
     features::{BlockScopeFeatures, FeatureSet, FunctionScopeFeatures, GlobalScopeFeatures},
     flirt::FlirtMatcher,
     needle::NeedleIndex,
@@ -13,6 +14,7 @@ pub use crate::core::{
         classifier::{SeverityClass, SeverityClassifier},
         risk::{FindingCounts, RiskAssessment},
     },
+    traits::Disassembler,
     types::{
         analysis::{AnalysisProgress, AnalysisResult, BinaryHashes, BinaryMetadata, SectionRange},
         result::{RbatError, RbatResult},

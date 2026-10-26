@@ -78,17 +78,7 @@ pub enum RbatError {
         object::Error,
     ),
 
-    /// Capstone disassembly engine failure.
-    #[cfg(feature = "backend-capstone")]
-    #[error("Disassembly error: {0}")]
-    DisassembleInstructionError(
-        #[from]
-        #[serde(serialize_with = "serialize_to_string")]
-        capstone::Error,
-    ),
-
-    /// Iced disassembly engine failure or configuration error.
-    #[cfg(feature = "backend-iced")]
+    /// Disassembly engine failure or configuration error.
     #[error("Disassembly error: {0}")]
     DisassembleInstructionError(String),
 
@@ -170,6 +160,13 @@ impl From<std::string::FromUtf8Error> for RbatError {
 impl From<std::str::Utf8Error> for RbatError {
     fn from(err: std::str::Utf8Error) -> Self {
         RbatError::DecodeUtf8Error(err.to_string())
+    }
+}
+
+#[cfg(feature = "backend-capstone")]
+impl From<capstone::Error> for RbatError {
+    fn from(err: capstone::Error) -> Self {
+        RbatError::DisassembleInstructionError(err.to_string())
     }
 }
 

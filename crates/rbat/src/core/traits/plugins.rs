@@ -16,3 +16,4 @@ pub(crate) trait HeuristicPlugin: Send + Sync {
         ctx: &AnalysisContext<'buf, 'ctx>,
     ) -> RbatResult<AnalysisProgress<'buf>>;
 }
+
