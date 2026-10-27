@@ -14,7 +14,7 @@
 //! ## Overview
 //!
 //! CFG reconstruction maps linear machine code into a directed graph structure through
-//! three coordinated analysis phases:
+//! four coordinated analysis phases:
 //!
 //! 1. **Leader Identification**: Scans disassembled instructions to identify block entry addresses
 //!    ("leaders"):
@@ -32,14 +32,20 @@
 //!      edge to the return site.
 //!    - **Sequential Instructions**: Emits a [`EdgeType::FallThrough`] edge to the next contiguous block.
 //!    - **Returns**: Terminates the block with no outgoing edges.
+//! 4. **Function Subgraph Recovery**: Discovers function entry candidates (first instruction of the text
+//!    stream, targets of inter-procedural call edges, and blocks with zero intra-procedural in-degree).
+//!    Traverses forward intra-procedural edges using BFS to partition reachable basic blocks into discrete,
+//!    non-overlapping [`Function`] execution subgraphs.
 //!
 //! ## Examples
 //!
 //! Constructing a CFG from an instruction stream and exporting it to Graphviz DOT format:
 //!
 //! ```rust
-//! use rbat::core::cfg::ControlFlowGraph;
-//! use rbat::core::parser::BinaryArch;
+//! use rbat::core::{
+//!   cfg::ControlFlowGraph,
+//!   parser::BinaryArch,
+//! };
 //! use std::sync::Arc;
 //!
 //! let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
@@ -55,6 +61,7 @@ use ahash::{HashMapExt, HashSetExt};
 use petgraph::graph::DiGraph;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -81,8 +88,10 @@ use std::sync::Arc;
 /// # Examples
 ///
 /// ```rust
-/// use rbat::core::cfg::ControlFlowGraph;
-/// use rbat::core::parser::BinaryArch;
+/// use rbat::core::{
+///   cfg::{ControlFlowGraph, Function},
+///   parser::BinaryArch,
+/// };
 /// use std::sync::Arc;
 ///
 /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
@@ -112,8 +121,10 @@ impl ControlFlowGraph {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::cfg::ControlFlowGraph;
-    /// use rbat::core::parser::BinaryArch;
+    /// use rbat::core::{
+    ///   cfg::ControlFlowGraph,
+    ///   parser::BinaryArch,
+    /// };
     /// use std::sync::Arc;
     ///
     /// let instructions = Arc::from([]);
@@ -267,8 +278,10 @@ impl ControlFlowGraph {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::cfg::ControlFlowGraph;
-    /// use rbat::core::parser::BinaryArch;
+    /// use rbat::core::{
+    ///   cfg::ControlFlowGraph,
+    ///   parser::BinaryArch,
+    /// };
     /// use std::sync::Arc;
     ///
     /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
@@ -328,8 +341,10 @@ impl ControlFlowGraph {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::cfg::ControlFlowGraph;
-    /// use rbat::core::parser::BinaryArch;
+    /// use rbat::core::{
+    ///   cfg::ControlFlowGraph,
+    ///   parser::BinaryArch,
+    /// };
     /// use std::sync::Arc;
     ///
     /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
@@ -363,8 +378,10 @@ impl ControlFlowGraph {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::cfg::{BasicBlock, ControlFlowGraph};
-    /// use rbat::core::parser::BinaryArch;
+    /// use rbat::core::{
+    ///   cfg::{BasicBlock, ControlFlowGraph},
+    ///   parser::BinaryArch,
+    /// };
     /// use std::sync::Arc;
     ///
     /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
@@ -417,6 +434,27 @@ impl ControlFlowGraph {
     }
 
     /// Returns the function that contains the basic block starting at `block_addr`, if any.
+    ///
+    /// # Parameters
+    ///
+    /// - `block_addr`: Virtual start address of the basic block.
+    ///
+    /// # Returns
+    ///
+    /// `Some(&Function)` containing the basic block, or `None` if unassigned.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   cfg::ControlFlowGraph,
+    ///   parser::BinaryArch,
+    /// };
+    /// use std::sync::Arc;
+    ///
+    /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+    /// assert!(cfg.function_for_block(0x1000).is_none());
+    /// ```
     pub fn function_for_block(&self, block_addr: u64) -> Option<&Function> {
         self.functions
             .values()
@@ -424,6 +462,32 @@ impl ControlFlowGraph {
     }
 
     /// Returns an iterator over references to all basic blocks belonging to the function.
+    ///
+    /// # Parameters
+    ///
+    /// - `func`: The [`Function`] descriptor whose basic blocks should be enumerated.
+    ///
+    /// # Returns
+    ///
+    /// An iterator over borrowed [`BasicBlock`] references in virtual address order.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   cfg::{ControlFlowGraph, Function},
+    ///   parser::BinaryArch,
+    /// };
+    /// use std::sync::Arc;
+    ///
+    /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+    /// let func = Function {
+    ///     start_address: 0x1000,
+    ///     end_address: 0x1020,
+    ///     basic_blocks: vec![],
+    /// };
+    /// assert_eq!(cfg.as_function_blocks(&func).count(), 0);
+    /// ```
     pub fn as_function_blocks<'a>(
         &'a self,
         func: &Function,
@@ -434,6 +498,34 @@ impl ControlFlowGraph {
     }
 
     /// Returns an iterator over references to all instructions belonging to the function.
+    ///
+    /// Iterates across all basic blocks in `func`, yielding instructions in linear order within each block.
+    ///
+    /// # Parameters
+    ///
+    /// - `func`: The [`Function`] descriptor whose constituent instructions should be enumerated.
+    ///
+    /// # Returns
+    ///
+    /// An iterator over borrowed [`InstructionInfo`] references across all blocks in `func`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   cfg::{ControlFlowGraph, Function},
+    ///   parser::BinaryArch,
+    /// };
+    /// use std::sync::Arc;
+    ///
+    /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+    /// let func = Function {
+    ///     start_address: 0x1000,
+    ///     end_address: 0x1020,
+    ///     basic_blocks: vec![],
+    /// };
+    /// assert_eq!(cfg.as_function_instr(&func).count(), 0);
+    /// ```
     pub fn as_function_instr<'a>(
         &'a self,
         func: &Function,
@@ -452,74 +544,81 @@ impl ControlFlowGraph {
             return FxHashMap::default();
         }
 
-        let mut entry_candidates = FxHashSet::default();
+        // Collect and sort all unique basic block start addresses to form a dense index 0..n
+        let mut block_addrs: Vec<u64> = blocks.keys().copied().collect();
+        block_addrs.sort_unstable();
+        let n = block_addrs.len();
 
-        // First instruction of the disassembled stream
+        let mut is_entry_candidate = vec![false; n];
+
+        // 1. First instruction of the disassembled stream
         if let Some(first_insn) = instructions.first()
-            && blocks.contains_key(&first_insn.address())
+            && let Ok(idx) = block_addrs.binary_search(&first_insn.address())
         {
-            entry_candidates.insert(first_insn.address());
+            is_entry_candidate[idx] = true;
         }
 
-        // All target blocks of inter-procedural Call edges
+        // 2. All target blocks of inter-procedural Call edges
         for (_, dst, edge_type) in edges {
-            if *edge_type == EdgeType::Call && blocks.contains_key(dst) {
-                entry_candidates.insert(*dst);
+            if *edge_type == EdgeType::Call
+                && let Ok(idx) = block_addrs.binary_search(dst)
+            {
+                is_entry_candidate[idx] = true;
             }
         }
 
-        // Calculate intra-procedural in-degree and forward adjacency
-        let mut intra_in_degree: FxHashMap<u64, usize> = FxHashMap::default();
-        for &addr in blocks.keys() {
-            intra_in_degree.insert(addr, 0);
-        }
+        // 3. Calculate intra-procedural in-degree and forward adjacency
+        let mut intra_in_degree = vec![0u16; n];
+        let mut intra_succs: Vec<SmallVec<[u32; 2]>> = vec![SmallVec::new(); n];
 
-        let mut intra_succs: FxHashMap<u64, Vec<u64>> = FxHashMap::default();
         for &(src, dst, edge_type) in edges {
-            if edge_type != EdgeType::Call && blocks.contains_key(&dst) {
-                *intra_in_degree.entry(dst).or_default() += 1;
-                intra_succs.entry(src).or_default().push(dst);
+            if edge_type != EdgeType::Call
+                && let (Ok(src_idx), Ok(dst_idx)) = (
+                    block_addrs.binary_search(&src),
+                    block_addrs.binary_search(&dst),
+                )
+            {
+                intra_in_degree[dst_idx] = intra_in_degree[dst_idx].saturating_add(1);
+                intra_succs[src_idx].push(dst_idx as u32);
             }
         }
 
         // Any block with zero intra-procedural in-degree is an entry candidate
-        for (&addr, &deg) in &intra_in_degree {
-            if deg == 0 {
-                entry_candidates.insert(addr);
+        for i in 0..n {
+            if intra_in_degree[i] == 0 {
+                is_entry_candidate[i] = true;
             }
         }
 
         let mut functions = FxHashMap::default();
-        let mut assigned_blocks: FxHashSet<u64> = FxHashSet::default();
+        let mut assigned = vec![false; n];
+        let mut queue = VecDeque::new();
 
-        let mut sorted_entries: Vec<u64> = entry_candidates.into_iter().collect();
-        sorted_entries.sort_unstable();
-
-        // Partition blocks into functions from identified entry points
-        for &entry in &sorted_entries {
-            if assigned_blocks.contains(&entry) {
+        // 4. Partition blocks into functions from identified entry points
+        // Entry candidates are iterated in 0..n ascending order (already matching sorted virtual addresses)
+        for entry_idx in 0..n {
+            if !is_entry_candidate[entry_idx] || assigned[entry_idx] {
                 continue;
             }
 
+            let entry_addr = block_addrs[entry_idx];
             let mut func_blocks = Vec::new();
-            let mut queue = VecDeque::new();
-            queue.push_back(entry);
-            assigned_blocks.insert(entry);
+            queue.push_back(entry_idx);
+            assigned[entry_idx] = true;
 
-            while let Some(current) = queue.pop_front() {
-                func_blocks.push(current);
+            while let Some(current_idx) = queue.pop_front() {
+                func_blocks.push(block_addrs[current_idx]);
 
-                if let Some(succs) = intra_succs.get(&current) {
-                    for &next in succs {
-                        // Do not cross into another known function entry point
-                        if next != entry && sorted_entries.binary_search(&next).is_ok() {
-                            continue;
-                        }
+                for &next_u32 in &intra_succs[current_idx] {
+                    let next_idx = next_u32 as usize;
+                    // Do not cross into another known function entry point
+                    if next_idx != entry_idx && is_entry_candidate[next_idx] {
+                        continue;
+                    }
 
-                        if !assigned_blocks.contains(&next) {
-                            assigned_blocks.insert(next);
-                            queue.push_back(next);
-                        }
+                    if !assigned[next_idx] {
+                        assigned[next_idx] = true;
+                        queue.push_back(next_idx);
                     }
                 }
             }
@@ -530,41 +629,37 @@ impl ControlFlowGraph {
                 .filter_map(|addr| blocks.get(addr))
                 .map(|b| b.end_address)
                 .max()
-                .unwrap_or(entry);
+                .unwrap_or(entry_addr);
 
             functions.insert(
-                entry,
+                entry_addr,
                 Function {
-                    start_address: entry,
+                    start_address: entry_addr,
                     end_address,
                     basic_blocks: func_blocks,
                 },
             );
         }
 
-        // Catch any orphan or disconnected basic blocks
-        let mut all_block_addrs: Vec<u64> = blocks.keys().copied().collect();
-        all_block_addrs.sort_unstable();
-
-        for orphan_entry in all_block_addrs {
-            if assigned_blocks.contains(&orphan_entry) {
+        // 5. Catch any orphan or disconnected basic blocks
+        for orphan_idx in 0..n {
+            if assigned[orphan_idx] {
                 continue;
             }
 
+            let orphan_entry = block_addrs[orphan_idx];
             let mut func_blocks = Vec::new();
-            let mut queue = VecDeque::new();
-            queue.push_back(orphan_entry);
-            assigned_blocks.insert(orphan_entry);
+            queue.push_back(orphan_idx);
+            assigned[orphan_idx] = true;
 
-            while let Some(current) = queue.pop_front() {
-                func_blocks.push(current);
+            while let Some(current_idx) = queue.pop_front() {
+                func_blocks.push(block_addrs[current_idx]);
 
-                if let Some(succs) = intra_succs.get(&current) {
-                    for &next in succs {
-                        if !assigned_blocks.contains(&next) {
-                            assigned_blocks.insert(next);
-                            queue.push_back(next);
-                        }
+                for &next_u32 in &intra_succs[current_idx] {
+                    let next_idx = next_u32 as usize;
+                    if !assigned[next_idx] {
+                        assigned[next_idx] = true;
+                        queue.push_back(next_idx);
                     }
                 }
             }
@@ -699,13 +794,56 @@ pub struct Function {
 }
 
 impl Function {
-    /// Number of basic blocks in this function.
+    /// Returns the number of basic blocks belonging to this function.
+    ///
+    /// # Returns
+    ///
+    /// Total count of constituent basic blocks.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::Function;
+    ///
+    /// let func = Function {
+    ///     start_address: 0x1000,
+    ///     end_address: 0x1020,
+    ///     basic_blocks: vec![0x1000, 0x1010],
+    /// };
+    /// assert_eq!(func.block_count(), 2);
+    /// ```
     #[inline]
     pub fn block_count(&self) -> usize {
         self.basic_blocks.len()
     }
 
-    /// Total number of instructions across all basic blocks in this function.
+    /// Computes the total number of instructions across all basic blocks in this function.
+    ///
+    /// # Parameters
+    ///
+    /// - `cfg`: The parent [`ControlFlowGraph`] providing basic block bounds and instruction stores.
+    ///
+    /// # Returns
+    ///
+    /// Total count of machine instructions across all constituent basic blocks.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   cfg::{ControlFlowGraph, Function},
+    ///   parser::BinaryArch,
+    /// };
+    /// use std::sync::Arc;
+    ///
+    /// let cfg = ControlFlowGraph::new(Arc::from([]), &BinaryArch::X64);
+    /// let func = Function {
+    ///     start_address: 0x1000,
+    ///     end_address: 0x1020,
+    ///     basic_blocks: vec![],
+    /// };
+    /// assert_eq!(func.instr_count(&cfg), 0);
+    /// ```
     pub fn instr_count(&self, cfg: &ControlFlowGraph) -> usize {
         self.basic_blocks
             .iter()
@@ -715,6 +853,29 @@ impl Function {
     }
 
     /// Checks if a virtual address falls within any of this function's basic blocks.
+    ///
+    /// # Parameters
+    ///
+    /// - `addr`: Virtual memory address to query.
+    /// - `blocks`: Map of all basic blocks indexed by start virtual address.
+    ///
+    /// # Returns
+    ///
+    /// `true` if `addr` falls within `[start_address..=end_address]` of any basic block in this function.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::cfg::Function;
+    /// use rustc_hash::FxHashMap;
+    ///
+    /// let func = Function {
+    ///     start_address: 0x1000,
+    ///     end_address: 0x1020,
+    ///     basic_blocks: vec![],
+    /// };
+    /// assert!(!func.contains_address(0x1005, &FxHashMap::default()));
+    /// ```
     pub fn contains_address(&self, addr: u64, blocks: &FxHashMap<u64, BasicBlock>) -> bool {
         self.basic_blocks.iter().any(|b_addr| {
             if let Some(block) = blocks.get(b_addr) {

@@ -1,16 +1,21 @@
 //! # Structural Feature Extraction
 //!
 //! Flattens and normalizes raw static binary analysis findings into structured,
-//! high-speed lookup sets for capa behavioral rule evaluation.
+//! high-speed lookup sets partitioned by Capa rule scopes.
 //!
 //! ## Core Types
 //!
-//! - [`FeatureSet`]: Normalized container of APIs, strings, section entropies, and CFG metrics.
+//! - [`FeatureSet`]: Master container of features partitioned across all scope levels.
+//! - [`FileScopeFeatures`]: Whole-binary structural metrics, dynamic imports, exports, and YARA strings.
+//! - [`FunctionScopeFeatures`]: Per-function control-flow topology, local cycles, complexity, and localized patterns.
+//! - [`BlockScopeFeatures`]: Per-basic-block instruction slices, tight loops, and localized pattern hits.
+//! - [`GlobalScopeFeatures`]: Universal architecture, OS, and binary format metadata.
 //!
 //! ## Overview
 //!
 //! Feature extraction bridges raw disassembler, parser, and plugin outputs to the declarative
-//! rule evaluation engine (`Rule::evaluate`). Extraction proceeds through several coordinated stages:
+//! rule evaluation engine ([`Rule::evaluate`]).
+//! Extraction proceeds through five coordinated stages:
 //!
 //! 1. **FLIRT Library Range Filtering**: Discovers compiler runtime and standard library functions
 //!    (e.g., libc, MSVCRT) and traces their address ranges. Basic blocks falling within library
@@ -18,24 +23,29 @@
 //!    standard library code.
 //! 2. **Interval Compaction**: Sorts and compacts identified library ranges with [`FeatureSet::merge_ranges`]
 //!    to enable $O(\log K)$ partition-point binary searches per basic block.
-//! 3. **API & String Normalization**: Flattens imported and exported APIs into Aho-Corasick [`PatternID`]
-//!    sets, and extracts lowercased string literals discovered across binary data sections.
-//! 4. **Graph Topometrics & Complexity**: Constructs an adjacency graph over non-library basic blocks,
-//!    deduplicates parallel edges, detects execution loops using an iterative 3-state DFS
-//!    ([`FeatureSet::has_cycle`]), and calculates McCabe cyclomatic complexity per weakly connected
-//!    component ([`FeatureSet::max_cyclomatic_complexity`]).
+//! 3. **Localized Basic Block Extraction**: Constructs [`BlockScopeFeatures`] for each non-library block,
+//!    recording tight loops (self-referencing branch edges) and instruction slices.
+//! 4. **Function Scope Reconstruction**: Derives [`FunctionScopeFeatures`] over intra-procedural subgraphs,
+//!    detecting local execution cycles ([`FeatureSet::has_cycle`]), calculating McCabe cyclomatic complexity
+//!    ([`FeatureSet::max_cyclomatic_complexity`]), and identifying direct recursion.
+//! 5. **File & Global Scope Aggregation**: Flattens global APIs, deduplicates string literals,
+//!    indexes section Shannon entropies, and normalizes target architecture and OS identifiers.
 //!
 //! ## Examples
 //!
 //! Extracting a `FeatureSet` from aggregated analysis results:
 //!
 //! ```rust
-//! use rbat::core::features::FeatureSet;
-//! use rbat::core::types::analysis::AnalysisResult;
+//! use rbat::core::{
+//!   features::FeatureSet,
+//!   types::analysis::AnalysisResult,
+//! };
 //!
 //! let result = AnalysisResult::default();
 //! let _features = FeatureSet::new(&result, &[]);
 //! ```
+//!
+//! [`Rule::evaluate`]: crate::core::rule::Rule::evaluate
 
 use crate::core::{
     cfg::{BasicBlock, ControlFlowGraph, EdgeType},
@@ -113,8 +123,10 @@ impl<'buf> FeatureSet<'buf> {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::features::FeatureSet;
-    /// use rbat::core::types::analysis::AnalysisResult;
+    /// use rbat::core::{
+    ///   features::FeatureSet,
+    ///   types::analysis::AnalysisResult,
+    /// };
     ///
     /// let res = AnalysisResult::default();
     /// let features = FeatureSet::new(&res, &[]);
@@ -134,11 +146,12 @@ impl<'buf> FeatureSet<'buf> {
 
         let (basic_block_scope, function_scope, cfg_instructions) = match res.cfg.as_ref() {
             Some(cfg) => {
-                let blocks = Self::extract_block_scopes(cfg, is_lib_block, &initial_apis);
+                let blocks = Self::extract_block_scopes(cfg, is_lib_block);
                 let functions = Self::extract_function_scopes(
                     cfg,
                     &blocks,
                     is_lib_block,
+                    &initial_apis,
                     &res.library_functions,
                 );
                 (blocks, functions, Arc::clone(&cfg.instructions))
@@ -160,10 +173,7 @@ impl<'buf> FeatureSet<'buf> {
     }
 
     /// Discovers and merges overlapping FLIRT runtime library address ranges.
-    pub(crate) fn extract_library_ranges(
-        res: &AnalysisResult<'_>,
-        arch_name: &str,
-    ) -> Vec<(u64, u64)> {
+    fn extract_library_ranges(res: &AnalysisResult<'_>, arch_name: &str) -> Vec<(u64, u64)> {
         match res.cfg.as_ref() {
             Some(cfg) if !res.library_functions.is_empty() => {
                 let all_entry_points: FxHashSet<u64> =
@@ -196,10 +206,9 @@ impl<'buf> FeatureSet<'buf> {
     }
 
     /// Extracts localized basic block scopes, instruction slices, and tight-loop indicators.
-    pub(crate) fn extract_block_scopes(
+    fn extract_block_scopes(
         cfg: &'buf ControlFlowGraph,
         is_lib_block: impl Fn(u64) -> bool,
-        api_ids: &FxHashSet<PatternID>,
     ) -> Vec<BlockScopeFeatures<'buf>> {
         let tight_loops: FxHashSet<u64> = cfg
             .edges
@@ -218,26 +227,12 @@ impl<'buf> FeatureSet<'buf> {
         let mut block_scopes = Vec::with_capacity(sorted_blocks.len());
         for block in sorted_blocks {
             let instructions = cfg.as_block_instr(block);
-            let mut patterns = FxHashSet::default();
-            let mut apis = FxHashSet::default();
-
-            for insn in instructions {
-                for &pat in &insn.matched {
-                    patterns.insert(pat);
-                    if api_ids.contains(&pat) {
-                        apis.insert(pat);
-                    }
-                }
-            }
-
             let is_tight_loop = tight_loops.contains(&block.start_address);
 
             block_scopes.push(BlockScopeFeatures {
                 start_address: block.start_address,
                 end_address: block.end_address,
                 instructions,
-                patterns,
-                apis,
                 is_tight_loop,
             });
         }
@@ -250,6 +245,7 @@ impl<'buf> FeatureSet<'buf> {
         cfg: &'buf ControlFlowGraph,
         block_scopes: &[BlockScopeFeatures<'buf>],
         is_lib_block: impl Fn(u64) -> bool,
+        api_ids: &FxHashSet<PatternID>,
         library_functions: &FxHashMap<u64, String>,
     ) -> Vec<FunctionScopeFeatures> {
         let addr_to_block_idx: FxHashMap<u64, usize> = block_scopes
@@ -282,8 +278,14 @@ impl<'buf> FeatureSet<'buf> {
             let mut patterns = FxHashSet::default();
             let mut apis = FxHashSet::default();
             for &idx in &block_indices {
-                patterns.extend(&block_scopes[idx].patterns);
-                apis.extend(&block_scopes[idx].apis);
+                for insn in block_scopes[idx].instructions {
+                    for &pat in &insn.matched {
+                        patterns.insert(pat);
+                        if api_ids.contains(&pat) {
+                            apis.insert(pat);
+                        }
+                    }
+                }
             }
 
             // Local intra-procedural adjacency list for McCabe complexity & loop detection
@@ -376,11 +378,18 @@ impl<'buf> FeatureSet<'buf> {
             apis.extend(&func.apis);
         }
 
-        let string_capacity: usize = res.string_values.values().map(|v| v.len()).sum();
-        let mut strings = AHashSet::with_capacity(string_capacity);
+        let mut seen_raw: AHashSet<&str> = AHashSet::new();
+        let mut strings = AHashSet::new();
         for instances in res.string_values.values() {
             for inst in instances {
-                strings.insert(inst.data.to_lowercase());
+                let s: &str = inst.data.as_ref();
+                if seen_raw.insert(s) {
+                    if s.bytes().any(|b| b.is_ascii_uppercase()) {
+                        strings.insert(s.to_ascii_lowercase());
+                    } else {
+                        strings.insert(s.to_string());
+                    }
+                }
             }
         }
 
@@ -425,30 +434,54 @@ impl<'buf> FeatureSet<'buf> {
     }
 
     /// Returns the file-level scope features.
+    ///
+    /// # Returns
+    ///
+    /// Reference to the binary-wide [`FileScopeFeatures`] container.
     #[inline]
     pub fn file_scope(&self) -> &FileScopeFeatures<'buf> {
         &self.file_scope
     }
 
     /// Returns the non-library functions extracted at function scope.
+    ///
+    /// # Returns
+    ///
+    /// Slice of [`FunctionScopeFeatures`] descriptors for non-library functions.
     #[inline]
     pub fn function_scope(&self) -> &[FunctionScopeFeatures] {
         &self.function_scope
     }
 
     /// Returns the non-library basic blocks extracted at basic block scope.
+    ///
+    /// # Returns
+    ///
+    /// Slice of [`BlockScopeFeatures`] descriptors for non-library basic blocks.
     #[inline]
     pub fn basic_block_scope(&self) -> &[BlockScopeFeatures<'buf>] {
         &self.basic_block_scope
     }
 
     /// Returns the global environment and format features.
+    ///
+    /// # Returns
+    ///
+    /// Reference to universal [`GlobalScopeFeatures`] containing architecture, OS, and format strings.
     #[inline]
     pub fn global_scope(&self) -> &GlobalScopeFeatures {
         &self.global_scope
     }
 
     /// Finds a function scope by its entry virtual address.
+    ///
+    /// # Parameters
+    ///
+    /// - `address`: Function entry virtual memory address.
+    ///
+    /// # Returns
+    ///
+    /// `Some(&FunctionScopeFeatures)` if a non-library function begins at `address`, or `None`.
     pub fn function_at(&self, address: u64) -> Option<&FunctionScopeFeatures> {
         self.function_scope
             .iter()
@@ -456,6 +489,14 @@ impl<'buf> FeatureSet<'buf> {
     }
 
     /// Finds a basic block scope by its start virtual address.
+    ///
+    /// # Parameters
+    ///
+    /// - `address`: Basic block start virtual memory address.
+    ///
+    /// # Returns
+    ///
+    /// `Some(&BlockScopeFeatures)` if a non-library block begins at `address`, or `None`.
     pub fn block_at(&self, address: u64) -> Option<&BlockScopeFeatures<'buf>> {
         self.basic_block_scope
             .iter()
@@ -463,6 +504,10 @@ impl<'buf> FeatureSet<'buf> {
     }
 
     /// Returns a shared reference to the backing instruction slice.
+    ///
+    /// # Returns
+    ///
+    /// Slice of all disassembled [`InstructionInfo`] instructions in linear order.
     #[inline]
     pub fn instructions(&self) -> &[InstructionInfo] {
         &self.cfg_instructions
@@ -639,7 +684,7 @@ impl GlobalScopeFeatures {
     }
 }
 
-/// Localized features, pattern matches, and instructions for a single basic block.
+/// Localized features, control-flow metrics, and constituent instructions for a single basic block.
 #[derive(Debug, Clone)]
 pub struct BlockScopeFeatures<'buf> {
     /// Virtual start address of the basic block.
@@ -648,10 +693,6 @@ pub struct BlockScopeFeatures<'buf> {
     pub(crate) end_address: u64,
     /// Borrowed slice of instructions contained in this block.
     pub(crate) instructions: &'buf [InstructionInfo],
-    /// All pattern IDs matched across this block's instructions (APIs, numbers, offsets, mnemonics, strings).
-    pub(crate) patterns: FxHashSet<PatternID>,
-    /// Resolved API pattern IDs invoked or referenced within this block.
-    pub(crate) apis: FxHashSet<PatternID>,
     /// Whether this basic block branches directly to its own start address (tight loop).
     pub(crate) is_tight_loop: bool,
 }
@@ -675,16 +716,32 @@ impl<'buf> BlockScopeFeatures<'buf> {
         self.instructions
     }
 
-    /// Returns all pattern IDs matched across this block's instructions.
+    /// Checks whether any instruction in this basic block matches the given pattern ID.
+    ///
+    /// # Parameters
+    ///
+    /// - `pat`: Compiled Aho-Corasick [`PatternID`] to test against instruction matches.
+    ///
+    /// # Returns
+    ///
+    /// `true` if at least one instruction in this basic block matched `pat`, `false` otherwise.
     #[inline]
-    pub fn patterns(&self) -> &FxHashSet<PatternID> {
-        &self.patterns
+    pub fn has_pattern(&self, pat: &PatternID) -> bool {
+        self.instructions
+            .iter()
+            .any(|insn| insn.matched.contains(pat))
     }
 
-    /// Returns resolved API pattern IDs invoked or referenced within this block.
+    /// Returns an iterator over all pattern IDs matched across this block's instructions.
+    ///
+    /// # Returns
+    ///
+    /// An iterator yielding each [`PatternID`] recorded in `InstructionInfo::matched` across the block.
     #[inline]
-    pub fn apis(&self) -> &FxHashSet<PatternID> {
-        &self.apis
+    pub fn patterns(&self) -> impl Iterator<Item = PatternID> + '_ {
+        self.instructions
+            .iter()
+            .flat_map(|insn| insn.matched.iter().copied())
     }
 
     /// Returns whether this basic block branches directly to its own start address (tight loop).
@@ -1146,10 +1203,8 @@ mod tests {
 
         // Basic block contains matched pattern IDs
         let b = fs.block_at(0x1000).expect("Block at 0x1000 must exist");
-        assert!(b.patterns.contains(&PatternID::must(42)));
-        assert!(b.patterns.contains(&PatternID::must(99)));
-        assert!(b.apis.contains(&PatternID::must(42)));
-        assert!(!b.apis.contains(&PatternID::must(99)));
+        assert!(b.has_pattern(&PatternID::must(42)));
+        assert!(b.has_pattern(&PatternID::must(99)));
 
         // Function scope inherits pattern IDs from constituent blocks
         let f = fs

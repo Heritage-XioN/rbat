@@ -9,6 +9,7 @@
 //! - [`Rule`]: Top-level security rule entity encapsulating metadata and evaluation conditions
 //! - [`RuleInner`]: Inner structure containing rule metadata ([`RuleMeta`]) and condition trees ([`RuleCondition`])
 //! - [`RuleMeta`]: Rule metadata including namespace, authors, MITRE ATT&CK techniques, and severity
+//! - [`RuleScope`]: Canonical static evaluation tier assigned to a rule (`file`, `function`, `basic block`, `instruction`)
 //! - [`RuleCondition`]: Untagged AST node representing boolean logic, feature assertions, and localized scopes
 //! - [`CapaCharacteristic`]: Strongly-typed enumeration of Mandiant Capa and binary heuristics characteristics
 //! - [`StringOrVec`]: Deserialization helper accepting either a scalar string or a string vector
@@ -22,6 +23,12 @@
 //!   JSON, and compiled MessagePack representations. Supports standard logic operators
 //!   (`and`, `or`, `not`), feature checks (`api`, `string`, `mnemonic`, `number`, `offset`),
 //!   and contextual scopes (`basic block`, `call`).
+//! - **Hierarchical Scope-Based Evaluation**: Rules declare an evaluation tier via `meta.scopes.static` ([`RuleScope`]).
+//!   The evaluation engine evaluates conditions at the specified granular level:
+//!   - *File Scope*: Evaluated globally against whole-binary metrics, string sets, and section entropies.
+//!   - *Function Scope*: Iterates across non-library functions; matches if $\ge 1$ function satisfies all conditions.
+//!   - *Basic Block Scope*: Iterates across non-library basic blocks; matches if $\ge 1$ block satisfies all conditions.
+//!   - *Instruction Scope*: Evaluated across individual machine instructions.
 //! - **Embedded Rule Assets**: Packages a pre-compiled MessagePack bundle providing instant
 //!   offline capability detection with zero runtime filesystem dependency.
 //! - **Two-Tier Partitioned Evaluation**: To optimize evaluation throughput and correctly
@@ -1045,14 +1052,19 @@ impl RuleCondition {
                         features.file_scope.raw_buffer,
                         &features.file_scope.strings,
                     )
-                } else if let Some(id) = needle.lookup.get(string) {
-                    needle.present[id.as_usize()].load(Ordering::Relaxed)
                 } else {
-                    features
-                        .file_scope
-                        .strings
-                        .iter()
-                        .any(|s| s.contains(string))
+                    let in_instructions = needle
+                        .lookup
+                        .get(string)
+                        .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed));
+
+                    in_instructions
+                        || features.file_scope.strings.contains(string)
+                        || features
+                            .file_scope
+                            .strings
+                            .iter()
+                            .any(|s| s.contains(string))
                 }
             }
             Self::Mnemonic { mnemonic } => {
@@ -1775,12 +1787,7 @@ impl RuleCondition {
             }
             Self::Api { api } | Self::Import { import: api } | Self::Export { export: api } => {
                 if let Some(id) = needle.lookup.get(api) {
-                    block.apis.contains(id)
-                        || block.patterns.contains(id)
-                        || block
-                            .instructions
-                            .iter()
-                            .any(|insn| insn.matched.contains(id))
+                    block.has_pattern(id)
                 } else {
                     false
                 }
@@ -1792,22 +1799,14 @@ impl RuleCondition {
                         .iter()
                         .any(|insn| needle.matches_regex_instruction(string, insn))
                 } else if let Some(id) = needle.lookup.get(string) {
-                    block.patterns.contains(id)
-                        || block
-                            .instructions
-                            .iter()
-                            .any(|insn| insn.matched.contains(id))
+                    block.has_pattern(id)
                 } else {
                     false
                 }
             }
             Self::Mnemonic { mnemonic } => {
                 if let Some(id) = needle.lookup.get(mnemonic) {
-                    block.patterns.contains(id)
-                        || block
-                            .instructions
-                            .iter()
-                            .any(|insn| insn.matched.contains(id))
+                    block.has_pattern(id)
                 } else {
                     false
                 }
@@ -1848,11 +1847,7 @@ impl RuleCondition {
             },
             Self::Number { number } | Self::Offset { offset: number } => {
                 if let Some(id) = needle.lookup.get(number) {
-                    block.patterns.contains(id)
-                        || block
-                            .instructions
-                            .iter()
-                            .any(|insn| insn.matched.contains(id))
+                    block.has_pattern(id)
                 } else {
                     false
                 }
@@ -2081,15 +2076,19 @@ impl RuleCondition {
             Self::String { string } => {
                 if Self::parse_capa_regex(string).is_some() {
                     needle.is_regex_present(string)
-                } else if let Some(id) = needle.lookup.get(string) {
-                    needle.present[id.as_usize()].load(Ordering::Relaxed)
-                        || features.file_scope.strings.contains(string)
                 } else {
-                    features
-                        .file_scope
-                        .strings
-                        .iter()
-                        .any(|s| s.contains(string))
+                    let in_instructions = needle
+                        .lookup
+                        .get(string)
+                        .is_some_and(|id| needle.present[id.as_usize()].load(Ordering::Relaxed));
+
+                    in_instructions
+                        || features.file_scope.strings.contains(string)
+                        || features
+                            .file_scope
+                            .strings
+                            .iter()
+                            .any(|s| s.contains(string))
                 }
             }
             Self::Mnemonic { mnemonic } => needle
@@ -2262,6 +2261,30 @@ impl Serialize for CapaCharacteristic {
 }
 
 /// Canonical static evaluation scope assigned to a security rule.
+///
+/// In Mandiant Capa, rules declare their operational scope via `meta.scopes.static`
+/// (or default to [`RuleScope::File`] when unspecified). Scopes determine the granular level
+/// of abstraction at which rule condition trees are matched against binary features:
+///
+/// - [`RuleScope::File`]: Evaluated once across the whole binary. Conditions match against
+///   global APIs, section Shannon entropies, extracted YARA strings, and aggregate structural metrics.
+/// - [`RuleScope::Function`]: Evaluated independently per non-library function. The rule matches
+///   if at least one function in the binary satisfies all top-level conditions within its local scope
+///   (e.g., local cyclomatic complexity, tight loops, internal call sites, or APIs invoked inside the function).
+/// - [`RuleScope::BasicBlock`]: Evaluated independently per basic block. Matches if at least one basic
+///   block satisfies all conditions (e.g., specific instruction sequences, mnemonics, operands, or tight loops).
+/// - [`RuleScope::Instruction`]: Evaluated across individual machine instructions. Matches if at least one
+///   instruction satisfies the condition.
+/// - [`RuleScope::Unsupported`]: Designated for dynamic-only or unsupported rule scopes. Evaluates to `false`.
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::rule::RuleScope;
+///
+/// let default_scope = RuleScope::default();
+/// assert_eq!(default_scope, RuleScope::File);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Hash)]
 pub enum RuleScope {
     /// File scope: evaluated over whole-binary structures and aggregate symbols (default).
@@ -2409,20 +2432,10 @@ mod tests {
         instructions: &'buf [InstructionInfo],
         is_tight_loop: bool,
     ) -> BlockScopeFeatures<'buf> {
-        let mut patterns = FxHashSet::default();
-        let mut apis = FxHashSet::default();
-        for insn in instructions {
-            for &p in &insn.matched {
-                patterns.insert(p);
-                apis.insert(p);
-            }
-        }
         BlockScopeFeatures {
             start_address,
             end_address,
             instructions,
-            patterns,
-            apis,
             is_tight_loop,
         }
     }
@@ -2439,8 +2452,12 @@ mod tests {
         let mut patterns = FxHashSet::default();
         let mut apis = FxHashSet::default();
         for &idx in &block_indices {
-            patterns.extend(&blocks[idx].patterns);
-            apis.extend(&blocks[idx].apis);
+            for insn in blocks[idx].instructions {
+                for &p in &insn.matched {
+                    patterns.insert(p);
+                    apis.insert(p);
+                }
+            }
         }
         FunctionScopeFeatures {
             start_address,
@@ -2631,8 +2648,6 @@ mod tests {
             start_address: block1.start_address,
             end_address: block1.end_address,
             instructions: &insns,
-            patterns: FxHashSet::default(),
-            apis: FxHashSet::default(),
             is_tight_loop: false,
         };
         let features = FeatureSet {
@@ -2835,8 +2850,6 @@ mod tests {
             start_address: block.start_address,
             end_address: block.end_address,
             instructions: &insns,
-            patterns: FxHashSet::default(),
-            apis: FxHashSet::default(),
             is_tight_loop: false,
         };
         let features_two_calls = FeatureSet {
