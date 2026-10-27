@@ -305,7 +305,9 @@ mod tests {
       "att&ck": "Defense Evasion::Debugger Evasion [T1622]"
     },
     "features": [
-      "code_cave"
+      {
+        "characteristic": "code cave"
+      }
     ]
   }
 }"#;
@@ -328,7 +330,9 @@ mod tests {
       "unknown_typo_field": "invalid"
     },
     "features": [
-      "code_cave"
+      {
+        "characteristic": "code cave"
+      }
     ]
   }
 }"#;

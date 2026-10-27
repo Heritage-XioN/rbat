@@ -148,3 +148,77 @@ fn test_cli_analyze_dry_run() {
         .assert()
         .success();
 }
+
+#[test]
+fn test_cli_analyze_backend_selection() {
+    let sample_path = get_sample_path("mimikatz.exe_");
+    if !sample_path.exists() {
+        return;
+    }
+
+    // Test with --backend capstone
+    #[cfg(feature = "backend-capstone")]
+    {
+        let mut cmd = Command::cargo_bin("rbat").unwrap();
+        cmd.arg("analyze")
+            .arg(&sample_path)
+            .arg("--backend")
+            .arg("capstone")
+            .arg("--dry-run")
+            .assert()
+            .success();
+    }
+
+    // Test with --backend iced
+    #[cfg(feature = "backend-iced")]
+    {
+        let mut cmd = Command::cargo_bin("rbat").unwrap();
+        cmd.arg("analyze")
+            .arg(&sample_path)
+            .arg("--backend")
+            .arg("iced")
+            .arg("--dry-run")
+            .assert()
+            .success();
+
+        // Test with -b short flag
+        let mut cmd = Command::cargo_bin("rbat").unwrap();
+        cmd.arg("analyze")
+            .arg(&sample_path)
+            .arg("-b")
+            .arg("iced")
+            .arg("--dry-run")
+            .assert()
+            .success();
+
+        // Test with --disassembler alias
+        let mut cmd = Command::cargo_bin("rbat").unwrap();
+        cmd.arg("analyze")
+            .arg(&sample_path)
+            .arg("--disassembler")
+            .arg("iced")
+            .arg("--dry-run")
+            .assert()
+            .success();
+    }
+}
+
+#[test]
+fn test_cli_analyze_invalid_backend() {
+    let sample_path = get_sample_path("mimikatz.exe_");
+    if !sample_path.exists() {
+        return;
+    }
+
+    let mut cmd = Command::cargo_bin("rbat").unwrap();
+    cmd.arg("analyze")
+        .arg(&sample_path)
+        .arg("--backend")
+        .arg("nonexistent_backend")
+        .arg("--dry-run")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "invalid value 'nonexistent_backend' for '--backend <BACKEND>'",
+        ));
+}

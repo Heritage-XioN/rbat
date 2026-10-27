@@ -4,6 +4,7 @@
 //! using `clap`, styled with custom ANSI colors matching the RBAT design system.
 
 pub use clap::{Parser, Subcommand};
+use rbat::prelude::*;
 use std::path::PathBuf;
 
 /// Custom ANSI styles for clap CLI help menus
@@ -98,9 +99,43 @@ pub struct AnalyzeArgs {
     /// namespace roots (merged on top of the embedded `capa-overrides.toml`).
     #[arg(long)]
     pub severity_overrides: Option<PathBuf>,
+    /// Disassembler backend engine to use (`capstone`, `iced`).
+    #[arg(
+        short = 'b',
+        long = "backend",
+        visible_alias = "disassembler",
+        value_enum
+    )]
+    pub backend: Option<DisassemblerBackendArg>,
     /// Output the Control Flow Graph (CFG) in Graphviz DOT format to stdout.
     #[arg(long)]
     pub cfg: bool,
+}
+
+/// Disassembly backend options selectable via command-line arguments.
+///
+/// Configured via the `--backend` (`-b`) CLI flag on the `analyze` subcommand to select
+/// between the multi-architecture [`Capstone`](DisassemblerBackendArg::Capstone) engine
+/// and the high-performance pure-Rust [`Iced`](DisassemblerBackendArg::Iced) engine.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisassemblerBackendArg {
+    /// Multi-architecture Capstone disassembly engine.
+    #[cfg(feature = "backend-capstone")]
+    Capstone,
+    /// High-throughput pure-Rust x86/x64 disassembly engine.
+    #[cfg(feature = "backend-iced")]
+    Iced,
+}
+
+impl From<DisassemblerBackendArg> for DisassemblerBackend {
+    fn from(arg: DisassemblerBackendArg) -> Self {
+        match arg {
+            #[cfg(feature = "backend-capstone")]
+            DisassemblerBackendArg::Capstone => DisassemblerBackend::Capstone,
+            #[cfg(feature = "backend-iced")]
+            DisassemblerBackendArg::Iced => DisassemblerBackend::Iced,
+        }
+    }
 }
 
 /// Arguments for the `rbat rules` subcommand.
