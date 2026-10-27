@@ -50,6 +50,8 @@
 //! assert_eq!(instructions[0].format_mnemonic(), "nop");
 //! assert_eq!(instructions[1].format_mnemonic(), "ret");
 //! ```
+//!
+//! [`CompactString`]: compact_str::CompactString
 
 use crate::core::{
     cfg::InstructionClass,
@@ -139,6 +141,8 @@ impl Disassembler for CapstoneBackend {
     /// assert_eq!(insns.len(), 1);
     /// assert_eq!(insns[0].format_mnemonic(), "mov");
     /// ```
+    ///
+    /// [`CompactString`]: compact_str::CompactString
     fn disassemble(
         &self,
         text_bytes: &[u8],

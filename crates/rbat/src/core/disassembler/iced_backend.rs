@@ -48,6 +48,8 @@
 //! assert_eq!(instructions[0].format_mnemonic(), "nop");
 //! assert_eq!(instructions[1].format_mnemonic(), "ret");
 //! ```
+//!
+//! [`CompactString`]: compact_str::CompactString
 
 use crate::core::{
     cfg::InstructionClass,
@@ -133,6 +135,8 @@ impl Disassembler for IcedBackend {
     /// assert_eq!(insns.len(), 1);
     /// assert_eq!(insns[0].format_mnemonic(), "mov");
     /// ```
+    ///
+    /// [`CompactString`]: compact_str::CompactString
     fn disassemble(
         &self,
         text_bytes: &[u8],
@@ -228,7 +232,7 @@ impl Disassembler for IcedBackend {
 }
 
 impl IcedBackend {
-    /// Creates an [`IntelFormatter`] configured with Capstone-compatible settings:
+    /// Creates an [`iced_x86::IntelFormatter`] configured with Capstone-compatible settings:
     /// lowercase hex prefix (`0x`), no suffix, and lowercase formatting.
     #[must_use]
     pub fn create_formatter() -> iced_x86::IntelFormatter {

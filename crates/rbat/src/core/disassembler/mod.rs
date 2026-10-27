@@ -49,10 +49,10 @@
 //! assert_eq!(insn.format_operands(), "eax, 0x1");
 //! ```
 
+pub use crate::core::traits::Disassembler;
 use crate::core::{
     cfg::{ControlFlowGraph, InstructionClass},
     parser::{BinaryArch, IatMap},
-    traits::Disassembler,
     types::result::RbatResult,
 };
 use aho_corasick::PatternID;
@@ -77,17 +77,46 @@ pub mod iced_backend;
 #[cfg(feature = "backend-iced")]
 pub use iced_backend::IcedBackend;
 
-/// Runtime disassembler backend selector using enum dispatch.
-#[derive(Clone, Default, Debug)]
+/// Runtime disassembler backend selector.
+///
+/// `DisassemblerBackend` unifies linear instruction decoders under a single runtime-selectable
+/// type. Built-in variants include [`Capstone`] and [`Iced`], as well as [`Custom`] for
+/// user-defined decoders implementing the [`Disassembler`] trait.
+///
+/// it allows applications to choose the most suitable engine per-analysis at runtime
+/// (e.g. using `Iced` for maximum x86/x64 throughput and `Capstone` for ARM/ARM64 coverage).
+///
+/// # Examples
+///
+/// ```rust
+/// use rbat::core::{
+///   disassembler::DisassemblerBackend,
+///   analyzer::Analyzer,
+///   traits::Disassembler,
+/// };
+///
+/// // Configure the analyzer with the pure-Rust Iced backend:
+/// #[cfg(feature = "backend-iced")]
+/// {
+///     let analyzer = Analyzer::builder()
+///         .with_backend(DisassemblerBackend::Iced)
+///         .build();
+///     assert_eq!(analyzer.backend().name(), "iced");
+/// }
+/// ```
+///
+/// [`Capstone`]: DisassemblerBackend::Capstone
+/// [`Iced`]: DisassemblerBackend::Iced
+/// [`Custom`]: DisassemblerBackend::Custom
+#[derive(Clone, Debug)]
 pub enum DisassemblerBackend {
-    /// Multi-architecture Capstone C-library disassembler backend.
+    /// Multi-architecture Capstone C-library disassembler backend (`x86`, `x64`, `ARM`, `ARM64`).
     #[cfg(feature = "backend-capstone")]
-    #[default]
     Capstone,
-    /// High-throughput pure-Rust iced-x86 disassembler backend.
+    /// High-throughput pure-Rust iced-x86 disassembler backend (`x86`, `x64`).
     #[cfg(feature = "backend-iced")]
     Iced,
-    /// Custom user-provided disassembler implementation.
+    /// Custom user-provided disassembler implementation wrapped in an [`Arc`].
     Custom(Arc<dyn Disassembler>),
 }
 
@@ -137,8 +166,45 @@ impl Disassembler for DisassemblerBackend {
 
 impl DisassemblerBackend {
     /// Wraps a custom disassembler implementation into a [`DisassemblerBackend::Custom`].
+    ///
+    /// # Parameters
+    ///
+    /// - `disassembler`: Custom engine fulfilling the [`Disassembler`] trait.
+    ///
+    /// # Returns
+    ///
+    /// A [`DisassemblerBackend::Custom`] variant holding an [`Arc`] reference to the disassembler.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{
+    ///   disassembler::{DisassemblerBackend, CapstoneBackend},
+    ///   traits::Disassembler,
+    /// };
+    ///
+    /// let backend = DisassemblerBackend::custom(CapstoneBackend);
+    /// assert_eq!(backend.name(), "capstone");
+    /// ```
     pub fn custom<D: Disassembler + 'static>(disassembler: D) -> Self {
         Self::Custom(Arc::new(disassembler))
+    }
+}
+
+impl Default for DisassemblerBackend {
+    /// Selects the default disassembler backend based on enabled cargo features.
+    ///
+    /// Prefers [`DisassemblerBackend::Capstone`] when `backend-capstone` is enabled,
+    /// falling back to [`DisassemblerBackend::Iced`] when only `backend-iced` is enabled.
+    fn default() -> Self {
+        #[cfg(feature = "backend-capstone")]
+        {
+            DisassemblerBackend::Capstone
+        }
+        #[cfg(all(feature = "backend-iced", not(feature = "backend-capstone")))]
+        {
+            DisassemblerBackend::Iced
+        }
     }
 }
 

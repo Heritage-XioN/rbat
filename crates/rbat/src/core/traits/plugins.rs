@@ -1,5 +1,3 @@
-//! # Common Abstractions and Traits
-//!
 //! This module defines the common interfaces used for executing heuristic plugins.
 
 use crate::core::types::{
@@ -16,4 +14,3 @@ pub(crate) trait HeuristicPlugin: Send + Sync {
         ctx: &AnalysisContext<'buf, 'ctx>,
     ) -> RbatResult<AnalysisProgress<'buf>>;
 }
-
