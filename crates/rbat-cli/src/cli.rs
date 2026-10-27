@@ -99,7 +99,7 @@ pub struct AnalyzeArgs {
     /// namespace roots (merged on top of the embedded `capa-overrides.toml`).
     #[arg(long)]
     pub severity_overrides: Option<PathBuf>,
-    /// Disassembler backend engine to use (`capstone`, `iced`).
+    /// Disassembler backend engine to use
     #[arg(
         short = 'b',
         long = "backend",
