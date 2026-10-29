@@ -19,14 +19,17 @@ RBAT (Rust Binary Analysis Tool) is a modern, high-performance static analysis a
 
 The project is organized as a Cargo workspace:
 
-* **[crates/rbat-core](crates/rbat-core/README.md)**: The core static analysis engine and CLI tool. Written in Rust, it performs binary parsing (ELF, PE, Mach-O), entropy calculation, YARA rule matching, FLIRT signature matching, disassembling (via `backend-capstone` or `backend-iced` feature flags), CFG graph reconstruction, and threat scoring against MITRE ATT&CK categories using a native JSON & YAML CAPA-compatible rule engine. Exposes the subcommand CLI (`analyze`, `rules`, `completions`, `--tui`).
+* **[crates/rbat](crates/rbat)**: The core static analysis engine library. Written in Rust, it performs binary parsing (ELF, PE, Mach-O), entropy calculation, YARA rule matching, FLIRT signature matching, disassembling (via `backend-capstone` and `backend-iced` feature flags), CFG graph reconstruction, and threat scoring against MITRE ATT&CK categories using a native JSON & YAML CAPA-compatible rule engine.
+* **[crates/rbat-cli](crates/rbat-cli)**: The terminal-native CLI binary executable (`rbat`) and Ratatui interactive TUI dashboard (`analyze`, `rules`, `completions`, `--tui`).
 * **[crates/xtask](crates/xtask)**: Developer automation CLI for pre-compiling Capa rules and repository maintenance (`cargo xtask bundle-rules`).
 
 ```text
 rbat/
-└── crates/
-    ├── rbat-core/           # Core Rust static analysis engine & CLI
-    └── xtask/               # Automation & rule pre-compilation
+├── crates/
+│   ├── rbat/               # Core static analysis library engine
+│   ├── rbat-cli/           # Terminal binary & TUI dashboard
+│   └── xtask/              # Developer automation & rule precompilation
+└── fuzz/                   # Fuzz targets & seed corpora
 ```
 
 ## Roadmap & Future Enhancements

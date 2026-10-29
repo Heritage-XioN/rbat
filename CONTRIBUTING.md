@@ -28,17 +28,22 @@ To ensure a productive and welcoming community, please read and follow our [Code
 
 ## Development Setup
 
-The workspace is structured as a cargo workspace containing:
-- `rbat-core`: Core static analysis engine and CLI tool.
+The workspace is structured as a Cargo workspace containing:
+- `crates/rbat`: Core static analysis engine library.
+- `crates/rbat-cli`: Terminal binary executable (`rbat`) with CLI subcommands and Ratatui TUI dashboard.
+- `crates/xtask`: Developer automation CLI for rule bundling (`cargo xtask bundle-rules`).
+- `fuzz`: LibFuzzer targets and seed generation scripts.
 
 ### Prerequisites
-- [Rust](https://rustup.rs/) (Stable)
-- [Node.js](https://nodejs.org/) & [pnpm](https://pnpm.io/) (For frontend client)
+- [Rust](https://rustup.rs/) (Stable 1.75+)
+- System packages: `libcapstone-dev`, `libyara-dev`, `pkg-config`
 
 ### Useful Commands
 - Check compilation: `cargo check`
 - Run tests: `cargo test`
-- Build release targets: `cargo build --release`
+- Check specific backend: `cargo check -p rbat --no-default-features --features backend-iced`
+- Build release targets: `cargo build --release -p rbat-cli --bin rbat`
+- Bundle capa rules: `cargo xtask bundle-rules`
 - Run full pre-release validation: `./scripts/validate-release.sh`
 
 ## Code Style
