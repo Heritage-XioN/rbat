@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head></head>
+<body>
+    <div class="header">
+        <h1>RBAT Threat Intelligence Report</h1>
+        <p>Automated Binary Triage & Static Risk Assessment</p>
+        <div class="header-accent-bar"></div>
+    </div>
+
+    <div class="executive-summary">
+        <h2 class="exec-title">Executive Summary</h2>
+        <div class="exec-grid">
+            <div class="exec-row">
+                <div class="exec-cell-label">Target File</div>
+                <div class="exec-cell-value"><code>{{ target_file }}</code></div>
+            </div>
+            <div class="exec-row">
+                <div class="exec-cell-label">Analysis Date</div>
+                <div class="exec-cell-value">{{ analysis_date }}</div>
+            </div>
+            <div class="exec-row">
+                <div class="exec-cell-label">Risk Assessment</div>
+                <div class="exec-cell-value">
+                    <span class="risk-score {{ severity_class }}">{{ score }}/100 ({{ severity }})</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if !recommendations.is_empty() %}
+    <div class="recommendations">
+        <h3>Security Recommendations</h3>
+        <ul>
+            {% for rec in recommendations %}
+            <li>{{ rec }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if has_heatmap %}
+    <div class="section-title">Section Entropy Heatmap</div>
+    <div class="image-container">
+        {{ heatmap_svg|safe }}
+    </div>
+    {% endif %}
+
+    <div class="section-title">Technical Indicators of Compromise (IOCs)</div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 26%;">INDICATOR</th>
+                <th style="width: 13%;">CLASS</th>
+                <th style="width: 19%;">ATT&amp;CK / MBC</th>
+                <th style="width: 42%;">DESCRIPTION</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for finding in findings %}
+            <tr>
+                <td><strong>{{ finding.indicator }}</strong></td>
+                <td><span class="badge {{ finding.class }}">{{ finding.class_label }}</span></td>
+                <td>{{ finding.mappings }}</td>
+                <td>{{ finding.description }}</td>
+            </tr>
+            {% endfor %}
+            {% if findings.is_empty() %}
+            <tr>
+                <td colspan="4" style="color: #64748b; text-align: center;">No significant indicators detected.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <div class="section-title">Deep Technical Analysis</div>
+    
+    <div style="margin-bottom: 24px;">
+        <h3 style="color: #0f172a; font-size: 14px; margin-bottom: 10px;">Binary Metadata</h3>
+        <table style="width: 100%;">
+            <thead>
+                <tr>
+                    <th style="width: 30%;">Property</th>
+                    <th style="width: 70%;">Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Binary Type</strong></td>
+                    <td><code>{{ binary_type }}</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Entry Point</strong></td>
+                    <td><code>{{ entry_point }}</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Architecture</strong></td>
+                    <td><code>{{ architecture }}</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Total Analysis Time</strong></td>
+                    <td><code>{{ total_analysis_time_ms }} ms</code></td>
+                </tr>
+                {% if hashes.sha256.len() > 0 %}
+                <tr>
+                    <td><strong>MD5</strong></td>
+                    <td><code>{{ hashes.md5 }}</code></td>
+                </tr>
+                <tr>
+                    <td><strong>SHA-1</strong></td>
+                    <td><code>{{ hashes.sha1 }}</code></td>
+                </tr>
+                <tr>
+                    <td><strong>SHA-256</strong></td>
+                    <td><code>{{ hashes.sha256 }}</code></td>
+                </tr>
+                {% endif %}
+                {% if hashes.ssdeep.len() > 0 %}
+                <tr>
+                    <td><strong>SSDEEP</strong></td>
+                    <td><code>{{ hashes.ssdeep }}</code></td>
+                </tr>
+                {% endif %}
+                {% if hashes.tlsh.len() > 0 %}
+                <tr>
+                    <td><strong>TLSH</strong></td>
+                    <td><code>{{ hashes.tlsh }}</code></td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="margin-bottom: 24px;">
+        <h3 style="color: #0f172a; font-size: 14px; margin-bottom: 10px;">Detected Capabilities</h3>
+        {% if capabilities.is_empty() %}
+        <p style="color: #64748b; font-size: 13px;">No specific suspicious capabilities detected.</p>
+        {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 30%;">Category</th>
+                    <th style="width: 70%;">Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cap in capabilities %}
+                <tr>
+                    <td><strong>{{ cap.category }}</strong></td>
+                    <td>{{ cap.details }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+
+    <div style="margin-bottom: 24px;">
+        <h3 style="color: #0f172a; font-size: 14px; margin-bottom: 10px;">Signature Matches</h3>
+        {% if signatures.is_empty() %}
+        <p style="color: #64748b; font-size: 13px;">No signature matches (Packers/YARA) detected.</p>
+        {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 30%;">Type</th>
+                    <th style="width: 70%;">Match Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sig in signatures %}
+                <tr>
+                    <td><strong>{{ sig.category }}</strong></td>
+                    <td>{{ sig.details }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+</body>
+</html>

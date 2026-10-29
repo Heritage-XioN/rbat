@@ -1,6 +1,7 @@
 /target
 .env
-report.*
+/report.*
+!crates/rbat-cli/templates/**
 crates/rbat/assets/signatures_embedded/
 crates/rbat/dhat_output/*
 fuzz/target/
