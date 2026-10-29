@@ -1,0 +1,202 @@
+name: Publish rbat-cli & Release Binaries
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*'
+      - 'cli-v*'
+      - 'stable-*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Perform a dry-run crates.io publish without uploading'
+        required: true
+        type: boolean
+        default: false
+      release_tag:
+        description: 'Release tag to attach binaries to (defaults to current ref)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate Pre-Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Full Release Validation
+        run: ./scripts/validate-release.sh
+        env:
+          CI: "true"
+
+  publish-crate:
+    name: Publish rbat-cli to Crates.io
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish rbat-cli to Crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ] || [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "Running dry-run publish for rbat-cli..."
+            cargo publish -p rbat-cli --dry-run
+          else
+            echo "Publishing rbat-cli to crates.io..."
+            cargo publish -p rbat-cli
+          fi
+
+  build-binaries:
+    name: Build (${{ matrix.target }})
+    needs: [validate, publish-crate]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: rbat-linux-x86_64.tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact_name: rbat-macos-x86_64.tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: rbat-macos-arm64.tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: rbat-windows-x86_64.zip
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
+
+      - name: Install System Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install capstone yara pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build CLI Binary
+        run: cargo build --release -p rbat-cli --bin rbat --target ${{ matrix.target }}
+
+      - name: Archive Artifacts (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p release_archive
+          cp target/${{ matrix.target }}/release/rbat release_archive/
+          cp README.md LICENSE release_archive/
+          tar -czf ${{ matrix.artifact_name }} -C release_archive .
+
+      - name: Archive Artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path release_archive
+          Copy-Item target/${{ matrix.target }}/release/rbat.exe release_archive/
+          Copy-Item README.md release_archive/
+          Copy-Item LICENSE release_archive/
+          Compress-Archive -Path release_archive\* -DestinationPath ${{ matrix.artifact_name }}
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: ${{ matrix.artifact_name }}
+
+  attach-release-assets:
+    name: Attach Assets to Release
+    needs: [build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_artifacts
+
+      - name: Determine Target Release Tag
+        id: tag_info
+        run: |
+          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            TAG="${{ github.event.inputs.release_tag }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG=""
+          fi
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "Target Release Tag: $TAG"
+
+      - name: Upload Assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ASSETS=($(find release_artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \)))
+          echo "Found assets: ${ASSETS[*]}"
+          if [ -n "$TAG" ]; then
+            echo "Uploading assets to release $TAG..."
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber || {
+              echo "Release $TAG does not exist yet. Creating draft release..."
+              gh release create "$TAG" "${ASSETS[@]}" --title "Release $TAG" --draft --generate-notes
+            }
+          else
+            echo "No tag detected. Creating draft release from current commit..."
+            DRAFT_TAG="draft-$(git rev-parse --short HEAD)"
+            gh release create "$DRAFT_TAG" "${ASSETS[@]}" --title "Draft Build $DRAFT_TAG" --draft
+          fi

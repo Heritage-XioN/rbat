@@ -1,0 +1,78 @@
+name: Publish rbat Library
+
+on:
+  push:
+    tags:
+      - 'rbat-v*'
+      - 'lib-v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Perform a dry-run publish without uploading to crates.io'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate Pre-Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Full Release Validation
+        run: ./scripts/validate-release.sh
+        env:
+          CI: "true"
+
+  publish-library:
+    name: Publish rbat to Crates.io
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish rbat to Crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ] || [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "Running dry-run publish for rbat library..."
+            cargo publish -p rbat --dry-run
+          else
+            echo "Publishing rbat library to crates.io..."
+            cargo publish -p rbat
+          fi

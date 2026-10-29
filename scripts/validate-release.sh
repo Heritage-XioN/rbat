@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
+# ==============================================================================
+# scripts/validate-release.sh
+# Comprehensive release validation suite for RBAT.
+# Executes formatting, linting, multi-backend feature checks, fuzz manifests,
+# rule compilation via xtask, and workspace test suites.
+# ==============================================================================
 
-# Exit immediately if a command exits with a non-zero status
-set -e
+set -euo pipefail
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -13,41 +18,55 @@ echo -e "${BLUE}=====================================================${NC}"
 echo -e "${BLUE}            RBAT Pre-Release Validation              ${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 
-# Define cleanup function for cargo config
-cleanup_config() {
-  echo -e "\n${YELLOW}🧹 Cleaning up temporary cargo configuration...${NC}"
-  rm -f .cargo/config.toml 2>/dev/null || true
-  rmdir .cargo 2>/dev/null || true
-}
-# Register cleanup to run on exit, interrupt, or termination
-trap cleanup_config EXIT
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 
-# Setup temporary cargo patch config to fix crates.io baseline compile error in cargo-semver-checks
-echo -e "\n${YELLOW}📦 Setting up temporary lightningcss patch...${NC}"
-mkdir -p /tmp/lightningcss-src
-if [ ! -f "/tmp/lightningcss-src/Cargo.toml" ]; then
-  echo "Downloading lightningcss source crate from crates.io..."
-  curl -L -s https://static.crates.io/crates/lightningcss/lightningcss-1.0.0-alpha.70.crate | tar -xz -C /tmp/lightningcss-src --strip-components=1
-fi
-mkdir -p .cargo
-echo '[patch.crates-io]' > .cargo/config.toml
-echo 'lightningcss = { path = "/tmp/lightningcss-src" }' >> .cargo/config.toml
+# 1. Formatting check
+echo -e "\n${YELLOW}🔍 1. Checking Code Formatting (cargo fmt)...${NC}"
+cargo fmt --all -- --check
+echo -e "${GREEN}✓ Formatting check passed.${NC}"
 
-# 1. Verify workspace compilation and unit tests
-echo -e "\n${YELLOW}🧪 1. Running Workspace Unit Tests...${NC}"
-cargo test --workspace --all-targets --verbose
+# 2. Strict Clippy check on all targets & features
+echo -e "\n${YELLOW}🔍 2. Running Workspace Lints (cargo clippy)...${NC}"
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+echo -e "${GREEN}✓ Clippy checks passed with 0 warnings.${NC}"
 
-# 2. Verify public API SemVer compliance using cargo-semver-checks
-echo -e "\n${YELLOW}🧪 3. Running SemVer Compatibility Checks (cargo-semver-checks)...${NC}"
+# 3. Disassembler Backend Feature Checks
+echo -e "\n${YELLOW}🔍 3. Verifying Disassembler Feature Configurations...${NC}"
+echo "   -> Checking rbat (backend-iced only)..."
+cargo check -p rbat --no-default-features --features backend-iced --quiet
+echo "   -> Checking rbat (backend-capstone only)..."
+cargo check -p rbat --no-default-features --features backend-capstone --quiet
+echo "   -> Checking rbat-cli (backend-iced only)..."
+cargo check -p rbat-cli --no-default-features --features backend-iced --quiet
+echo "   -> Checking rbat-cli (backend-capstone only)..."
+cargo check -p rbat-cli --no-default-features --features backend-capstone --quiet
+echo -e "${GREEN}✓ Feature compilation matrix passed.${NC}"
+
+# 4. Fuzz Manifest Check
+echo -e "\n${YELLOW}🔍 4. Verifying Fuzz Targets Manifest...${NC}"
+cargo check --manifest-path fuzz/Cargo.toml --quiet
+echo -e "${GREEN}✓ Fuzz manifest check passed.${NC}"
+
+# 5. Capa Rules Precompilation via xtask
+echo -e "\n${YELLOW}🔍 5. Verifying Rule Compilation (cargo xtask bundle-rules)...${NC}"
+cargo xtask bundle-rules
+echo -e "${GREEN}✓ Rule bundling passed successfully.${NC}"
+
+# 6. Workspace Unit and Integration Tests
+echo -e "\n${YELLOW}🧪 6. Running Workspace Test Suite...${NC}"
+cargo test --workspace --all-targets
+echo -e "${GREEN}✓ Workspace test suite passed.${NC}"
+
+# 7. Optional SemVer Compatibility Check
+echo -e "\n${YELLOW}🔍 7. Checking SemVer Compliance (cargo-semver-checks)...${NC}"
 if ! command -v cargo-semver-checks &> /dev/null; then
-  echo -e "${YELLOW}⚠️  cargo-semver-checks is not installed.${NC}"
-  echo -e "You can install it with: ${BLUE}cargo install cargo-semver-checks --locked${NC}"
-  echo -e "Skipping local SemVer check..."
+  echo -e "${YELLOW}⚠️  cargo-semver-checks is not installed locally.${NC}"
+  echo -e "   Install with: cargo install cargo-semver-checks --locked"
+  echo -e "   Skipping local SemVer check..."
 else
-  echo "Running semver-checks for rbat-core (package: rbat)..."
-  # Run semver check against crates.io version (default)
-  # If it fails, print a warning or error. If we are running in CI, we want to enforce it.
-  if [ "$CI" = "true" ]; then
+  echo "Running semver-checks for rbat..."
+  if [ "${CI:-false}" = "true" ]; then
     cargo semver-checks --package rbat
   else
     cargo semver-checks --package rbat || {
@@ -59,6 +78,7 @@ else
   echo -e "${GREEN}✓ SemVer check passed successfully.${NC}"
 fi
 
-echo -e "\n${GREEN}🎉 SUCCESS: All release validation gates passed successfully!${NC}"
-echo -e "The codebase is 100% ready for a stable release."
+echo -e "\n${GREEN}=====================================================${NC}"
+echo -e "${GREEN}🎉 SUCCESS: All release validation gates passed!     ${NC}"
+echo -e "${GREEN}=====================================================${NC}"
 exit 0

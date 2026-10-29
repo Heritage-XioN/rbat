@@ -5,6 +5,9 @@ on:
     branches: [ master ]
     paths:
       - 'crates/**'
+      - 'fuzz/**'
+      - 'scripts/**'
+      - '.cargo/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/ci-rust.yml'
@@ -12,6 +15,9 @@ on:
     branches: [ master ]
     paths:
       - 'crates/**'
+      - 'fuzz/**'
+      - 'scripts/**'
+      - '.cargo/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/ci-rust.yml'
@@ -25,7 +31,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   lint-rust:
@@ -38,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -47,11 +52,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Check Formatting
         run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy (All Targets & All Features)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Check Fuzz Manifest
+        run: cargo check --manifest-path fuzz/Cargo.toml
 
   test-rust:
-    name: Run Tests
+    name: Run Tests & Feature Matrix
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,12 +67,18 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config protobuf-compiler
+          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Workspace Tests (Default Features)
+        run: cargo test --workspace --all-targets --verbose
+      - name: Test rbat (backend-iced only)
+        run: cargo test -p rbat --no-default-features --features backend-iced
+      - name: Test rbat (backend-capstone only)
+        run: cargo test -p rbat --no-default-features --features backend-capstone
+      - name: Test rbat-cli (backend-iced only)
+        run: cargo test -p rbat-cli --no-default-features --features backend-iced
+      - name: Test rbat-cli (backend-capstone only)
+        run: cargo test -p rbat-cli --no-default-features --features backend-capstone

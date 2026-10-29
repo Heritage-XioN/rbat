@@ -6,6 +6,7 @@ on:
     paths:
       - 'crates/**'
       - 'fuzz/**'
+      - 'scripts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/fuzz.yml'
@@ -14,6 +15,7 @@ on:
     paths:
       - 'crates/**'
       - 'fuzz/**'
+      - 'scripts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/fuzz.yml'
@@ -32,24 +34,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  property-tests:
-    name: Property-Based Verification (proptest)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcapstone-dev libyara-dev pkg-config
-      - name: Install Rust Stable
-        uses: dtolnay/rust-toolchain@stable
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-      - name: Run Property Invariant Tests
-        run: cargo test --test properties --verbose
-
   fuzz-smoke:
     name: Smoke Fuzzing (cargo-fuzz)
     runs-on: ubuntu-latest
@@ -73,7 +57,7 @@ jobs:
         run: bash scripts/generate_fuzz_corpus.sh
       - name: Smoke Run Fuzz Targets
         run: |
-          # Run each target for 30 with token dictionaries
+          # Run each target for 30s with token dictionaries
           cargo +nightly fuzz run fuzz_rules -- -dict=fuzz/dictionaries/rules.dict -max_total_time=30
           cargo +nightly fuzz run fuzz_flirt -- -dict=fuzz/dictionaries/sig.dict -max_total_time=30
           cargo +nightly fuzz run fuzz_cfg -- -dict=fuzz/dictionaries/binary.dict -max_total_time=30
