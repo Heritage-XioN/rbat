@@ -146,7 +146,7 @@ impl Analyzer {
     ///
     /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// let analyzer = Analyzer::builder()
-    ///     .with_rules("path/to/custom_rules")
+    ///     .with_rules("path/to/custom_rules")?
     ///     .build();
     /// # Ok(())
     /// # }
@@ -434,7 +434,7 @@ struct AnalysisConfig {
 ///
 /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// let analyzer = AnalyzerBuilder::new()
-///     .with_rules("custom/rules/dir")
+///     .with_rules("custom/rules/dir")?
 ///     .with_classifier("custom/overrides.toml")?
 ///     .build();
 /// # Ok(())
@@ -493,12 +493,15 @@ impl AnalyzerBuilder {
     /// ```rust,no_run
     /// use rbat::core::analyzer::AnalyzerBuilder;
     ///
-    /// let builder = AnalyzerBuilder::new().with_rules("path/to/custom_rules");
+    /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let builder = AnalyzerBuilder::new().with_rules("path/to/custom_rules")?;
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn with_rules<P: AsRef<Path>>(mut self, path: P) -> Self {
-        let ext_rules = Rule::extend(path);
+    pub fn with_rules<P: AsRef<Path>>(mut self, path: P) -> RbatResult<Self> {
+        let ext_rules = Rule::extend(path)?;
         self.config.custom_rules = Some(ext_rules);
-        self
+        Ok(self)
     }
 
     /// Sets a path to a TOML severity override configuration file.

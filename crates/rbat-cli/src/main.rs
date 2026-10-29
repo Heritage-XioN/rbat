@@ -87,7 +87,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         builder = builder.with_flirt(path)?;
     }
     if let Some(ref path) = args.rules {
-        builder = builder.with_rules(path);
+        builder = builder.with_rules(path)?;
     }
     let analyzer = builder.build();
 

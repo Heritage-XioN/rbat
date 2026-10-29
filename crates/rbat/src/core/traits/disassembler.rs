@@ -92,7 +92,7 @@ pub trait Disassembler: Send + Sync + Debug {
     /// - The requested `arch` is unsupported by this disassembler.
     /// - Linear instruction decoding fails fatally.
     /// - No valid instructions could be decoded from `text_bytes` ([`RbatError::DisassembleInstructionError`]).
-    /// 
+    ///
     /// [`RbatError`]: crate::core::types::result::RbatError
     /// [`RbatError::DisassembleInstructionError`]: crate::core::types::result::RbatError::DisassembleInstructionError
     fn disassemble(

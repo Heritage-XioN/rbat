@@ -43,6 +43,7 @@ md-5 = "0.10.6"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
 fuzzyhash = "0.2.2"
+walkdir = { workspace = true }
 fast-tlsh = { version = "0.1.10", default-features = false, features = ["std", "easy-functions", "opt-default"] }
 
 [dev-dependencies]

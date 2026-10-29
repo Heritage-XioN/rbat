@@ -90,6 +90,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::atomic::Ordering;
+use walkdir::WalkDir;
 
 /// Embedded capa rules message pack bytes
 const CAPA_RULES_MP: &[u8] = include_bytes!("../../assets/embedded_rules.mp");
@@ -377,33 +378,54 @@ impl Rule {
     ///
     /// A vector containing both embedded and custom [`Rule`] instances.
     ///
+    /// Loads and merges custom capa rules from an external directory on top of the embedded rule set.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Directory path containing custom `.yaml`, `.yml`, or `.json` rule definitions.
+    ///
+    /// # Returns
+    ///
+    /// A vector containing both embedded and external [`Rule`] definitions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RbatError`] if directory traversal fails.
+    ///
     /// # Examples
     ///
     /// ```rust,no_run
     /// use rbat::core::rule::Rule;
     ///
-    /// let rules = Rule::extend("path/to/custom/rules");
+    /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let rules = Rule::extend("path/to/custom/rules")?;
     /// assert!(!rules.is_empty());
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn extend<P: AsRef<Path>>(path: P) -> Vec<Self> {
+    pub fn extend<P: AsRef<Path>>(path: P) -> RbatResult<Vec<Self>> {
         let mut rules = Self::load_embedded();
-        let custom_rules = Rule::load_from_directory(path.as_ref());
+        let custom_rules = Rule::from_dir(path)?;
         rules.extend(custom_rules);
-        rules
+        Ok(rules)
     }
 
     /// Loads custom JSON and YAML rules recursively from a directory on the local filesystem.
     ///
-    /// Recursively scans `dir`, skipping hidden files/directories (names beginning with `.`),
+    /// Recursively scans `path`, skipping hidden files/directories (names beginning with `.`),
     /// and deserializes all files ending with `.json`, `.yaml`, or `.yml`.
     ///
     /// # Parameters
     ///
-    /// - `dir`: Directory path to inspect for rule definitions.
+    /// - `path`: Directory path to inspect for rule definitions.
     ///
     /// # Returns
     ///
     /// A vector of parsed [`Rule`] instances.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RbatError`] if filesystem traversal fails.
     ///
     /// # Examples
     ///
@@ -411,40 +433,35 @@ impl Rule {
     /// use std::path::Path;
     /// use rbat::core::rule::Rule;
     ///
-    /// let rules = Rule::load_from_directory(Path::new("path/to/rules"));
+    /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let rules = Rule::from_dir(Path::new("path/to/rules"))?;
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn load_from_directory(dir: &std::path::Path) -> Vec<Self> {
+    pub fn from_dir<P: AsRef<Path>>(path: P) -> RbatResult<Vec<Self>> {
         let mut rules = Vec::new();
-        Self::load_from_directory_recursive(dir, &mut rules);
-        rules
-    }
-
-    fn load_from_directory_recursive(dir: &std::path::Path, rules: &mut Vec<Self>) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|name| name.starts_with('.'))
-                {
-                    continue;
-                }
-                if path.is_dir() {
-                    Self::load_from_directory_recursive(&path, rules);
-                } else if path.is_file() {
-                    let is_rule_ext = path
-                        .extension()
-                        .is_some_and(|ext| ext == "json" || ext == "yaml" || ext == "yml");
-                    if is_rule_ext
-                        && let Ok(data) = std::fs::read(&path)
-                        && let Ok(rule) = Self::from_slice(&data)
-                    {
-                        rules.push(rule);
-                    }
-                }
+        let walker = WalkDir::new(path).into_iter();
+        for entry in walker.filter_entry(|d| {
+            d.depth() == 0
+                || d.file_name()
+                    .to_str()
+                    .map(|s| !s.starts_with('.'))
+                    .unwrap_or(false)
+        }) {
+            let entry = entry?;
+            let is_rules_file = entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "json" || ext == "yaml" || ext == "yml");
+            if is_rules_file
+                && let Ok(data) = std::fs::read(entry.path())
+                && let Ok(rule) = Self::from_slice(&data)
+            {
+                rules.push(rule);
             }
         }
+        Ok(rules)
     }
 
     /// Evaluates candidate rules against extracted binary features using two-tier partitioned fixpoint iteration.
@@ -3576,5 +3593,119 @@ rule:
         let rule_count_fn_bb = Rule::from_slice(yaml_count_fn_bb).unwrap();
         let needle_count_fn_bb = NeedleIndex::new(std::slice::from_ref(&rule_count_fn_bb));
         assert!(rule_count_fn_bb.matches(&features_multi_bb, &needle_count_fn_bb, &empty_matched));
+    }
+
+    #[test]
+    fn test_rule_from_dir_capa_rules_asset() {
+        use std::path::PathBuf;
+
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let capa_rules_dir = manifest_dir.join("assets/capa-rules");
+
+        if !capa_rules_dir.exists() {
+            println!(
+                "Skipping test_rule_from_dir_capa_rules_asset: submodule not found at {:?}",
+                capa_rules_dir
+            );
+            return;
+        }
+
+        let rules = Rule::from_dir(&capa_rules_dir)
+            .expect("Rule::from_dir failed on assets/capa-rules directory");
+
+        assert!(
+            rules.len() >= 1000,
+            "Expected at least 1000 rules in assets/capa-rules, found {}",
+            rules.len()
+        );
+
+        // Verify that every parsed rule contains a valid, non-empty identifier
+        for rule in &rules {
+            assert!(
+                !rule.rule.meta.name.trim().is_empty(),
+                "Found rule with empty meta name"
+            );
+        }
+
+        // Verify known rules are present in the loaded set
+        let rule_names: ahash::AHashSet<&str> =
+            rules.iter().map(|r| r.rule.meta.name.as_str()).collect();
+        assert!(
+            rule_names.contains("compiled with ps2exe"),
+            "Expected 'compiled with ps2exe' rule in loaded rules"
+        );
+        assert!(
+            rule_names.contains("execute command"),
+            "Expected 'execute command' rule in loaded rules"
+        );
+    }
+
+    #[test]
+    fn test_rule_from_dir_filtering_and_errors() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create tempdir");
+        let root = temp_dir.path();
+
+        // 1. Empty directory returns empty vector
+        let empty_rules = Rule::from_dir(root).expect("Empty dir should succeed");
+        assert!(empty_rules.is_empty());
+
+        // 2. Valid rule in a subdirectory
+        let sub = root.join("subfolder");
+        std::fs::create_dir_all(&sub).unwrap();
+        let valid_rule = r#"
+rule:
+  meta:
+    name: test valid rule
+  features:
+    - string: "malicious"
+"#;
+        std::fs::write(sub.join("rule.yaml"), valid_rule).unwrap();
+
+        // 3. Hidden directory rule (should be skipped)
+        let hidden_dir = root.join(".hidden");
+        std::fs::create_dir_all(&hidden_dir).unwrap();
+        std::fs::write(hidden_dir.join("hidden.yaml"), valid_rule).unwrap();
+
+        // 4. Hidden file (should be skipped)
+        std::fs::write(sub.join(".dotfile.yaml"), valid_rule).unwrap();
+
+        // 5. Non-rule extension (should be skipped)
+        std::fs::write(sub.join("notes.txt"), valid_rule).unwrap();
+
+        let loaded = Rule::from_dir(root).expect("from_dir should succeed on populated tempdir");
+        assert_eq!(
+            loaded.len(),
+            1,
+            "Only the 1 non-hidden valid rule file should be loaded"
+        );
+        assert_eq!(loaded[0].rule.meta.name, "test valid rule");
+
+        // 6. Non-existent path returns an error
+        let nonexistent = root.join("does_not_exist");
+        let err = Rule::from_dir(&nonexistent);
+        assert!(err.is_err(), "Non-existent path must return an Err");
+    }
+
+    #[test]
+    fn test_rule_extend_with_capa_rules_asset() {
+        use std::path::PathBuf;
+
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let capa_rules_dir = manifest_dir.join("assets/capa-rules");
+
+        if !capa_rules_dir.exists() {
+            return;
+        }
+
+        let embedded_count = Rule::load_embedded().len();
+        let extended_rules =
+            Rule::extend(&capa_rules_dir).expect("Rule::extend failed on assets/capa-rules");
+
+        assert!(
+            extended_rules.len() >= embedded_count,
+            "Extended rules ({}) should be >= embedded rules ({})",
+            extended_rules.len(),
+            embedded_count
+        );
     }
 }

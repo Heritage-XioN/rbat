@@ -70,6 +70,14 @@ pub enum RbatError {
         std::io::Error,
     ),
 
+    /// Recursive directory traversal error
+    #[error("Error occurred while walking dir: {0}")]
+    WalkDirError(
+        #[from]
+        #[serde(serialize_with = "serialize_to_string")]
+        walkdir::Error,
+    ),
+
     /// Executable binary header parsing failure.
     #[error("Error occurred while parsing binary: {0}")]
     ParseBinaryError(

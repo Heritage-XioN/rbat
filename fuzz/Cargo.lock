@@ -895,6 +895,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.18",
  "toml",
+ "walkdir",
  "yaml_serde",
  "yara",
 ]
