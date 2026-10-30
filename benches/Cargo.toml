@@ -1,0 +1,23 @@
+[package]
+name = "rbat-bench"
+version = "0.0.0"
+publish = false
+edition = "2024"
+autobins = false
+
+[features]
+default = ["backend-capstone", "backend-iced"]
+backend-iced = ["rbat/backend-iced"]
+backend-capstone = ["rbat/backend-capstone"]
+
+[[bench]]
+name = "engine"
+path = "src/main.rs"
+harness = false
+
+[dependencies]
+rbat = { path = "../crates/rbat", default-features = false }
+criterion = { workspace = true }
+object = "0.39.1"
+rayon = { workspace = true }
+serde_json = { workspace = true }
