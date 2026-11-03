@@ -1,8 +1,6 @@
 use crate::common::{load_sample, parse_sample_context};
 use criterion::{Criterion, Throughput};
-use rbat::core::cfg::ControlFlowGraph;
-use rbat::core::disassembler::IcedBackend;
-use rbat::core::traits::Disassembler;
+use rbat::core::{cfg::ControlFlowGraph, disassembler::IcedBackend, traits::Disassembler};
 
 fn bench_cfg_sample(
     c: &mut Criterion,

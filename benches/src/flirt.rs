@@ -1,9 +1,8 @@
 use crate::common::{load_sample, parse_sample_context};
 use criterion::{Criterion, Throughput};
-use rbat::core::cfg::ControlFlowGraph;
-use rbat::core::disassembler::IcedBackend;
-use rbat::core::flirt::FlirtMatcher;
-use rbat::core::traits::Disassembler;
+use rbat::core::{
+    cfg::ControlFlowGraph, disassembler::IcedBackend, flirt::FlirtMatcher, traits::Disassembler,
+};
 
 pub fn bench_flirt(c: &mut Criterion) {
     let mut group = c.benchmark_group("flirt");
