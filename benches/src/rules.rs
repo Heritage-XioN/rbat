@@ -46,7 +46,7 @@ pub fn bench_rules(c: &mut Criterion) {
         let mut group = c.benchmark_group("rule_eval");
         group.throughput(Throughput::Elements(rules_count));
 
-        // Generate realistic FeatureSet from al-khaser_x86.exe_
+        // Small sample: al-khaser_x86.exe_
         let buffer = load_sample("al-khaser_x86.exe_");
         let analyzer = Analyzer::builder().build();
         let (analysis_result, _) = analyzer
@@ -55,8 +55,20 @@ pub fn bench_rules(c: &mut Criterion) {
 
         let features = FeatureSet::new(&analysis_result, &buffer);
 
-        group.bench_function("evaluate_embedded_rules", |b| {
+        group.bench_function("small/evaluate", |b| {
             b.iter(|| Rule::evaluate(&features, &rules, &needle))
+        });
+
+        // Large sample: 112f9f0e8d349858a80dd8c14190e620.exe_ (9.19MB)
+        let large_buffer = load_sample("112f9f0e8d349858a80dd8c14190e620.exe_");
+        let (large_analysis_result, _) = analyzer
+            .batch(&large_buffer)
+            .expect("Batch analysis failed to generate test features");
+        let large_features = FeatureSet::new(&large_analysis_result, &large_buffer);
+
+        group.sample_size(10);
+        group.bench_function("large/evaluate", |b| {
+            b.iter(|| Rule::evaluate(&large_features, &rules, &needle))
         });
 
         group.finish();
