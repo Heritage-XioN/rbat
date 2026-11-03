@@ -309,21 +309,12 @@ impl NeedleIndex {
         let instructions = Arc::make_mut(&mut cfg.instructions);
 
         instructions.par_iter_mut().for_each_init(
-            || {
-                (
-                    String::with_capacity(32),
-                    String::with_capacity(64),
-                    String::with_capacity(128),
-                )
-            },
-            |(buf_m, buf_o, haystack), insn| {
-                insn.format_mnemonic_into(buf_m);
-                insn.format_operands_into(buf_o);
-
+            || String::with_capacity(128),
+            |haystack, insn| {
                 haystack.clear();
-                haystack.push_str(buf_m);
+                haystack.push_str(&insn.mnemonic);
                 haystack.push(' ');
-                haystack.push_str(buf_o);
+                haystack.push_str(&insn.op_str);
                 if let Some(ref api) = insn.api_resolution {
                     haystack.push(' ');
                     haystack.push_str(api);

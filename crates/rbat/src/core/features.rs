@@ -52,6 +52,7 @@ use crate::core::{
     disassembler::InstructionInfo,
     flirt::FlirtMatcher,
     parser::BinaryArch,
+    rule::CapaCharacteristic,
     types::analysis::AnalysisResult,
 };
 use ahash::{AHashMap, AHashSet, HashMapExt, HashSetExt};
@@ -99,6 +100,8 @@ pub struct FeatureSet<'buf> {
     pub(crate) global_scope: GlobalScopeFeatures,
     /// Shared backing instructions for CFG basic block inspection.
     pub(crate) cfg_instructions: Arc<[InstructionInfo]>,
+    /// Inverted index and characteristic lookup tables.
+    pub(crate) indices: FeatureIndices,
 }
 
 impl<'buf> FeatureSet<'buf> {
@@ -110,6 +113,7 @@ impl<'buf> FeatureSet<'buf> {
     /// 3. Reconstructs function scopes, calculating local cycle presence, McCabe complexity, and recursion.
     /// 4. Aggregates file-level structural metrics, APIs, and matched strings.
     /// 5. Normalizes global binary format, architecture, and OS metadata.
+    /// 6. Builds inverted index mappings for basic blocks and functions to accelerate rule queries.
     ///
     /// # Parameters
     ///
@@ -160,16 +164,25 @@ impl<'buf> FeatureSet<'buf> {
         };
 
         let file_scope =
-            Self::extract_file_scope(res, &function_scope, basic_block_scope.len(), raw_buffer);
+            Self::extract_file_scope(res, &basic_block_scope, &function_scope, raw_buffer);
         let global_scope = Self::extract_global_scope(res);
 
-        Self {
+        let mut fs = Self {
             file_scope,
             function_scope,
             basic_block_scope,
             global_scope,
             cfg_instructions,
-        }
+            indices: FeatureIndices::default(),
+        };
+        fs.build_indices();
+        fs
+    }
+
+    /// Rebuilds inverted index mappings and characteristic lists from current basic blocks and functions.
+    pub(crate) fn build_indices(&mut self) {
+        self.indices
+            .build(&self.basic_block_scope, &self.function_scope);
     }
 
     /// Discovers and merges overlapping FLIRT runtime library address ranges.
@@ -229,11 +242,35 @@ impl<'buf> FeatureSet<'buf> {
             let instructions = cfg.as_block_instr(block);
             let is_tight_loop = tight_loops.contains(&block.start_address);
 
+            let mut nzxor_count = 0;
+            let mut peb_access_count = 0;
+            let mut fs_access_count = 0;
+            let mut gs_access_count = 0;
+
+            for insn in instructions {
+                if Self::is_nzxor(insn) {
+                    nzxor_count += 1;
+                }
+                if Self::is_peb_access(insn) {
+                    peb_access_count += 1;
+                }
+                if Self::is_fs_access(insn) {
+                    fs_access_count += 1;
+                }
+                if Self::is_gs_access(insn) {
+                    gs_access_count += 1;
+                }
+            }
+
             block_scopes.push(BlockScopeFeatures {
                 start_address: block.start_address,
                 end_address: block.end_address,
                 instructions,
                 is_tight_loop,
+                nzxor_count,
+                peb_access_count,
+                fs_access_count,
+                gs_access_count,
             });
         }
 
@@ -261,6 +298,13 @@ impl<'buf> FeatureSet<'buf> {
             .collect();
         sorted_functions.sort_unstable_by_key(|f| f.start_address);
 
+        // Pre-group outgoing edges by src address for O(1) lookup during function traversal
+        let mut edges_by_src: FxHashMap<u64, SmallVec<[(u64, EdgeType); 2]>> =
+            FxHashMap::with_capacity(cfg.edges.len());
+        for &(src, dst, edge_type) in &cfg.edges {
+            edges_by_src.entry(src).or_default().push((dst, edge_type));
+        }
+
         let mut function_scopes = Vec::with_capacity(sorted_functions.len());
 
         for func in sorted_functions {
@@ -277,8 +321,22 @@ impl<'buf> FeatureSet<'buf> {
 
             let mut patterns = FxHashSet::default();
             let mut apis = FxHashSet::default();
+            let mut nzxor_count = 0;
+            let mut peb_access_count = 0;
+            let mut fs_access_count = 0;
+            let mut gs_access_count = 0;
+            let mut tight_loop_count = 0;
+
             for &idx in &block_indices {
-                for insn in block_scopes[idx].instructions {
+                let b = &block_scopes[idx];
+                nzxor_count += b.nzxor_count;
+                peb_access_count += b.peb_access_count;
+                fs_access_count += b.fs_access_count;
+                gs_access_count += b.gs_access_count;
+                if b.is_tight_loop {
+                    tight_loop_count += 1;
+                }
+                for insn in b.instructions {
                     for &pat in &insn.matched {
                         patterns.insert(pat);
                         if api_ids.contains(&pat) {
@@ -299,17 +357,20 @@ impl<'buf> FeatureSet<'buf> {
             let mut is_recursive = false;
             let mut external_calls = FxHashSet::default();
 
-            for &(src, dst, edge_type) in &cfg.edges {
-                if local_addr_to_idx.contains_key(&src) {
-                    if edge_type == EdgeType::Call {
-                        if dst == func.start_address {
-                            is_recursive = true;
-                        } else {
-                            external_calls.insert(dst);
+            for &global_block_idx in &block_indices {
+                let src_addr = block_scopes[global_block_idx].start_address;
+                if let Some(outgoing) = edges_by_src.get(&src_addr) {
+                    let s = local_addr_to_idx[&src_addr];
+                    for &(dst, edge_type) in outgoing {
+                        if edge_type == EdgeType::Call {
+                            if dst == func.start_address {
+                                is_recursive = true;
+                            } else {
+                                external_calls.insert(dst);
+                            }
+                        } else if let Some(&d) = local_addr_to_idx.get(&dst) {
+                            local_adj[s].push(d as u32);
                         }
-                    } else if let Some(&d) = local_addr_to_idx.get(&dst) {
-                        let s = local_addr_to_idx[&src];
-                        local_adj[s].push(d as u32);
                     }
                 }
             }
@@ -357,6 +418,11 @@ impl<'buf> FeatureSet<'buf> {
                 is_recursive,
                 calls_from,
                 name,
+                nzxor_count,
+                peb_access_count,
+                fs_access_count,
+                gs_access_count,
+                tight_loop_count,
             });
         }
 
@@ -366,8 +432,8 @@ impl<'buf> FeatureSet<'buf> {
     /// Aggregates global file-level features across functions, imports, exports, and data sections.
     fn extract_file_scope(
         res: &'buf AnalysisResult<'buf>,
+        block_scopes: &[BlockScopeFeatures<'buf>],
         function_scopes: &[FunctionScopeFeatures],
-        total_blocks: usize,
         raw_buffer: &'buf [u8],
     ) -> FileScopeFeatures<'buf> {
         let mut apis = FxHashSet::with_capacity(res.imports.len() + res.exports.len());
@@ -400,16 +466,37 @@ impl<'buf> FeatureSet<'buf> {
             .max()
             .unwrap_or(0);
 
+        let mut nzxor_count = 0;
+        let mut peb_access_count = 0;
+        let mut fs_access_count = 0;
+        let mut gs_access_count = 0;
+        let mut tight_loop_count = 0;
+
+        for b in block_scopes {
+            nzxor_count += b.nzxor_count;
+            peb_access_count += b.peb_access_count;
+            fs_access_count += b.fs_access_count;
+            gs_access_count += b.gs_access_count;
+            if b.is_tight_loop {
+                tight_loop_count += 1;
+            }
+        }
+
         FileScopeFeatures {
             apis,
             strings,
             section_entropies: &res.section_entropy,
             has_code_cave: !res.code_cave.is_empty(),
             has_packer_sig: !res.packer_signatures.is_empty(),
-            basic_blocks_count: total_blocks,
+            basic_blocks_count: block_scopes.len(),
             has_loop,
             max_cyclomatic_complexity,
             raw_buffer,
+            nzxor_count,
+            peb_access_count,
+            fs_access_count,
+            gs_access_count,
+            tight_loop_count,
         }
     }
 
@@ -511,6 +598,45 @@ impl<'buf> FeatureSet<'buf> {
     #[inline]
     pub fn instructions(&self) -> &[InstructionInfo] {
         &self.cfg_instructions
+    }
+
+    /// Returns the inverted index mapping PatternID to basic block indices.
+    #[inline]
+    pub fn pattern_to_blocks(&self) -> &FxHashMap<PatternID, Vec<u32>> {
+        &self.indices.pattern_to_blocks
+    }
+
+    /// Returns the inverted index mapping PatternID to function indices.
+    #[inline]
+    pub fn pattern_to_functions(&self) -> &FxHashMap<PatternID, Vec<u32>> {
+        &self.indices.pattern_to_functions
+    }
+
+    /// Returns global pattern frequency counts across all basic blocks.
+    #[inline]
+    pub fn pattern_counts(&self) -> &FxHashMap<PatternID, usize> {
+        &self.indices.pattern_counts
+    }
+
+    /// Returns indices of basic blocks containing tight loops.
+    #[inline]
+    pub fn tight_loop_blocks(&self) -> &[u32] {
+        self.indices
+            .characteristic_blocks(CapaCharacteristic::TightLoop)
+    }
+
+    /// Returns indices of functions containing tight loops.
+    #[inline]
+    pub fn tight_loop_functions(&self) -> &[u32] {
+        self.indices
+            .characteristic_functions(CapaCharacteristic::TightLoop)
+    }
+
+    /// Returns indices of functions that are recursive.
+    #[inline]
+    pub fn recursive_functions(&self) -> &[u32] {
+        self.indices
+            .characteristic_functions(CapaCharacteristic::RecursiveCall)
     }
 
     /// Sorts and merges overlapping or contiguous address ranges.
@@ -651,6 +777,102 @@ impl<'buf> FeatureSet<'buf> {
             .max()
             .unwrap_or(1)
     }
+
+    /// Checks whether an instruction represents a non-zeroing XOR operation (`xor dst, src` with `dst != src`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{cfg::InstructionClass, disassembler::InstructionInfo, features::FeatureSet};
+    ///
+    /// let insn = InstructionInfo::new(0x1000, "xor", "eax, ebx", InstructionClass::Normal, None);
+    /// assert!(FeatureSet::is_nzxor(&insn));
+    ///
+    /// let zeroing = InstructionInfo::new(0x1000, "xor", "eax, eax", InstructionClass::Normal, None);
+    /// assert!(!FeatureSet::is_nzxor(&zeroing));
+    /// ```
+    #[inline]
+    pub fn is_nzxor(insn: &InstructionInfo) -> bool {
+        if insn.mnemonic != "xor" {
+            return false;
+        }
+        if let Some((dst, src)) = insn.op_str.split_once(',') {
+            let dst = dst.trim();
+            let src = src.trim();
+            !dst.is_empty() && !src.is_empty() && dst != src
+        } else {
+            false
+        }
+    }
+
+    /// Checks whether `haystack` contains `needle` case-insensitively without heap allocations.
+    #[inline]
+    pub(crate) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+        let needle_bytes = needle.as_bytes();
+        if needle_bytes.is_empty() {
+            return true;
+        }
+        let haystack_bytes = haystack.as_bytes();
+        if haystack_bytes.len() < needle_bytes.len() {
+            return false;
+        }
+        haystack_bytes
+            .windows(needle_bytes.len())
+            .any(|window| window.eq_ignore_ascii_case(needle_bytes))
+    }
+
+    /// Checks whether an instruction accesses the Process Environment Block (`fs:[0x30]` on x86, `gs:[0x60]` on x64).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{cfg::InstructionClass, disassembler::InstructionInfo, features::FeatureSet};
+    ///
+    /// let insn = InstructionInfo::new(0x1000, "mov", "eax, fs:[0x30]", InstructionClass::Normal, None);
+    /// assert!(FeatureSet::is_peb_access(&insn));
+    /// ```
+    #[inline]
+    pub fn is_peb_access(insn: &InstructionInfo) -> bool {
+        let op = &insn.op_str;
+        (Self::contains_ignore_ascii_case(op, "fs:")
+            && (Self::contains_ignore_ascii_case(op, "0x30")
+                || Self::contains_ignore_ascii_case(op, "[48]")
+                || Self::contains_ignore_ascii_case(op, " 48")))
+            || (Self::contains_ignore_ascii_case(op, "gs:")
+                && (Self::contains_ignore_ascii_case(op, "0x60")
+                    || Self::contains_ignore_ascii_case(op, "[96]")
+                    || Self::contains_ignore_ascii_case(op, " 96")))
+    }
+
+    /// Checks whether an instruction references the `fs:` segment register.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{cfg::InstructionClass, disassembler::InstructionInfo, features::FeatureSet};
+    ///
+    /// let insn = InstructionInfo::new(0x1000, "mov", "eax, fs:[0]", InstructionClass::Normal, None);
+    /// assert!(FeatureSet::is_fs_access(&insn));
+    /// ```
+    #[inline]
+    pub fn is_fs_access(insn: &InstructionInfo) -> bool {
+        Self::contains_ignore_ascii_case(&insn.op_str, "fs:")
+    }
+
+    /// Checks whether an instruction references the `gs:` segment register.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rbat::core::{cfg::InstructionClass, disassembler::InstructionInfo, features::FeatureSet};
+    ///
+    /// let insn = InstructionInfo::new(0x1000, "mov", "rax, gs:[0]", InstructionClass::Normal, None);
+    /// assert!(FeatureSet::is_gs_access(&insn));
+    /// ```
+    #[inline]
+    pub fn is_gs_access(insn: &InstructionInfo) -> bool {
+        Self::contains_ignore_ascii_case(&insn.op_str, "gs:")
+    }
 }
 
 /// Global format, operating system, and architecture features valid across all rule scopes.
@@ -695,6 +917,14 @@ pub struct BlockScopeFeatures<'buf> {
     pub(crate) instructions: &'buf [InstructionInfo],
     /// Whether this basic block branches directly to its own start address (tight loop).
     pub(crate) is_tight_loop: bool,
+    /// Count of non-zeroing XOR instructions in this block.
+    pub(crate) nzxor_count: usize,
+    /// Count of PEB-access instructions in this block.
+    pub(crate) peb_access_count: usize,
+    /// Count of fs: register access instructions in this block.
+    pub(crate) fs_access_count: usize,
+    /// Count of gs: register access instructions in this block.
+    pub(crate) gs_access_count: usize,
 }
 
 impl<'buf> BlockScopeFeatures<'buf> {
@@ -749,6 +979,54 @@ impl<'buf> BlockScopeFeatures<'buf> {
     pub fn is_tight_loop(&self) -> bool {
         self.is_tight_loop
     }
+
+    /// Returns whether any instruction in this block is a non-zeroing XOR.
+    #[inline]
+    pub fn has_nzxor(&self) -> bool {
+        self.nzxor_count > 0
+    }
+
+    /// Returns whether any instruction in this block accesses the PEB.
+    #[inline]
+    pub fn has_peb_access(&self) -> bool {
+        self.peb_access_count > 0
+    }
+
+    /// Returns whether any instruction in this block references fs: register.
+    #[inline]
+    pub fn has_fs_access(&self) -> bool {
+        self.fs_access_count > 0
+    }
+
+    /// Returns whether any instruction in this block references gs: register.
+    #[inline]
+    pub fn has_gs_access(&self) -> bool {
+        self.gs_access_count > 0
+    }
+
+    /// Returns the count of non-zeroing XOR instructions in this block.
+    #[inline]
+    pub fn nzxor_count(&self) -> usize {
+        self.nzxor_count
+    }
+
+    /// Returns the count of PEB-access instructions in this block.
+    #[inline]
+    pub fn peb_access_count(&self) -> usize {
+        self.peb_access_count
+    }
+
+    /// Returns the count of fs: register access instructions in this block.
+    #[inline]
+    pub fn fs_access_count(&self) -> usize {
+        self.fs_access_count
+    }
+
+    /// Returns the count of gs: register access instructions in this block.
+    #[inline]
+    pub fn gs_access_count(&self) -> usize {
+        self.gs_access_count
+    }
 }
 
 /// Localized features, control-flow metrics, and constituent basic blocks for a single function.
@@ -776,6 +1054,16 @@ pub struct FunctionScopeFeatures {
     pub(crate) calls_from: usize,
     /// FLIRT or symbol-recovered function name, if identified.
     pub(crate) name: Option<String>,
+    /// Total count of non-zeroing XOR instructions across constituent blocks.
+    pub(crate) nzxor_count: usize,
+    /// Total count of PEB accesses across constituent blocks.
+    pub(crate) peb_access_count: usize,
+    /// Total count of fs: register accesses across constituent blocks.
+    pub(crate) fs_access_count: usize,
+    /// Total count of gs: register accesses across constituent blocks.
+    pub(crate) gs_access_count: usize,
+    /// Total count of tight loops across constituent blocks.
+    pub(crate) tight_loop_count: usize,
 }
 
 impl FunctionScopeFeatures {
@@ -844,6 +1132,66 @@ impl FunctionScopeFeatures {
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
+
+    /// Returns whether any constituent block contains a non-zeroing XOR instruction.
+    #[inline]
+    pub fn has_nzxor(&self) -> bool {
+        self.nzxor_count > 0
+    }
+
+    /// Returns whether any constituent block accesses the PEB.
+    #[inline]
+    pub fn has_peb_access(&self) -> bool {
+        self.peb_access_count > 0
+    }
+
+    /// Returns whether any constituent block references fs: register.
+    #[inline]
+    pub fn has_fs_access(&self) -> bool {
+        self.fs_access_count > 0
+    }
+
+    /// Returns whether any constituent block references gs: register.
+    #[inline]
+    pub fn has_gs_access(&self) -> bool {
+        self.gs_access_count > 0
+    }
+
+    /// Returns whether any constituent block contains a tight loop.
+    #[inline]
+    pub fn has_tight_loop(&self) -> bool {
+        self.tight_loop_count > 0
+    }
+
+    /// Returns total count of non-zeroing XOR instructions across constituent blocks.
+    #[inline]
+    pub fn nzxor_count(&self) -> usize {
+        self.nzxor_count
+    }
+
+    /// Returns total count of PEB accesses across constituent blocks.
+    #[inline]
+    pub fn peb_access_count(&self) -> usize {
+        self.peb_access_count
+    }
+
+    /// Returns total count of fs: register accesses across constituent blocks.
+    #[inline]
+    pub fn fs_access_count(&self) -> usize {
+        self.fs_access_count
+    }
+
+    /// Returns total count of gs: register accesses across constituent blocks.
+    #[inline]
+    pub fn gs_access_count(&self) -> usize {
+        self.gs_access_count
+    }
+
+    /// Returns total count of tight loops across constituent blocks.
+    #[inline]
+    pub fn tight_loop_count(&self) -> usize {
+        self.tight_loop_count
+    }
 }
 
 /// Binary-wide structural and symbol features evaluated at file scope.
@@ -867,6 +1215,16 @@ pub struct FileScopeFeatures<'buf> {
     pub(crate) max_cyclomatic_complexity: usize,
     /// Raw binary buffer for direct regex pattern verification.
     pub(crate) raw_buffer: &'buf [u8],
+    /// Total count of non-zeroing XOR instructions in the binary.
+    pub(crate) nzxor_count: usize,
+    /// Total count of PEB accesses in the binary.
+    pub(crate) peb_access_count: usize,
+    /// Total count of fs: accesses in the binary.
+    pub(crate) fs_access_count: usize,
+    /// Total count of gs: accesses in the binary.
+    pub(crate) gs_access_count: usize,
+    /// Total count of tight loops in the binary.
+    pub(crate) tight_loop_count: usize,
 }
 
 impl<'buf> FileScopeFeatures<'buf> {
@@ -922,6 +1280,214 @@ impl<'buf> FileScopeFeatures<'buf> {
     #[inline]
     pub fn raw_buffer(&self) -> &'buf [u8] {
         self.raw_buffer
+    }
+
+    /// Returns whether any basic block contains a non-zeroing XOR instruction.
+    #[inline]
+    pub fn has_nzxor(&self) -> bool {
+        self.nzxor_count > 0
+    }
+
+    /// Returns whether any basic block accesses the PEB.
+    #[inline]
+    pub fn has_peb_access(&self) -> bool {
+        self.peb_access_count > 0
+    }
+
+    /// Returns whether any basic block references fs: register.
+    #[inline]
+    pub fn has_fs_access(&self) -> bool {
+        self.fs_access_count > 0
+    }
+
+    /// Returns whether any basic block references gs: register.
+    #[inline]
+    pub fn has_gs_access(&self) -> bool {
+        self.gs_access_count > 0
+    }
+
+    /// Returns whether any basic block is a tight loop.
+    #[inline]
+    pub fn has_tight_loop(&self) -> bool {
+        self.tight_loop_count > 0
+    }
+
+    /// Returns total count of non-zeroing XOR instructions in the binary.
+    #[inline]
+    pub fn nzxor_count(&self) -> usize {
+        self.nzxor_count
+    }
+
+    /// Returns total count of PEB accesses in the binary.
+    #[inline]
+    pub fn peb_access_count(&self) -> usize {
+        self.peb_access_count
+    }
+
+    /// Returns total count of fs: accesses in the binary.
+    #[inline]
+    pub fn fs_access_count(&self) -> usize {
+        self.fs_access_count
+    }
+
+    /// Returns total count of gs: accesses in the binary.
+    #[inline]
+    pub fn gs_access_count(&self) -> usize {
+        self.gs_access_count
+    }
+
+    /// Returns total count of tight loops in the binary.
+    #[inline]
+    pub fn tight_loop_count(&self) -> usize {
+        self.tight_loop_count
+    }
+}
+
+/// Inverted indices and precomputed characteristic candidate indices.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FeatureIndices {
+    /// Inverted index: maps PatternID to the indices of basic blocks containing this pattern.
+    pub(crate) pattern_to_blocks: FxHashMap<PatternID, Vec<u32>>,
+    /// Inverted index: maps PatternID to the indices of functions containing this pattern.
+    pub(crate) pattern_to_functions: FxHashMap<PatternID, Vec<u32>>,
+    /// Global count of each pattern across all basic blocks / instructions.
+    pub(crate) pattern_counts: FxHashMap<PatternID, usize>,
+    /// Precomputed block index lists for each characteristic.
+    pub(crate) characteristic_blocks: FxHashMap<CapaCharacteristic, Vec<u32>>,
+    /// Precomputed function index lists for each characteristic.
+    pub(crate) characteristic_functions: FxHashMap<CapaCharacteristic, Vec<u32>>,
+}
+
+impl FeatureIndices {
+    /// Returns the basic block indices matching a given characteristic.
+    #[inline]
+    pub fn characteristic_blocks(&self, char: CapaCharacteristic) -> &[u32] {
+        self.characteristic_blocks
+            .get(&char)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Returns the function indices matching a given characteristic.
+    #[inline]
+    pub fn characteristic_functions(&self, char: CapaCharacteristic) -> &[u32] {
+        self.characteristic_functions
+            .get(&char)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Rebuilds inverted index mappings and characteristic lists from current basic blocks and functions.
+    pub(crate) fn build(
+        &mut self,
+        blocks: &[BlockScopeFeatures<'_>],
+        functions: &[FunctionScopeFeatures],
+    ) {
+        self.pattern_to_blocks.clear();
+        self.pattern_counts.clear();
+        self.characteristic_blocks.clear();
+
+        let mut tight_loop_blocks = Vec::new();
+        let mut nzxor_blocks = Vec::new();
+        let mut peb_access_blocks = Vec::new();
+        let mut fs_access_blocks = Vec::new();
+        let mut gs_access_blocks = Vec::new();
+
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_idx_u32 = block_idx as u32;
+            if block.is_tight_loop {
+                tight_loop_blocks.push(block_idx_u32);
+            }
+            if block.has_nzxor() {
+                nzxor_blocks.push(block_idx_u32);
+            }
+            if block.has_peb_access() {
+                peb_access_blocks.push(block_idx_u32);
+            }
+            if block.has_fs_access() {
+                fs_access_blocks.push(block_idx_u32);
+            }
+            if block.has_gs_access() {
+                gs_access_blocks.push(block_idx_u32);
+            }
+            for insn in block.instructions {
+                for &pat in &insn.matched {
+                    *self.pattern_counts.entry(pat).or_insert(0) += 1;
+                    let b_list = self.pattern_to_blocks.entry(pat).or_default();
+                    if b_list.last().copied() != Some(block_idx_u32) {
+                        b_list.push(block_idx_u32);
+                    }
+                }
+            }
+        }
+
+        self.characteristic_blocks
+            .insert(CapaCharacteristic::TightLoop, tight_loop_blocks);
+        self.characteristic_blocks
+            .insert(CapaCharacteristic::Nzxor, nzxor_blocks);
+        self.characteristic_blocks
+            .insert(CapaCharacteristic::PebAccess, peb_access_blocks);
+        self.characteristic_blocks
+            .insert(CapaCharacteristic::FsAccess, fs_access_blocks);
+        self.characteristic_blocks
+            .insert(CapaCharacteristic::GsAccess, gs_access_blocks);
+
+        self.pattern_to_functions.clear();
+        self.characteristic_functions.clear();
+
+        let mut tight_loop_functions = Vec::new();
+        let mut loop_functions = Vec::new();
+        let mut recursive_functions = Vec::new();
+        let mut nzxor_functions = Vec::new();
+        let mut peb_access_functions = Vec::new();
+        let mut fs_access_functions = Vec::new();
+        let mut gs_access_functions = Vec::new();
+
+        for (func_idx, func) in functions.iter().enumerate() {
+            let func_idx_u32 = func_idx as u32;
+            if func.has_tight_loop() {
+                tight_loop_functions.push(func_idx_u32);
+            }
+            if func.has_loop() {
+                loop_functions.push(func_idx_u32);
+            }
+            if func.is_recursive() {
+                recursive_functions.push(func_idx_u32);
+            }
+            if func.has_nzxor() {
+                nzxor_functions.push(func_idx_u32);
+            }
+            if func.has_peb_access() {
+                peb_access_functions.push(func_idx_u32);
+            }
+            if func.has_fs_access() {
+                fs_access_functions.push(func_idx_u32);
+            }
+            if func.has_gs_access() {
+                gs_access_functions.push(func_idx_u32);
+            }
+            for &pat in &func.patterns {
+                self.pattern_to_functions
+                    .entry(pat)
+                    .or_default()
+                    .push(func_idx_u32);
+            }
+        }
+
+        self.characteristic_functions
+            .insert(CapaCharacteristic::TightLoop, tight_loop_functions);
+        self.characteristic_functions
+            .insert(CapaCharacteristic::Loop, loop_functions);
+        self.characteristic_functions
+            .insert(CapaCharacteristic::RecursiveCall, recursive_functions);
+        self.characteristic_functions
+            .insert(CapaCharacteristic::Nzxor, nzxor_functions);
+        self.characteristic_functions
+            .insert(CapaCharacteristic::PebAccess, peb_access_functions);
+        self.characteristic_functions
+            .insert(CapaCharacteristic::FsAccess, fs_access_functions);
+        self.characteristic_functions
+            .insert(CapaCharacteristic::GsAccess, gs_access_functions);
     }
 }
 
