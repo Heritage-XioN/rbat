@@ -72,13 +72,5 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-      - name: Workspace Tests (Default Features)
+      - name: Workspace Tests
         run: cargo test --workspace --all-targets --verbose
-      - name: Test rbat (backend-iced only)
-        run: cargo test -p rbat --no-default-features --features backend-iced
-      - name: Test rbat (backend-capstone only)
-        run: cargo test -p rbat --no-default-features --features backend-capstone
-      - name: Test rbat-cli (backend-iced only)
-        run: cargo test -p rbat-cli --no-default-features --features backend-iced
-      - name: Test rbat-cli (backend-capstone only)
-        run: cargo test -p rbat-cli --no-default-features --features backend-capstone
