@@ -62,7 +62,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::sync::Arc;
 
-/// this type represents the adjacency vector.
+/// this type represents an adjacency vector.
 type Adj = Vec<SmallVec<[u32; 2]>>;
 
 /// Collected metrics, symbols, and structural indicators partitioned by scope.
@@ -807,7 +807,7 @@ impl<'buf> FeatureSet<'buf> {
 
     /// Checks whether `haystack` contains `needle` case-insensitively without heap allocations.
     #[inline]
-    pub(crate) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
         let needle_bytes = needle.as_bytes();
         if needle_bytes.is_empty() {
             return true;
@@ -1378,11 +1378,7 @@ impl FeatureIndices {
     }
 
     /// Rebuilds inverted index mappings and characteristic lists from current basic blocks and functions.
-    pub(crate) fn build(
-        &mut self,
-        blocks: &[BlockScopeFeatures<'_>],
-        functions: &[FunctionScopeFeatures],
-    ) {
+    fn build(&mut self, blocks: &[BlockScopeFeatures<'_>], functions: &[FunctionScopeFeatures]) {
         self.pattern_to_blocks.clear();
         self.pattern_counts.clear();
         self.characteristic_blocks.clear();
