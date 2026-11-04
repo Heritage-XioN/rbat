@@ -1,9 +1,6 @@
 use crate::common::load_sample;
 use criterion::{Criterion, Throughput};
-use rbat::core::analyzer::Analyzer;
-use rbat::core::features::FeatureSet;
-use rbat::core::needle::NeedleIndex;
-use rbat::core::rule::Rule;
+use rbat::core::{analyzer::Analyzer, eval::Rule, features::FeatureSet, needle::NeedleIndex};
 
 pub fn bench_rules(c: &mut Criterion) {
     let rules = Rule::load_embedded();

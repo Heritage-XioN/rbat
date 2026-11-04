@@ -28,8 +28,8 @@
 //!
 //! ```rust
 //! use rbat::core::{
+//!   eval::Rule,
 //!   needle::NeedleIndex,
-//!   rule::Rule,
 //! };
 //!
 //! let rules = Rule::load_embedded();
@@ -41,7 +41,7 @@
 use crate::core::{
     cfg::ControlFlowGraph,
     disassembler::InstructionInfo,
-    rule::{Rule, RuleCondition},
+    eval::{Rule, RuleCondition},
 };
 use ahash::{AHashMap, AHashSet};
 use aho_corasick::{AhoCorasick, PatternID};
@@ -61,8 +61,8 @@ use std::sync::{
 ///
 /// ```rust
 /// use rbat::core::{
+///   eval::Rule,
 ///   needle::NeedleIndex,
-///   rule::Rule,
 /// };
 ///
 /// let rules = Rule::load_embedded();
@@ -100,8 +100,8 @@ impl NeedleIndex {
     ///
     /// ```rust
     /// use rbat::core::{
+    ///   eval::Rule,
     ///   needle::NeedleIndex,
-    ///   rule::Rule,
     /// };
     ///
     /// let rules = Rule::load_embedded();
@@ -286,9 +286,9 @@ impl NeedleIndex {
     /// ```rust
     /// use rbat::core::{
     ///   cfg::ControlFlowGraph,
+    ///   eval::Rule,
     ///   needle::NeedleIndex,
     ///   parser::BinaryArch,
-    ///   rule::Rule,
     /// };
     /// use std::sync::Arc;
     ///
@@ -365,7 +365,7 @@ impl NeedleIndex {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::{needle::NeedleIndex, rule::Rule};
+    /// use rbat::core::{eval::Rule, needle::NeedleIndex};
     ///
     /// let rules = Rule::load_embedded();
     /// let needle = NeedleIndex::new(&rules);
@@ -433,7 +433,7 @@ impl NeedleIndex {
     /// # Examples
     ///
     /// ```rust
-    /// use rbat::core::{needle::NeedleIndex, rule::Rule};
+    /// use rbat::core::{eval::Rule, needle::NeedleIndex};
     ///
     /// let rules = Rule::load_embedded();
     /// let needle = NeedleIndex::new(&rules);
@@ -472,7 +472,7 @@ impl NeedleIndex {
     ///
     /// ```rust
     /// use ahash::AHashSet;
-    /// use rbat::core::{needle::NeedleIndex, rule::Rule};
+    /// use rbat::core::{eval::Rule, needle::NeedleIndex};
     ///
     /// let rules = Rule::load_embedded();
     /// let needle = NeedleIndex::new(&rules);
@@ -649,7 +649,7 @@ impl NeedleIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::rule::{RuleInner, RuleMeta};
+    use crate::core::eval::{RuleInner, RuleMeta};
 
     #[test]
     fn test_needle_scan_buffer_ascii_and_utf16le() {

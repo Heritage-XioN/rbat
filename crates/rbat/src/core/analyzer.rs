@@ -71,11 +71,11 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use crate::core::{
     disassembler::{DisassemblerBackend, InstructionInfo},
+    eval::Rule,
     features::FeatureSet,
     flirt::FlirtMatcher,
     needle::NeedleIndex,
     parser::{ParsedBinaryContext, Parser},
-    rule::Rule,
     scoring::{classifier::SeverityClassifier, risk::RiskAssessment},
     traits::Disassembler,
     traits::HeuristicPlugin,

@@ -76,13 +76,13 @@
 pub mod analyzer;
 pub mod cfg;
 pub mod disassembler;
+pub mod eval;
 pub mod features;
 pub mod flirt;
 pub(crate) mod heuristics;
 pub mod needle;
 pub mod parser;
 pub(crate) mod plugins;
-pub mod rule;
 pub mod scoring;
 pub mod traits;
 pub mod types;

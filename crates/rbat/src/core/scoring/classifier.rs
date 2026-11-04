@@ -65,7 +65,7 @@
 //!
 //! ```rust
 //! use rbat::core::{
-//!   rule::RuleMeta,
+//!   eval::RuleMeta,
 //!   scoring::classifier::{SeverityClass, SeverityClassifier},
 //! };
 //!
@@ -91,7 +91,7 @@
 //! [`risk`]: crate::core::scoring::risk
 
 use crate::core::{
-    rule::RuleMeta,
+    eval::RuleMeta,
     types::result::{RbatError, RbatResult},
 };
 use serde::{Deserialize, Serialize};
@@ -248,7 +248,7 @@ impl SeverityClass {
 ///
 /// ```rust
 /// use rbat::core::{
-///   rule::RuleMeta,
+///   eval::RuleMeta,
 ///   scoring::classifier::{SeverityClass, SeverityClassifier},
 /// };
 ///
@@ -421,7 +421,7 @@ impl SeverityClassifier {
     ///
     /// ```rust
     /// use rbat::core::{
-    ///   rule::RuleMeta,
+    ///   eval::RuleMeta,
     ///   scoring::classifier::{SeverityClass, SeverityClassifier},
     /// };
     ///
@@ -596,7 +596,7 @@ impl SeverityClassifier {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::rule::StringOrVec;
+    use crate::core::eval::StringOrVec;
 
     use super::*;
 

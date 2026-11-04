@@ -6,10 +6,10 @@ pub use crate::core::{
     analyzer::Analyzer,
     cfg::{BasicBlock, ControlFlowGraph, Function},
     disassembler::{DisassemblerBackend, InstructionInfo},
+    eval::{CapaCharacteristic, Rule, RuleScope},
     features::{BlockScopeFeatures, FeatureSet, FunctionScopeFeatures, GlobalScopeFeatures},
     flirt::FlirtMatcher,
     needle::NeedleIndex,
-    rule::{CapaCharacteristic, Rule, RuleScope},
     scoring::{
         classifier::{SeverityClass, SeverityClassifier},
         risk::{FindingCounts, RiskAssessment},

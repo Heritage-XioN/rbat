@@ -45,14 +45,14 @@
 //! let _features = FeatureSet::new(&result, &[]);
 //! ```
 //!
-//! [`Rule::evaluate`]: crate::core::rule::Rule::evaluate
+//! [`Rule::evaluate`]: crate::core::eval::Rule::evaluate
 
 use crate::core::{
     cfg::{BasicBlock, ControlFlowGraph, EdgeType},
     disassembler::InstructionInfo,
+    eval::CapaCharacteristic,
     flirt::FlirtMatcher,
     parser::BinaryArch,
-    rule::CapaCharacteristic,
     types::analysis::AnalysisResult,
 };
 use ahash::{AHashMap, AHashSet, HashMapExt, HashSetExt};

@@ -57,7 +57,7 @@
 //!
 //! ```rust
 //! use rbat::core::{
-//!   rule::RuleMeta,
+//!   eval::RuleMeta,
 //!   scoring::{risk::RiskAssessment, classifier::SeverityClassifier},
 //! };
 //!
@@ -74,7 +74,7 @@
 //! ```
 
 use crate::core::{
-    rule::{RuleMeta, StringOrVec},
+    eval::{RuleMeta, StringOrVec},
     scoring::classifier::{SeverityClass, SeverityClassifier},
 };
 use ahash::{AHashMap, AHashSet};
@@ -140,7 +140,7 @@ impl RiskAssessment {
     ///
     /// ```rust
     /// use rbat::core::{
-    ///   rule::RuleMeta,
+    ///   eval::RuleMeta,
     ///   scoring::{risk::RiskAssessment, classifier::SeverityClassifier},
     /// };
     ///
