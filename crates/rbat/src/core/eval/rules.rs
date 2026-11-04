@@ -1000,7 +1000,6 @@ pub struct RuleMeta {
 mod tests {
     use super::*;
     use crate::core::eval::test_helpers::*;
-    use crate::core::features::GlobalScopeFeatures;
     use crate::core::{
         cfg::{BasicBlock, ControlFlowGraph},
         disassembler::InstructionInfo,
@@ -1015,23 +1014,18 @@ mod tests {
         let mut section_entropies = AHashMap::new();
         section_entropies.insert(".text", 7.8);
 
-        let features = make_test_feature_set(
-            make_test_file_scope(
-                FxHashSet::from_iter([aho_corasick::PatternID::must(0)]),
-                &section_entropies,
-                0,
-                false,
-                0,
-            ),
-            Vec::new(),
-            Vec::new(),
-            GlobalScopeFeatures {
-                os: "linux".to_string(),
-                arch: "x86_64".to_string(),
-                binary_format: "elf".to_string(),
-            },
-            Arc::from([]),
+        let mut file_scope = make_test_file_scope(
+            FxHashSet::from_iter([aho_corasick::PatternID::must(0)]),
+            &section_entropies,
+            0,
+            false,
+            0,
         );
+        file_scope.os = "linux".to_string();
+        file_scope.arch = "x86_64".to_string();
+        file_scope.binary_format = "elf".to_string();
+
+        let features = make_test_feature_set(file_scope, Vec::new(), Vec::new(), Arc::from([]));
 
         // Simple API Match Rule
         let rule_api = Rule {
@@ -1177,17 +1171,13 @@ mod tests {
         let empty_entropy = AHashMap::new();
         let cfg_instructions: Arc<[InstructionInfo]> = insns.clone().into();
         let block_scope = make_test_block(block1.start_address, block1.end_address, &insns, false);
-        let features = make_test_feature_set(
-            make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, true, 5),
-            Vec::new(),
-            vec![block_scope],
-            GlobalScopeFeatures {
-                os: "Windows".to_owned(),
-                arch: "x86_64".to_owned(),
-                binary_format: "pe".to_owned(),
-            },
-            cfg_instructions,
-        );
+        let mut file_scope = make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, true, 5);
+        file_scope.os = "Windows".to_owned();
+        file_scope.arch = "x86_64".to_owned();
+        file_scope.binary_format = "pe".to_owned();
+
+        let features =
+            make_test_feature_set(file_scope, Vec::new(), vec![block_scope], cfg_instructions);
 
         let matches = Rule::evaluate(&features, &rules, &needle);
 
@@ -1244,17 +1234,12 @@ mod tests {
             apis.insert(id);
         }
 
-        let features = make_test_feature_set(
-            make_test_file_scope(apis, &empty_entropy, 0, false, 0),
-            Vec::new(),
-            Vec::new(),
-            GlobalScopeFeatures {
-                os: "windows pe".to_owned(),
-                arch: "x86_64".to_owned(),
-                binary_format: "pe".to_owned(),
-            },
-            Arc::from([]),
-        );
+        let mut file_scope = make_test_file_scope(apis, &empty_entropy, 0, false, 0);
+        file_scope.os = "windows pe".to_owned();
+        file_scope.arch = "x86_64".to_owned();
+        file_scope.binary_format = "pe".to_owned();
+
+        let features = make_test_feature_set(file_scope, Vec::new(), Vec::new(), Arc::from([]));
 
         let matched = Rule::evaluate(&features, &rules, &needle);
         // Only the consumer rule should be returned (lib rules are filtered from final results)

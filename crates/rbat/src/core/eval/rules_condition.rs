@@ -537,9 +537,9 @@ impl RuleCondition {
                 }
             }
             // Minimally match OS and Arch if present
-            Self::Os { os } => features.global_scope.os.contains(os),
-            Self::Arch { arch } => features.global_scope.arch.contains(arch),
-            Self::Format { format } => features.global_scope.binary_format.contains(format),
+            Self::Os { os } => features.file_scope.os.contains(os),
+            Self::Arch { arch } => features.file_scope.arch.contains(arch),
+            Self::Format { format } => features.file_scope.binary_format.contains(format),
             Self::Import { import } => {
                 if let Some(id) = needle.lookup.get(import) {
                     features.file_scope.apis.contains(id)
@@ -961,9 +961,9 @@ impl RuleCondition {
                         })
                 })
             }
-            Self::Os { os } => features.global_scope.os.contains(os),
-            Self::Arch { arch } => features.global_scope.arch.contains(arch),
-            Self::Format { format } => features.global_scope.binary_format.contains(format),
+            Self::Os { os } => features.file_scope.os.contains(os),
+            Self::Arch { arch } => features.file_scope.arch.contains(arch),
+            Self::Format { format } => features.file_scope.binary_format.contains(format),
             Self::Section { section } => features
                 .file_scope
                 .section_entropies
@@ -1206,9 +1206,9 @@ impl RuleCondition {
                     })
                 })
             }
-            Self::Os { os } => features.global_scope.os.contains(os),
-            Self::Arch { arch } => features.global_scope.arch.contains(arch),
-            Self::Format { format } => features.global_scope.binary_format.contains(format),
+            Self::Os { os } => features.file_scope.os.contains(os),
+            Self::Arch { arch } => features.file_scope.arch.contains(arch),
+            Self::Format { format } => features.file_scope.binary_format.contains(format),
             Self::Section { section } => features
                 .file_scope
                 .section_entropies
@@ -1376,9 +1376,9 @@ impl RuleCondition {
             Self::InstructionScope { conditions } | Self::CallScope { conditions } => conditions
                 .iter()
                 .all(|c| c.matches_instruction_scope(insn, features, needle, matched_rules)),
-            Self::Os { os } => features.global_scope.os.contains(os),
-            Self::Arch { arch } => features.global_scope.arch.contains(arch),
-            Self::Format { format } => features.global_scope.binary_format.contains(format),
+            Self::Os { os } => features.file_scope.os.contains(os),
+            Self::Arch { arch } => features.file_scope.arch.contains(arch),
+            Self::Format { format } => features.file_scope.binary_format.contains(format),
             Self::Section { section } => features
                 .file_scope
                 .section_entropies
@@ -1484,6 +1484,16 @@ impl RuleCondition {
             | Self::InstructionScope { conditions } => conditions
                 .iter()
                 .all(|c| c.is_present(needle, features, matched_rules)),
+            Self::Os { os } => {
+                features.file_scope.os.is_empty() || features.file_scope.os.contains(os)
+            }
+            Self::Arch { arch } => {
+                features.file_scope.arch.is_empty() || features.file_scope.arch.contains(arch)
+            }
+            Self::Format { format } => {
+                features.file_scope.binary_format.is_empty()
+                    || features.file_scope.binary_format.contains(format)
+            }
             _ => true,
         }
     }
@@ -1590,7 +1600,6 @@ mod tests {
     use super::*;
     use crate::core::eval::test_helpers::*;
     use crate::core::eval::{RuleInner, RuleMeta, RuleScope};
-    use crate::core::features::GlobalScopeFeatures;
     use crate::core::{cfg::BasicBlock, disassembler::InstructionInfo, needle::NeedleIndex};
     use ahash::{AHashMap, AHashSet};
     use rustc_hash::FxHashSet;
@@ -1599,17 +1608,13 @@ mod tests {
     #[test]
     fn test_format_condition_matching() {
         let empty_entropy = AHashMap::new();
-        let features = make_test_feature_set(
-            make_test_file_scope(FxHashSet::default(), &empty_entropy, 0, false, 0),
-            Vec::new(),
-            Vec::new(),
-            GlobalScopeFeatures {
-                os: "windows pe".to_owned(),
-                arch: "x86".to_owned(),
-                binary_format: "pe".to_owned(),
-            },
-            Arc::from([]),
-        );
+        let mut file_scope =
+            make_test_file_scope(FxHashSet::default(), &empty_entropy, 0, false, 0);
+        file_scope.os = "windows pe".to_owned();
+        file_scope.arch = "x86".to_owned();
+        file_scope.binary_format = "pe".to_owned();
+
+        let features = make_test_feature_set(file_scope, Vec::new(), Vec::new(), Arc::from([]));
 
         let rule_pe = RuleCondition::Format {
             format: "pe".to_owned(),
@@ -1678,17 +1683,14 @@ mod tests {
         let empty_entropy = AHashMap::new();
         let cfg_instructions: Arc<[InstructionInfo]> = insns.clone().into();
         let block_scope = make_test_block(block.start_address, block.end_address, &insns, false);
-        let features_two_calls = make_test_feature_set(
-            make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, false, 1),
-            Vec::new(),
-            vec![block_scope],
-            GlobalScopeFeatures {
-                os: "windows".to_owned(),
-                arch: "x86_64".to_owned(),
-                binary_format: "pe".to_owned(),
-            },
-            cfg_instructions,
-        );
+        let mut file_scope =
+            make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, false, 1);
+        file_scope.os = "windows".to_owned();
+        file_scope.arch = "x86_64".to_owned();
+        file_scope.binary_format = "pe".to_owned();
+
+        let features_two_calls =
+            make_test_feature_set(file_scope, Vec::new(), vec![block_scope], cfg_instructions);
 
         let matched = Rule::evaluate(&features_two_calls, &rules, &needle);
         assert_eq!(matched.len(), 1);
@@ -1719,17 +1721,11 @@ mod tests {
         let mut file_scope =
             make_test_file_scope(FxHashSet::default(), &empty_entropy, 0, false, 0);
         file_scope.raw_buffer = buf;
-        let features = make_test_feature_set(
-            file_scope,
-            Vec::new(),
-            Vec::new(),
-            GlobalScopeFeatures {
-                os: "windows".to_owned(),
-                arch: "x86_64".to_owned(),
-                binary_format: "pe".to_owned(),
-            },
-            Arc::from([]),
-        );
+        file_scope.os = "windows".to_owned();
+        file_scope.arch = "x86_64".to_owned();
+        file_scope.binary_format = "pe".to_owned();
+
+        let features = make_test_feature_set(file_scope, Vec::new(), Vec::new(), Arc::from([]));
 
         let matches = Rule::evaluate(&features, &rules, &needle);
         assert_eq!(matches.len(), 1);
@@ -1786,17 +1782,12 @@ rule:
         file_apis.insert(pid_create_process);
         file_apis.insert(pid_virtual_alloc);
 
-        let features = make_test_feature_set(
-            make_test_file_scope(file_apis, &empty_entropy, 2, false, 1),
-            vec![fn1, fn2],
-            blocks,
-            GlobalScopeFeatures {
-                os: "windows".to_owned(),
-                arch: "x86".to_owned(),
-                binary_format: "pe".to_owned(),
-            },
-            Arc::from([]),
-        );
+        let mut file_scope = make_test_file_scope(file_apis, &empty_entropy, 2, false, 1);
+        file_scope.os = "windows".to_owned();
+        file_scope.arch = "x86".to_owned();
+        file_scope.binary_format = "pe".to_owned();
+
+        let features = make_test_feature_set(file_scope, vec![fn1, fn2], blocks, Arc::from([]));
 
         let empty_matched = AHashSet::new();
         assert!(!rule.matches(&features, &needle, &empty_matched));
@@ -1849,17 +1840,12 @@ rule:
         file_apis.insert(pid_create_process);
         file_apis.insert(pid_virtual_alloc);
 
-        let features = make_test_feature_set(
-            make_test_file_scope(file_apis, &empty_entropy, 2, false, 1),
-            vec![func],
-            blocks,
-            GlobalScopeFeatures {
-                os: "windows".to_owned(),
-                arch: "x86".to_owned(),
-                binary_format: "pe".to_owned(),
-            },
-            Arc::from([]),
-        );
+        let mut file_scope = make_test_file_scope(file_apis, &empty_entropy, 2, false, 1);
+        file_scope.os = "windows".to_owned();
+        file_scope.arch = "x86".to_owned();
+        file_scope.binary_format = "pe".to_owned();
+
+        let features = make_test_feature_set(file_scope, vec![func], blocks, Arc::from([]));
 
         let empty_matched = AHashSet::new();
         assert!(rule.matches(&features, &needle, &empty_matched));
@@ -1910,7 +1896,6 @@ rule:
             file_scope_disjoint,
             Vec::new(),
             blocks_disjoint,
-            GlobalScopeFeatures::default(),
             Arc::from([]),
         );
 
@@ -1920,13 +1905,8 @@ rule:
         let blocks_match = vec![make_test_block(0x1000, 0x1005, &insns_b1, false)];
         let file_scope_match =
             make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, false, 1);
-        let features_match = make_test_feature_set(
-            file_scope_match,
-            Vec::new(),
-            blocks_match,
-            GlobalScopeFeatures::default(),
-            Arc::from([]),
-        );
+        let features_match =
+            make_test_feature_set(file_scope_match, Vec::new(), blocks_match, Arc::from([]));
 
         assert!(rule.matches(&features_match, &needle, &empty_matched));
     }
@@ -1966,13 +1946,8 @@ rule:
         let empty_entropy = AHashMap::new();
         let file_scope_match =
             make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, false, 1);
-        let features_match = make_test_feature_set(
-            file_scope_match,
-            Vec::new(),
-            blocks_match,
-            GlobalScopeFeatures::default(),
-            Arc::from([]),
-        );
+        let features_match =
+            make_test_feature_set(file_scope_match, Vec::new(), blocks_match, Arc::from([]));
 
         let empty_matched = AHashSet::new();
         assert!(rule.matches(&features_match, &needle, &empty_matched));
@@ -1985,13 +1960,8 @@ rule:
 
         let file_scope_split =
             make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, false, 1);
-        let features_split = make_test_feature_set(
-            file_scope_split,
-            Vec::new(),
-            blocks_split,
-            GlobalScopeFeatures::default(),
-            Arc::from([]),
-        );
+        let features_split =
+            make_test_feature_set(file_scope_split, Vec::new(), blocks_split, Arc::from([]));
 
         assert!(!rule.matches(&features_split, &needle, &empty_matched));
     }
@@ -2024,13 +1994,7 @@ rule:
 
         let empty_entropy = AHashMap::new();
         let file_scope = make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, true, 1);
-        let features = make_test_feature_set(
-            file_scope,
-            vec![func],
-            blocks,
-            GlobalScopeFeatures::default(),
-            Arc::from([]),
-        );
+        let features = make_test_feature_set(file_scope, vec![func], blocks, Arc::from([]));
 
         let empty_matched = AHashSet::new();
         assert!(rule_loop.matches(&features, &needle_loop, &empty_matched));
@@ -2079,13 +2043,8 @@ rule:
         let blocks_with_xor = vec![make_test_block(0x1000, 0x1005, &insns_with_xor, false)];
         let file_scope_insn =
             make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, false, 1);
-        let features_insn_block = make_test_feature_set(
-            file_scope_insn,
-            Vec::new(),
-            blocks_with_xor,
-            GlobalScopeFeatures::default(),
-            Arc::from([]),
-        );
+        let features_insn_block =
+            make_test_feature_set(file_scope_insn, Vec::new(), blocks_with_xor, Arc::from([]));
 
         assert!(rule_insn_block.matches(&features_insn_block, &needle_insn_block, &empty_matched));
     }

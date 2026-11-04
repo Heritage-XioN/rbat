@@ -340,7 +340,7 @@ pub(crate) mod test_helpers {
         disassembler::InstructionInfo,
         features::{
             BlockScopeFeatures, FeatureIndices, FeatureSet, FileScopeFeatures,
-            FunctionScopeFeatures, GlobalScopeFeatures,
+            FunctionScopeFeatures,
         },
     };
     use ahash::{AHashMap, AHashSet};
@@ -460,6 +460,9 @@ pub(crate) mod test_helpers {
         max_cyclomatic_complexity: usize,
     ) -> FileScopeFeatures<'buf> {
         FileScopeFeatures {
+            os: String::new(),
+            arch: String::new(),
+            binary_format: String::new(),
             apis,
             strings: AHashSet::new(),
             section_entropies,
@@ -481,7 +484,6 @@ pub(crate) mod test_helpers {
         mut file_scope: FileScopeFeatures<'buf>,
         function_scope: Vec<FunctionScopeFeatures>,
         basic_block_scope: Vec<BlockScopeFeatures<'buf>>,
-        global_scope: GlobalScopeFeatures,
         cfg_instructions: Arc<[InstructionInfo]>,
     ) -> FeatureSet<'buf> {
         let mut nzxor_count = 0;
@@ -508,7 +510,6 @@ pub(crate) mod test_helpers {
             file_scope,
             function_scope,
             basic_block_scope,
-            global_scope,
             cfg_instructions,
             indices: FeatureIndices::default(),
         };
@@ -521,7 +522,6 @@ pub(crate) mod test_helpers {
 mod tests {
     use super::test_helpers::*;
     use super::*;
-    use crate::core::features::GlobalScopeFeatures;
     use crate::core::needle::NeedleIndex;
     use ahash::{AHashMap, AHashSet};
     use rustc_hash::FxHashSet;
@@ -546,13 +546,7 @@ rule:
         let mut file_scope =
             make_test_file_scope(FxHashSet::default(), &empty_entropy, 0, false, 0);
         file_scope.strings = AHashSet::from_iter(["evil".to_string()]);
-        let features = make_test_feature_set(
-            file_scope,
-            Vec::new(),
-            Vec::new(),
-            GlobalScopeFeatures::default(),
-            Arc::from([]),
-        );
+        let features = make_test_feature_set(file_scope, Vec::new(), Vec::new(), Arc::from([]));
 
         let empty_matched = AHashSet::new();
         assert!(!rule.matches(&features, &needle, &empty_matched));
@@ -586,13 +580,7 @@ rule:
             make_test_file_scope(FxHashSet::default(), &empty_entropy, 1, false, 1);
         file_scope.has_code_cave = true;
         file_scope.has_packer_sig = true;
-        let features = make_test_feature_set(
-            file_scope,
-            Vec::new(),
-            blocks,
-            GlobalScopeFeatures::default(),
-            Arc::from([]),
-        );
+        let features = make_test_feature_set(file_scope, Vec::new(), blocks, Arc::from([]));
         let empty_matched = AHashSet::new();
         assert!(rule_peb.matches(&features, &needle_peb, &empty_matched));
 
@@ -635,13 +623,8 @@ rule:
 
         let file_scope_multi =
             make_test_file_scope(FxHashSet::default(), &empty_entropy, 2, false, 1);
-        let features_multi_bb = make_test_feature_set(
-            file_scope_multi,
-            vec![func],
-            blocks2,
-            GlobalScopeFeatures::default(),
-            Arc::from([]),
-        );
+        let features_multi_bb =
+            make_test_feature_set(file_scope_multi, vec![func], blocks2, Arc::from([]));
 
         assert!(rule_count_bb.matches(&features_multi_bb, &needle_count_bb, &empty_matched));
 

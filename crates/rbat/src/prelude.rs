@@ -7,7 +7,7 @@ pub use crate::core::{
     cfg::{BasicBlock, ControlFlowGraph, Function},
     disassembler::{DisassemblerBackend, InstructionInfo},
     eval::{CapaCharacteristic, Rule, RuleScope},
-    features::{BlockScopeFeatures, FeatureSet, FunctionScopeFeatures, GlobalScopeFeatures},
+    features::{BlockScopeFeatures, FeatureSet, FileScopeFeatures, FunctionScopeFeatures},
     flirt::FlirtMatcher,
     needle::NeedleIndex,
     scoring::{

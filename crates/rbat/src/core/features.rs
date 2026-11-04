@@ -6,10 +6,9 @@
 //! ## Core Types
 //!
 //! - [`FeatureSet`]: Master container of features partitioned across all scope levels.
-//! - [`FileScopeFeatures`]: Whole-binary structural metrics, dynamic imports, exports, and YARA strings.
+//! - [`FileScopeFeatures`]: Whole-binary structural metrics, platform metadata, imports, exports, and strings.
 //! - [`FunctionScopeFeatures`]: Per-function control-flow topology, local cycles, complexity, and localized patterns.
 //! - [`BlockScopeFeatures`]: Per-basic-block instruction slices, tight loops, and localized pattern hits.
-//! - [`GlobalScopeFeatures`]: Universal architecture, OS, and binary format metadata.
 //!
 //! ## Overview
 //!
@@ -69,10 +68,9 @@ type Adj = Vec<SmallVec<[u32; 2]>>;
 ///
 /// `FeatureSet` organizes binary characteristics into pre-indexed sets and normalized metrics
 /// partitioned by Capa scope tiers:
-/// - [`FileScopeFeatures`]: Whole-binary structural metrics, imports, exports, and YARA strings.
+/// - [`FileScopeFeatures`]: Whole-binary structural metrics, platform metadata, imports, exports, and strings.
 /// - [`FunctionScopeFeatures`]: Per-function control-flow topology, local cycles, complexity, and localized patterns.
 /// - [`BlockScopeFeatures`]: Per-basic-block instruction slices, tight loops, and localized pattern hits.
-/// - [`GlobalScopeFeatures`]: Universal architecture, OS, and format metadata.
 ///
 /// # Lifetime
 ///
@@ -96,8 +94,6 @@ pub struct FeatureSet<'buf> {
     pub(crate) function_scope: Vec<FunctionScopeFeatures>,
     /// All non-library basic blocks and their scoped features.
     pub(crate) basic_block_scope: Vec<BlockScopeFeatures<'buf>>,
-    /// Global architecture, OS, and format features valid across all scopes.
-    pub(crate) global_scope: GlobalScopeFeatures,
     /// Shared backing instructions for CFG basic block inspection.
     pub(crate) cfg_instructions: Arc<[InstructionInfo]>,
     /// Inverted index and characteristic lookup tables.
@@ -165,13 +161,11 @@ impl<'buf> FeatureSet<'buf> {
 
         let file_scope =
             Self::extract_file_scope(res, &basic_block_scope, &function_scope, raw_buffer);
-        let global_scope = Self::extract_global_scope(res);
 
         let mut fs = Self {
             file_scope,
             function_scope,
             basic_block_scope,
-            global_scope,
             cfg_instructions,
             indices: FeatureIndices::default(),
         };
@@ -482,7 +476,22 @@ impl<'buf> FeatureSet<'buf> {
             }
         }
 
+        let binary_type = res.metadata.binary_type.to_lowercase();
+        let binary_format = if binary_type.contains("mach") {
+            "macho"
+        } else if binary_type.contains("elf") {
+            "elf"
+        } else if binary_type.contains("pe") {
+            "pe"
+        } else {
+            "unknown"
+        };
+        let arch = res.metadata.architecture_name().to_lowercase();
+
         FileScopeFeatures {
+            os: binary_type,
+            arch,
+            binary_format: binary_format.to_string(),
             apis,
             strings,
             section_entropies: &res.section_entropy,
@@ -497,26 +506,6 @@ impl<'buf> FeatureSet<'buf> {
             fs_access_count,
             gs_access_count,
             tight_loop_count,
-        }
-    }
-
-    /// Normalizes global binary format, architecture, and OS metadata.
-    fn extract_global_scope(res: &AnalysisResult<'_>) -> GlobalScopeFeatures {
-        let binary_type = res.metadata.binary_type.to_lowercase();
-        let binary_format = if binary_type.contains("mach") {
-            "macho"
-        } else if binary_type.contains("elf") {
-            "elf"
-        } else if binary_type.contains("pe") {
-            "pe"
-        } else {
-            "unknown"
-        };
-
-        GlobalScopeFeatures {
-            os: binary_type,
-            arch: res.metadata.architecture_name().to_lowercase(),
-            binary_format: binary_format.to_string(),
         }
     }
 
@@ -548,16 +537,6 @@ impl<'buf> FeatureSet<'buf> {
     #[inline]
     pub fn basic_block_scope(&self) -> &[BlockScopeFeatures<'buf>] {
         &self.basic_block_scope
-    }
-
-    /// Returns the global environment and format features.
-    ///
-    /// # Returns
-    ///
-    /// Reference to universal [`GlobalScopeFeatures`] containing architecture, OS, and format strings.
-    #[inline]
-    pub fn global_scope(&self) -> &GlobalScopeFeatures {
-        &self.global_scope
     }
 
     /// Finds a function scope by its entry virtual address.
@@ -875,37 +854,6 @@ impl<'buf> FeatureSet<'buf> {
     }
 }
 
-/// Global format, operating system, and architecture features valid across all rule scopes.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct GlobalScopeFeatures {
-    /// Target operating system string (e.g. "windows", "linux", "macos").
-    pub(crate) os: String,
-    /// Target CPU architecture string (e.g. "x86_64", "x86", "arm", "arm64").
-    pub(crate) arch: String,
-    /// Canonical binary format identifier (`pe`, `elf`, or `macho`).
-    pub(crate) binary_format: String,
-}
-
-impl GlobalScopeFeatures {
-    /// Returns the target operating system string.
-    #[inline]
-    pub fn os(&self) -> &str {
-        &self.os
-    }
-
-    /// Returns the target CPU architecture string.
-    #[inline]
-    pub fn arch(&self) -> &str {
-        &self.arch
-    }
-
-    /// Returns the canonical binary format identifier (`pe`, `elf`, or `macho`).
-    #[inline]
-    pub fn binary_format(&self) -> &str {
-        &self.binary_format
-    }
-}
-
 /// Localized features, control-flow metrics, and constituent instructions for a single basic block.
 #[derive(Debug, Clone)]
 pub struct BlockScopeFeatures<'buf> {
@@ -1197,6 +1145,12 @@ impl FunctionScopeFeatures {
 /// Binary-wide structural and symbol features evaluated at file scope.
 #[derive(Debug, Clone)]
 pub struct FileScopeFeatures<'buf> {
+    /// Target operating system string (e.g. "windows", "linux", "macos").
+    pub(crate) os: String,
+    /// Target CPU architecture string (e.g. "x86_64", "x86", "arm", "arm64").
+    pub(crate) arch: String,
+    /// Canonical binary format identifier (`pe`, `elf`, or `macho`).
+    pub(crate) binary_format: String,
     /// Union of all APIs across functions + dynamic imports + exports.
     pub(crate) apis: FxHashSet<PatternID>,
     /// Extracted string constants and YARA string matches.
@@ -1228,6 +1182,24 @@ pub struct FileScopeFeatures<'buf> {
 }
 
 impl<'buf> FileScopeFeatures<'buf> {
+    /// Returns the target operating system string (e.g. "windows", "linux", "macos").
+    #[inline]
+    pub fn os(&self) -> &str {
+        &self.os
+    }
+
+    /// Returns the target CPU architecture string (e.g. "x86_64", "x86", "arm", "arm64").
+    #[inline]
+    pub fn arch(&self) -> &str {
+        &self.arch
+    }
+
+    /// Returns the canonical binary format identifier (`pe`, `elf`, or `macho`).
+    #[inline]
+    pub fn binary_format(&self) -> &str {
+        &self.binary_format
+    }
+
     /// Returns the union of all APIs across functions + dynamic imports + exports.
     #[inline]
     pub fn apis(&self) -> &FxHashSet<PatternID> {
