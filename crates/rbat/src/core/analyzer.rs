@@ -596,7 +596,7 @@ impl AnalyzerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test_helpers;
+    use crate::core::test_helpers;
     use std::fs;
     use tempfile::tempdir;
 

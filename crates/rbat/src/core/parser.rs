@@ -60,9 +60,9 @@
 //! [`Arm`]: BinaryArch::Arm
 //! [`Arm64`]: BinaryArch::Arm64
 
-use crate::{
-    core::types::result::{RbatError, RbatResult},
-    utils::entropy::calculate_entropy,
+use crate::core::{
+    helpers::calculate_entropy,
+    types::result::{RbatError, RbatResult},
 };
 use ahash::AHashMap;
 use object::{
@@ -543,7 +543,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::utils::test_helpers;
+    use crate::core::test_helpers;
 
     #[test]
     fn test_evaluate_section_entropy_elf() {

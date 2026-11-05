@@ -79,6 +79,7 @@ pub mod disassembler;
 pub mod eval;
 pub mod features;
 pub mod flirt;
+pub mod helpers;
 pub(crate) mod heuristics;
 pub mod needle;
 pub mod parser;
@@ -87,3 +88,6 @@ pub mod scoring;
 pub mod traits;
 pub mod types;
 pub mod yarahandler;
+
+#[cfg(test)]
+pub(crate) mod test_helpers;
