@@ -20,13 +20,13 @@ fuzz_target!(|data: &[u8]| {
     let code_bytes = &data[1..];
     let dis = DisassemblerBackend::default();
     let iat_map = IatMap::default();
-    if let Ok(insns) = dis.disassemble(code_bytes, 0x1000, arch, &iat_map) {
-        if !insns.is_empty() {
-            let cfg = ControlFlowGraph::new(insns, &arch);
-            for block in cfg.blocks.values() {
-                let _ = cfg.as_block_instr(block);
-                let _ = block.instr_count();
-            }
+    if let Ok(insns) = dis.disassemble(code_bytes, 0x1000, arch, &iat_map)
+        && !insns.is_empty()
+    {
+        let cfg = ControlFlowGraph::new(insns, &arch);
+        for block in cfg.blocks.values() {
+            let _ = cfg.as_block_instr(block);
+            let _ = block.instr_count();
         }
     }
 });

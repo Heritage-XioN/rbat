@@ -4,7 +4,7 @@
 //! directory validation for the `rbat rules` subcommand.
 
 use crossterm::style::{Color, Stylize};
-use rbat::core::rule::Rule;
+use rbat::core::eval::Rule;
 use std::fs;
 use std::path::Path;
 
@@ -283,7 +283,7 @@ fn validate_dir_recursive(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rbat::core::rule::Rule;
+    use rbat::core::eval::Rule;
     use tempfile::tempdir;
 
     #[test]

@@ -904,7 +904,6 @@ dependencies = [
 name = "rbat-fuzz"
 version = "0.0.0"
 dependencies = [
- "fast-flirt",
  "libfuzzer-sys",
  "rbat",
  "rustc-hash",

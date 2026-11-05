@@ -54,17 +54,15 @@
 
 use std::sync::Arc;
 
-use crate::{
-    core::{
-        heuristics::{disassemble_section, packer_sig_check, string_check},
-        parser::Parser,
-        traits::HeuristicPlugin,
-        types::{
-            analysis::{AnalysisContext, AnalysisProgress, BinaryMetadata},
-            result::RbatResult,
-        },
+use crate::core::{
+    helpers::compute_hashes,
+    heuristics::{disassemble_section, packer_sig_check, string_check},
+    parser::Parser,
+    traits::HeuristicPlugin,
+    types::{
+        analysis::{AnalysisContext, AnalysisProgress, BinaryMetadata},
+        result::RbatResult,
     },
-    utils::hashing::compute_hashes,
 };
 
 /// A plugin that computes cryptographic digests (MD5, SHA-1, SHA-256) and
@@ -239,13 +237,13 @@ impl HeuristicPlugin for CfgPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::test_helpers;
     use crate::core::{
         flirt::FlirtMatcher,
         needle::NeedleIndex,
         parser::{BinaryArch, BinaryOS},
         types::analysis::SectionRange,
     };
-    use crate::utils::test_helpers;
     use object::File;
     use std::fs;
     use tempfile::tempdir;

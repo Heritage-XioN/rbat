@@ -71,11 +71,11 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use crate::core::{
     disassembler::{DisassemblerBackend, InstructionInfo},
+    eval::Rule,
     features::FeatureSet,
     flirt::FlirtMatcher,
     needle::NeedleIndex,
     parser::{ParsedBinaryContext, Parser},
-    rule::Rule,
     scoring::{classifier::SeverityClassifier, risk::RiskAssessment},
     traits::Disassembler,
     traits::HeuristicPlugin,
@@ -596,7 +596,7 @@ impl AnalyzerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test_helpers;
+    use crate::core::test_helpers;
     use std::fs;
     use tempfile::tempdir;
 

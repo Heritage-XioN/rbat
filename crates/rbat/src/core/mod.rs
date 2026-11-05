@@ -19,13 +19,13 @@
 //!
 //! 3. **Concurrent Heuristic Execution** (`plugins`, `heuristics`, [`flirt`], [`yarahandler`]):
 //!    Executes modular analysis plugins in parallel over a Rayon work-stealing thread pool:
-//!    - Cryptographic and fuzzy hashes (MD5, SHA-1, SHA-256, SSDEEP, TLSH) via [`plugins::MetadataPlugin`].
+//!    - Cryptographic and fuzzy hashes (MD5, SHA-1, SHA-256, SSDEEP, TLSH) via `plugins::MetadataPlugin`.
 //!    - Section-level Shannon entropy calculations via `plugins::EntropyPlugin`.
 //!    - Embedded YARA suspicious string and packer signature scans via [`yarahandler`].
 //!    - Fast library function identification via [`flirt::FlirtMatcher`].
 //!    - Code cave discovery (NOP sleds, NULL blocks, INT3 padding) via `heuristics`.
 //!
-//! 4. **Capability Rule Matching** ([`rule`], [`needle`], [`features`]):
+//! 4. **Capability Rule Matching** ([`eval`], [`needle`], [`features`]):
 //!    Extracts behavioral and structural features partitioned by scope (file, function, basic block,
 //!    instruction) into a unified [`FeatureSet`].
 //!    Queries rule trees against pre-built Aho-Corasick automata in [`needle::NeedleIndex`] to evaluate
@@ -76,14 +76,18 @@
 pub mod analyzer;
 pub mod cfg;
 pub mod disassembler;
+pub mod eval;
 pub mod features;
 pub mod flirt;
+pub mod helpers;
 pub(crate) mod heuristics;
 pub mod needle;
 pub mod parser;
 pub(crate) mod plugins;
-pub mod rule;
 pub mod scoring;
 pub mod traits;
 pub mod types;
 pub mod yarahandler;
+
+#[cfg(test)]
+pub(crate) mod test_helpers;

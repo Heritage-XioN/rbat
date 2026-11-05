@@ -1,6 +1,6 @@
 pub use clap::{Parser, Subcommand};
 use color_eyre::Result;
-use rbat::core::rule::Rule;
+use rbat::core::eval::Rule;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;

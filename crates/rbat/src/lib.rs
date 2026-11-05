@@ -4,4 +4,3 @@
 
 pub mod core;
 pub mod prelude;
-pub(crate) mod utils;
