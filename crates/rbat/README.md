@@ -8,7 +8,7 @@
 
 **rbat** is a high-performance, modular static binary analysis and threat detection engine. It provides programmatic APIs to parse executable formats, reconstruct control flow graphs, perform multi-backend disassembly, match FLIRT compiler signatures, evaluate Mandiant Capa behavioral rules across four execution scopes, and aggregate findings into calibrated Bayesian threat scores mapped to MITRE ATT&CK and MBC.
 
-This crate serves as the foundational analysis library for the CLI/TUI binary crate `rbat-cli`.
+This crate serves as the foundational analysis library for the CLI/TUI binary crate [`rbat-cli`](../rbat-cli/README.md).
 
 ---
 
@@ -299,11 +299,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-For complete executable examples, explore the `examples/` directory:
-* `examples/batch_analysis.rs`: Programmatic batch analysis with metadata and risk reporting.
-* `examples/streaming_analysis.rs`: Real-time streaming analysis with progress event callbacks.
-* `examples/custom_disassembler.rs`: End-to-end custom `Disassembler` trait implementation.
-* `examples/cfg_and_functions.rs`: Basic block navigation, cyclomatic complexity, and DOT graph export.
+For complete executable examples, explore the [`examples/`](examples/) directory:
+* [`examples/batch_analysis.rs`](examples/batch_analysis.rs): Programmatic batch analysis with metadata and risk reporting.
+* [`examples/streaming_analysis.rs`](examples/streaming_analysis.rs): Real-time streaming analysis with progress event callbacks.
+* [`examples/custom_disassembler.rs`](examples/custom_disassembler.rs): End-to-end custom `Disassembler` trait implementation.
+* [`examples/cfg_and_functions.rs`](examples/cfg_and_functions.rs): Basic block navigation, cyclomatic complexity, and DOT graph export.
 
 ---
 
@@ -401,14 +401,14 @@ cargo bench -p rbat-bench --bench engine -- bench_pipeline
 
 ## Fuzzing & Tooling
 
-### LibFuzzer Fuzz Suite (`fuzz/`)
+### LibFuzzer Fuzz Suite ([`fuzz/`](../../fuzz/))
 
 Four libFuzzer targets ensure stability and memory safety against corrupted, malformed, or adversarial inputs:
 
-* `fuzz_analyze`: End-to-end analyzer batching on arbitrary byte slices.
-* `fuzz_cfg`: CFG reconstruction resilience against circular branches and malformed jump targets.
-* `fuzz_flirt`: Resilience against corrupted `.sig` and `.pat` signature formats.
-* `fuzz_rules`: YAML/JSON rule parsing, syntax validation, and match tree evaluation.
+* [`fuzz_analyze`](../../fuzz/fuzz_targets/fuzz_analyze.rs): End-to-end analyzer batching on arbitrary byte slices (`Analyzer::streaming`).
+* [`fuzz_cfg`](../../fuzz/fuzz_targets/fuzz_cfg.rs): CFG reconstruction resilience against circular branches and malformed jump targets (`ControlFlowGraph::new`).
+* [`fuzz_flirt`](../../fuzz/fuzz_targets/fuzz_flirt.rs): Resilience against corrupted `.sig` and `.pat` signature formats (`FlirtMatcher::identify_library_functions`).
+* [`fuzz_rules`](../../fuzz/fuzz_targets/fuzz_rules.rs): YAML/JSON rule parsing, syntax validation, and match tree evaluation (`Rule::evaluate`).
 
 ```bash
 # Generate seed corpus from existing test files
@@ -432,6 +432,8 @@ cargo run -p xtask -- bundle-rules
 ---
 
 ## Attribution & Dependencies
+
+This project builds on the incredible work of the following projects:
 
 * [**iced-x86**](https://github.com/icedland/iced) -- High-throughput x86/x64 instruction decoder and Intel-syntax formatter.
 * [**capstone-rs**](https://github.com/capstone-rust/capstone-rs) -- Multi-architecture disassembly engine (ARM, ARM64, MIPS, PowerPC) via Capstone C-FFI.
