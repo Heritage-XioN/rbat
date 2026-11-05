@@ -20,9 +20,14 @@ use std::time::Duration;
 use tui_banner::Banner;
 
 use crate::cli::{AnalyzeArgs, Cli, Commands, CompletionsArgs, RulesAction, RulesArgs};
-use crate::report::{
-    generate_csv_report, generate_json_report, generate_pdf_report, print_terminal_report,
-};
+#[cfg(feature = "report-csv")]
+use crate::report::generate_csv_report;
+#[cfg(feature = "report-json")]
+use crate::report::generate_json_report;
+#[cfg(feature = "report-pdf")]
+use crate::report::generate_pdf_report;
+
+use crate::report::print_terminal_report;
 use crate::rules::{print_rule_example, print_rule_schema, validate_rules_directory};
 use crate::tui::App;
 use rbat::prelude::*;
@@ -198,9 +203,11 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         std::fs::create_dir_all(&base_dir)?;
     }
 
+    #[allow(unused_mut)]
     let mut generated_reports: Vec<(&str, PathBuf)> = Vec::new();
 
     // PDF report generation
+    #[cfg(feature = "report-pdf")]
     if args.pdf {
         let pdf_path = base_dir.join("report.pdf");
         generate_pdf_report(&args.path, &risk_assessment, &analysis_result, &pdf_path)?;
@@ -208,6 +215,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     }
 
     // CSV report generation
+    #[cfg(feature = "report-csv")]
     if args.csv {
         let csv_path = base_dir.join("report.csv");
         generate_csv_report(&args.path, &risk_assessment, &analysis_result, &csv_path)?;
@@ -215,6 +223,7 @@ fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     }
 
     // JSON report generation
+    #[cfg(feature = "report-json")]
     if args.json {
         let json_path = base_dir.join("report.json");
         generate_json_report(&args.path, &risk_assessment, &analysis_result, &json_path)?;

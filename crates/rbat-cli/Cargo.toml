@@ -15,10 +15,16 @@ name = "rbat"
 path = "src/main.rs"
 
 [features]
-default = ["backend-capstone", "backend-iced"]
+default = ["backend-capstone", "backend-iced", "report-json"]
 backend-capstone = ["rbat/backend-capstone"]
 backend-iced = ["rbat/backend-iced"]
 dhat-heap = ["dep:dhat"]
+
+# Report generation features
+report-csv = ["dep:csv"]
+report-json = ["dep:serde_json"]
+report-pdf = ["dep:fullbleed", "dep:askama", "dep:lightningcss"]
+reports = ["report-csv", "report-json", "report-pdf"]
 
 [dependencies]
 dhat = { version = "0.3.3", optional = true }
@@ -31,13 +37,13 @@ tui-banner = { workspace = true }
 crossterm = "0.29.0"
 ratatui = "0.30.0"
 comfy-table = "7.1.4"
-askama = "0.16.0"
-fullbleed = "0.6.11"
-lightningcss = "=1.0.0-alpha.70"
+askama = { version = "0.16.0", optional = true }
+fullbleed = { version = "0.6.11", optional = true }
+lightningcss = { version = "=1.0.0-alpha.70", optional = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, optional = true }
 chrono = { workspace = true }
-csv = "1.4.0"
+csv = { version = "1.4.0", optional = true }
 ahash = "0.8"
 
 [dev-dependencies]

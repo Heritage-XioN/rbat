@@ -69,6 +69,11 @@ fn test_cli_rules_validate() {
         ));
 }
 
+#[cfg(all(
+    feature = "report-json",
+    feature = "report-csv",
+    feature = "report-pdf"
+))]
 #[test]
 fn test_cli_analyze_reports_and_output() {
     let sample_path = get_sample_path("al-khaser_x86.exe_");
@@ -115,6 +120,30 @@ fn test_cli_analyze_reports_and_output() {
     assert!(json_exists, "JSON report was not created");
     assert!(csv_exists, "CSV report was not created");
     assert!(pdf_exists, "PDF report was not created");
+}
+
+#[cfg(feature = "report-json")]
+#[test]
+fn test_cli_analyze_json_report() {
+    let sample_path = get_sample_path("al-khaser_x86.exe_");
+    if !sample_path.exists() {
+        return;
+    }
+
+    let out_dir = tempdir().expect("Failed to create temp dir");
+
+    let mut cmd = Command::cargo_bin("rbat").unwrap();
+    cmd.arg("analyze")
+        .arg(&sample_path)
+        .arg("--json")
+        .arg("--out-dir")
+        .arg(out_dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("RBAT STATIC ANALYSIS REPORT"));
+
+    let json_path = out_dir.path().join("report.json");
+    assert!(json_path.exists(), "JSON report was not created");
 }
 
 #[test]

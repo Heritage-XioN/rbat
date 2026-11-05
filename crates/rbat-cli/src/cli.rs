@@ -75,12 +75,15 @@ pub struct AnalyzeArgs {
     #[arg(short, long)]
     pub tui: bool,
     /// Generate a PDF report of the analysis findings.
+    #[cfg(feature = "report-pdf")]
     #[arg(short, long)]
     pub pdf: bool,
     /// Generate a CSV summary of the analysis findings.
+    #[cfg(feature = "report-csv")]
     #[arg(short, long)]
     pub csv: bool,
     /// Generate a JSON dump of the raw analysis findings.
+    #[cfg(feature = "report-json")]
     #[arg(short, long)]
     pub json: bool,
     /// Output directory for report generation. Defaults to current directory.
